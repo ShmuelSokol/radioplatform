@@ -178,7 +178,7 @@ export default function ContractEditor({ contract, sponsorId, onClose }: {
                     {/* A whole morning/afternoon/evening shows only on an older contract that has it */}
                     {[...TIME_SLOTS, ...WIDE_DAYPARTS.filter((w) => dayparts.includes(w.key))].map((p) => (
                       <button key={p.key} type="button" aria-pressed={dayparts.includes(p.key)} className={chip(dayparts.includes(p.key))} onClick={() => setDayparts(toggle(dayparts, p.key))}>
-                        {p.label} <span className="text-xs opacity-75">{p.hours}</span>
+                        {p.label} <span className="ml-1.5 text-xs opacity-75">{p.hours}</span>
                       </button>
                     ))}
                   </div>

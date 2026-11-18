@@ -2523,7 +2523,7 @@ Round 1 of the test list for each. Covered rows name the test; the rest are the 
 
 ### Contract Edit dialog (PRs 369, 373)
 - [x] V3-81 Edit, cancel and delete take effect on the queue; a slot still waiting after the last day never airs | modes: both | covered: test_sponsorship_contracts.py
-- [ ] V3-82 The Edit dialog on the client page and on Spot Schedule opens with the contract's values, offers the three-hour slots, saves, and shows no unexpected toast or console error, at desktop and iPhone size | modes: both | covered: NOT COVERED (J)
+- [x] V3-82 The Edit dialog on the client page and on Spot Schedule opens with the contract's values, offers the three-hour slots, saves, and shows no unexpected toast or console error, at desktop and iPhone size | modes: both | covered: client page: frontend/e2e/sponsor-clients.mjs (all seven slots offered at desktop, iPhone 13 and SE; Save with nothing changed leaves every contract field as it was; guard) passes 2026-11-18 on a local Postgres seed. Found and fixed: slot name and hours ran together ("Early afternoon12 PM to 3 PM"). Spot Schedule's Edit: same dialog, not driven separately
 
 ### Sponsors top menu (PR 368)
 - [ ] V3-83 Sponsors is its own top menu with All Clients first; Campaigns opens the client page; each role sees only what it may (sponsor and viewer cannot open it; dj per access.ts) | modes: n.a. | covered: the menu shows only links canAccess(role) allows (Navbar.tsx), and access.ts mirrors the guards checked by test_role_access.py; a look at the menu per role on the page: NOT COVERED (J)
