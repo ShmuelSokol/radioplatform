@@ -64,7 +64,8 @@ class Engine:
 async def eng(db_session, monkeypatch):
     # Alerts at once in these tests; the 5 s hold has its own test
     monkeypatch.setattr(playout_engine, "EMERGENCY_ALERT_AFTER", 0)
-    station = Station(id=uuid.uuid4(), name="Engine FM", timezone="America/New_York")
+    station = Station(id=uuid.uuid4(), name="Engine FM", timezone="America/New_York",
+                      automation_config={"live_delay_seconds": 0})  # no broadcast delay: a show takes the air at once
     db_session.add(station)
     songs = []
     for i in range(4):

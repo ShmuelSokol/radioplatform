@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # --- LiveShow schemas ---
@@ -79,3 +80,12 @@ class CallInRequestListResponse(BaseModel):
 class ScreenerAction(BaseModel):
     caller_name: str | None = None
     notes: str | None = None
+
+
+class DumpRequest(BaseModel):
+    drop_caller: bool = False
+
+
+class DelayRequest(BaseModel):
+    action: Literal["exit", "build"]
+    seconds: float | None = Field(default=None, ge=0, le=40)

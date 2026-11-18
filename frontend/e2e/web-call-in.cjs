@@ -54,6 +54,12 @@ const recent = (page, key) => page.evaluate((k) => (window.__rx[k] || []).slice(
   // End anything live on this station first
   for (const s of (await (await fetch(`${API}/live-shows?limit=100`, { headers: H })).json()).shows || [])
     if (s.status === 'live') await fetch(`${API}/live-shows/${s.id}/end`, { method: 'POST', headers: H });
+  // This script is about who hears whom, at once: run it with no broadcast delay
+  // (e2e/live-delay.cjs covers the delay) and put the station's setting back after
+  const station = await (await fetch(`${API}/stations/${STATION}`, { headers: H })).json();
+  const putConfig = (c) => fetch(`${API}/stations/${STATION}`, { method: 'PUT', headers: H, body: JSON.stringify({ automation_config: c }) });
+  await putConfig({ ...(station.automation_config || {}), live_delay_seconds: 0 });
+  const restore = () => putConfig(station.automation_config || {});
   const now = new Date();
   const show = await (await fetch(`${API}/live-shows`, { method: 'POST', headers: H, body: JSON.stringify({ station_id: STATION, title: 'Call-in test', scheduled_start: now.toISOString(), scheduled_end: new Date(+now + 3600e3).toISOString(), calls_enabled: true }) })).json();
 
@@ -116,7 +122,7 @@ const recent = (page, key) => page.evaluate((k) => (window.__rx[k] || []).slice(
     await screener.getByText('Approved (1)').waitFor({ timeout: 3000 });
     check('screener: Moshe moves to Approved', await screener.getByText('Waiting (0)').isVisible());
     // F-HOST-3: the host puts the caller on air from the console's queue
-    await host.getByText('Approved Queue (1)').waitFor({ timeout: 5000 });
+    await host.getByText('Approved Queue (1)').waitFor({ timeout: 5000 }).catch(async (e) => { console.log('HOST PAGE:', (await host.locator('body').innerText()).replace(/\n+/g, ' / ').slice(0, 700)); throw e; });
     await host.getByRole('button', { name: 'Put On Air' }).click();
     await caller.getByText("You're on the air").waitFor({ timeout: 5000 });
     check('caller page: on the air', true);
@@ -148,7 +154,7 @@ const recent = (page, key) => page.evaluate((k) => (window.__rx[k] || []).slice(
     check('Start Broadcasting is back', await host.getByText('Start Broadcasting').isVisible());
     await fetch(`${API}/live-shows/${show.id}/end`, { method: 'POST', headers: H });
   } finally {
-    lws.close(); await hostB.close(); await callerB.close();
+    lws.close(); await hostB.close(); await callerB.close(); await restore();
   }
   process.exit(fails ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(2); });

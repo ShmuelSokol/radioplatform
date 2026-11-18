@@ -4,11 +4,12 @@ import { useLiveShow, useEndLiveShow } from '../../hooks/useLiveShows';
 import { useLiveShowWS } from '../../hooks/useLiveShowWS';
 import { useHostAudio } from '../../hooks/useHostAudio';
 import { endCall, putCallerOnAir } from '../../api/liveShows';
+import DelayPanel from './live/DelayPanel';
 
 export default function HostConsole() {
   const { showId } = useParams<{ showId: string }>();
   const navigate = useNavigate();
-  const { show, callers, secondsRemaining, isConnected } = useLiveShowWS(showId);
+  const { show, callers, secondsRemaining, isConnected, air, lastDump } = useLiveShowWS(showId);
   const { data: showData } = useLiveShow(showId);
   const endShowMut = useEndLiveShow();
   const { isRecording, startRecording, stopRecording, audioLevel, error: audioError } = useHostAudio(showId);
@@ -99,18 +100,18 @@ export default function HostConsole() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white p-3 sm:p-4">
+    <div className="min-h-screen bg-gray-950 text-white p-3 sm:p-4">
       {/* Header */}
       <div className="flex items-center justify-between mb-4 sm:mb-6">
         <div className="min-w-0 flex-1">
           <h1 className="text-lg sm:text-xl font-bold text-cyan-300 truncate">{currentShow?.title || 'Host Console'}</h1>
           <div className="flex items-center gap-2 mt-1">
             <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-500'}`} />
-            <span className="text-[11px] text-gray-500">
+            <span className="text-[11px] text-gray-400">
               {isConnected ? 'Connected' : 'Reconnecting...'}
             </span>
             {currentShow?.status === 'live' && (
-              <span className="text-[10px] bg-red-700 text-red-200 px-2 py-0.5 rounded-full animate-pulse uppercase font-bold">
+              <span className="text-[10px] bg-red-700 text-white px-2 py-0.5 rounded-full animate-pulse uppercase font-bold">
                 LIVE
               </span>
             )}
@@ -174,7 +175,21 @@ export default function HostConsole() {
             {audioError && (
               <div className="text-red-400 text-[11px] mt-2">{audioError}</div>
             )}
+            {isRecording && air?.mode === 'pre-roll' && (
+              <div className="text-yellow-400 text-sm mt-2 font-bold" data-testid="preroll-note">
+                Listeners hear you in {Math.max(0, Math.ceil(air.target - air.delay))} s. Start talking now.
+              </div>
+            )}
+            {isRecording && air?.on_air && (
+              <div className="text-red-400 text-sm mt-2 font-bold" data-testid="heard-note">
+                {air.delay > 0.5
+                  ? `Listeners hear you ${air.delay.toFixed(0)} s later.`
+                  : air.target > 0 ? 'Listeners hear you almost at once: the delay is building back.' : 'Listeners hear you now.'}
+              </div>
+            )}
           </div>
+
+          <DelayPanel showId={showId} air={air} lastDump={lastDump} callerOnAir={!!callers.find(c => c.status === 'on_air')} />
         </div>
 
         {/* Center: On-air caller */}

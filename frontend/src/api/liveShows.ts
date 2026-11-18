@@ -134,3 +134,44 @@ export const getTimeRemaining = async (showId: string): Promise<{ seconds: numbe
   const res = await apiClient.get<{ seconds: number | null }>(`/live-shows/${showId}/time-remaining`);
   return res.data;
 };
+
+// --- Broadcast delay (Dump, exit, build) ---
+
+export interface AirStatus {
+  show_id: string;
+  /** off = not on air; pre-roll = filling before listeners hear anything */
+  mode: 'off' | 'pre-roll' | 'steady' | 'building' | 'shrinking' | 'exiting' | 'no delay' | 'insert';
+  on_air: boolean;
+  /** Seconds waiting in the delay now: what a Dump can still cut */
+  delay: number;
+  target: number;
+  configured: number;
+  /** Seconds one Dump cuts (0 = everything waiting) */
+  dump_size: number;
+  safe: boolean;
+  dumps: number;
+  finishing?: boolean;
+  auto_exit?: boolean;
+  insert?: { title: string; kind: string; remaining: number } | null;
+  next_insert?: { title: string; kind: string; in: number } | null;
+  host_silent_for?: number;
+}
+
+export const getAirStatus = async (showId: string): Promise<AirStatus> => {
+  const res = await apiClient.get<AirStatus>(`/live-shows/${showId}/air`);
+  return res.data;
+};
+
+export const dumpShow = async (
+  showId: string, dropCaller = false,
+): Promise<{ dumped_seconds: number; dropped_callers: string[]; air: AirStatus }> => {
+  const res = await apiClient.post(`/live-shows/${showId}/dump`, { drop_caller: dropCaller });
+  return res.data;
+};
+
+export const setShowDelay = async (
+  showId: string, action: 'exit' | 'build', seconds?: number,
+): Promise<AirStatus> => {
+  const res = await apiClient.post<AirStatus>(`/live-shows/${showId}/delay`, { action, seconds });
+  return res.data;
+};

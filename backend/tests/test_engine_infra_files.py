@@ -506,5 +506,7 @@ def test_the_item_after_a_live_show_loads_during_the_show():
     live = live[:live.index("end)")]
     assert "main_requests.fetch()" not in live   # one ask only: the flush's
     svc = (Path(__file__).resolve().parents[1] / "app/services/live_show_service.py").read_text()
-    assert svc.index("engine_live(station.id, True)") < svc.index("engine_flush(station.id)")
-    assert "engine_live(station.id, False)" in svc
+    take = svc[svc.index("async def take_over_station"):]
+    assert take.index("engine_live(station.id, True)") < take.index("engine_flush(station.id)")
+    release = svc[svc.index("async def release_station"):]
+    assert "engine_live(station.id, False)" in release[:release.index("return True")]

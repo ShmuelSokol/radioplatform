@@ -28,7 +28,8 @@ def _no_replenish(monkeypatch):
 
 
 async def _station_playing(db):
-    station = Station(id=uuid.uuid4(), name="Main", timezone="America/New_York")
+    station = Station(id=uuid.uuid4(), name="Main", timezone="America/New_York",
+                      automation_config={"live_delay_seconds": 0})  # straight through: the delay has its own tests
     db.add(station)
     song = Asset(id=uuid.uuid4(), title="Song", duration=240.0, file_path="s", asset_type="music")
     after = Asset(id=uuid.uuid4(), title="After", duration=200.0, file_path="a", asset_type="music")

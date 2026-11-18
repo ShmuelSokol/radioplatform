@@ -1,0 +1,306 @@
+/**
+ * The broadcast delay of a live show, end to end: Dump, build-back, exit, delay length.
+ * Part A is a host "microphone" sent from this script, so the test decides what is
+ * said and when: a 1000 Hz "curse" is said, Dump is pressed, and no listener may
+ * ever receive it. Part B presses every control of the delay panel on the Host
+ * Console and the Call Screener in a browser with a fake microphone and reads what
+ * the screen says, on a desktop and a phone size. Part C is the station's settings.
+ * Needs a real backend and the site running against it (see wiki/live-shows.md):
+ *   KBR_ADMIN_EMAIL=admin KBR_ADMIN_PASSWORD=... node e2e/live-delay.cjs <station id>
+ * API_URL / BASE_URL default to :8000 and :3000; SHOTS_DIR keeps screenshots.
+ * The station's live settings are changed for the run and put back at the end.
+ */
+const { chromium, devices } = require('playwright');
+const fs = require('fs'), os = require('os'), path = require('path');
+const WebSocket = globalThis.WebSocket;
+const API = process.env.API_URL || 'http://localhost:8000/api/v1', SITE = process.env.BASE_URL || 'http://localhost:3000';
+const STATION = process.argv[2];
+const SHOTS = process.env.SHOTS_DIR;
+const ONLY = process.env.ONLY;
+const RATE = 24000;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let fails = 0;
+const check = (n, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${d !== '' ? '  (' + d + ')' : ''}`); if (!ok) fails++; };
+function power(samples, f, rate = RATE) { // Goertzel
+  const k = 2 * Math.cos(2 * Math.PI * f / rate); let s1 = 0, s2 = 0;
+  for (const x of samples) { const s0 = x / 32768 + k * s1 - s2; s2 = s1; s1 = s0; }
+  return Math.sqrt(Math.max(0, s1 * s1 + s2 * s2 - k * s1 * s2)) / Math.max(1, samples.length);
+}
+const tone = (f, n, phase) => { const b = new Int16Array(n); for (let i = 0; i < n; i++) b[i] = Math.round(8000 * Math.sin(2 * Math.PI * f * (phase + i) / RATE)); return b; };
+
+/** A listener page's socket: every frame with the time it arrived */
+function listener() {
+  const l = { frames: [], states: [], ws: new WebSocket(`${API.replace(/^http/, 'ws')}/ws/live/station/${STATION}/listen`) };
+  l.ws.binaryType = 'arraybuffer';
+  l.ws.onmessage = (e) => {
+    if (typeof e.data === 'string') { const m = JSON.parse(e.data); if (m.type === 'live_state') l.states.push({ live: m.live, at: Date.now() }); return; }
+    l.frames.push({ at: Date.now(), pcm: new Int16Array(e.data) });
+  };
+  l.since = (t) => l.frames.filter((f) => f.at >= t).flatMap((f) => Array.from(f.pcm));
+  l.live = () => (l.states.length ? l.states[l.states.length - 1].live : false);
+  return l;
+}
+
+/** A host microphone driven by the script: say(f) sets the tone being "said" */
+function hostMic(showId, token) {
+  const h = { f: 440, sent: 0, ws: new WebSocket(`${API.replace(/^http/, 'ws')}/ws/live/${showId}/audio`), back: [] };
+  h.ws.binaryType = 'arraybuffer';
+  h.ready = new Promise((res) => { h.ws.onopen = () => { h.ws.send(JSON.stringify({ type: 'auth', token })); res(); }; });
+  const t0 = Date.now();
+  h.timer = setInterval(() => {
+    if (h.ws.readyState !== 1) return;
+    const due = Math.floor((Date.now() - t0) / 1000 * RATE) - h.sent;
+    if (due <= 0) return;
+    h.ws.send(h.f ? tone(h.f, due, h.sent).buffer : new Int16Array(due).buffer);
+    h.sent += due;
+  }, 40);
+  h.say = (f) => { h.f = f; };
+  h.close = () => { clearInterval(h.timer); h.ws.close(); };
+  return h;
+}
+
+(async () => {
+  if (!STATION) { console.error('usage: node e2e/live-delay.cjs <station id>'); process.exit(2); }
+  const token = (await (await fetch(`${API}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: process.env.KBR_ADMIN_EMAIL || 'admin', password: process.env.KBR_ADMIN_PASSWORD }) })).json()).access_token;
+  const H = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+  const api = async (method, url, body) => { const r = await fetch(`${API}${url}`, { method, headers: H, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, json: await r.json().catch(() => null) }; };
+  const station = (await api('GET', `/stations/${STATION}`)).json;
+  const before = station.automation_config || {};
+  const setConfig = (extra) => api('PUT', `/stations/${STATION}`, { automation_config: { ...before, ...extra } });
+  const endAll = async () => { for (const s of ((await api('GET', '/live-shows?limit=100')).json.shows || [])) if (s.status === 'live' && s.station_id === STATION) await api('POST', `/live-shows/${s.id}/end`); };
+  const newShow = async (title, minutes = 60) => { const now = new Date(); return (await api('POST', '/live-shows', { station_id: STATION, title, scheduled_start: now.toISOString(), scheduled_end: new Date(+now + minutes * 60e3).toISOString(), calls_enabled: true })).json; };
+  const air = async (id) => (await api('GET', `/live-shows/${id}/air`)).json;
+  await endAll();
+  await sleep(500);
+
+  try {
+    // ---------- Part A: what a listener receives ----------
+    if (!ONLY || ONLY === 'audio') {
+      await setConfig({ live_delay_seconds: 6, live_dump_seconds: 0 });
+      const show = await newShow('Delay test A');
+      const l = listener();
+      await sleep(300);
+      const mic = hostMic(show.id, token);
+      await mic.ready;
+      const t0 = Date.now();
+      await sleep(3000);
+      let a = await air(show.id);
+      check('A1 while the delay fills nothing reaches listeners', l.frames.length === 0 && !l.live(), `${l.frames.length} frames, mode ${a.mode}`);
+      check('A2 the console is told it is filling', a.mode === 'pre-roll' && a.delay > 2 && a.delay < 4, `${a.mode} ${a.delay}`);
+      await sleep(4500);
+      const firstAt = l.frames.length ? l.frames[0].at - t0 : -1;
+      check('A3 listeners hear the host one delay later', l.live() && firstAt > 5500 && firstAt < 7200, `first audio after ${firstAt} ms, delay 6000`);
+      a = await air(show.id);
+      check('A4 the delay is full and safe', a.mode === 'steady' && a.safe && Math.abs(a.delay - 6) < 0.5, `${a.mode} ${a.delay}`);
+      check('A5 the station is the show\'s once it is heard', ((await api('GET', `/stations/${STATION}`)).json.automation_config || {}).live_show_id === show.id);
+
+      // The "curse": 2 s of 1000 Hz. Dump is pressed 1.5 s after it ends.
+      const curseAt = Date.now();
+      mic.say(1000);
+      await sleep(2000);
+      mic.say(440);
+      await sleep(1500);
+      const d = await api('POST', `/live-shows/${show.id}/dump`);
+      check('A6 Dump answers with what it cut', d.status === 200 && d.json.dumped_seconds > 5 && d.json.air.dumps === 1, JSON.stringify(d.json && { cut: d.json.dumped_seconds, left: d.json.air.delay }));
+      await sleep(12000);
+      const after = l.since(curseAt);
+      const p1000 = power(after, 1000), p440 = power(after, 440);
+      check('A7 the dumped words never reach a listener', p1000 < 0.002 && p440 > 0.02, `1000 Hz ${p1000.toFixed(4)}, 440 Hz ${p440.toFixed(4)} over ${(after.length / RATE).toFixed(1)} s`);
+      // The same tone left alone does arrive (the check above can fail)
+      const t2 = Date.now();
+      mic.say(1000); await sleep(1000); mic.say(440);
+      await sleep(9000);
+      check('A8 without a Dump the same words do air', power(l.since(t2), 1000) > 0.005, power(l.since(t2), 1000).toFixed(4));
+      a = await air(show.id);
+      check('A9 the delay builds back by itself (3 % a second under non-stop talk)', a.delay > 0.5 && (a.mode === 'building' || a.mode === 'steady'), `${a.mode} ${a.delay} s, ${((Date.now() - curseAt) / 1000).toFixed(0)} s after the Dump`);
+
+      // Exit: winds down to really live
+      let r = await api('POST', `/live-shows/${show.id}/delay`, { action: 'exit' });
+      check('A10 Exit delay is accepted', r.status === 200 && r.json.target === 0);
+      mic.say(0); // a pause: the delay closes quickly
+      await sleep(5000);
+      mic.say(440);
+      a = await air(show.id);
+      check('A11 after exiting there is no delay', a.mode === 'no delay' && a.delay < 0.4 && !a.safe, `${a.mode} ${a.delay}`);
+      const t3 = Date.now();
+      mic.say(1000); await sleep(600); mic.say(440);
+      await sleep(900);
+      check('A12 with no delay listeners hear the host at once', power(l.since(t3), 1000) > 0.005, power(l.since(t3), 1000).toFixed(4));
+      r = await api('POST', `/live-shows/${show.id}/dump`);
+      check('A13 Dump with no delay says nothing can be cut', r.status === 409 && /already heard|Nothing is waiting/.test(r.json.detail), `${r.status} ${JSON.stringify(r.json)}`);
+
+      // Build to 4 s, then end the show: the last words air before the music returns
+      r = await api('POST', `/live-shows/${show.id}/delay`, { action: 'build', seconds: 4 });
+      check('A14 Build delay to a chosen length', r.status === 200 && r.json.target === 4 && r.json.configured === 4);
+      mic.say(0); await sleep(9000);
+      a = await air(show.id);
+      check('A15 the delay built to the chosen length', Math.abs(a.delay - 4) < 0.6, `${a.delay}`);
+      mic.say(1500);
+      await sleep(1500);
+      const endAt = Date.now();
+      mic.close();
+      await api('POST', `/live-shows/${show.id}/end`);
+      await sleep(300);
+      check('A16 End show: listeners still on the show while the delay plays out', l.live());
+      await sleep(6000);
+      const offAt = l.states.filter((s) => !s.live).pop();
+      check('A17 the host\'s last words aired, then the show went off', !l.live() && power(l.since(endAt), 1500) > 0.005 && offAt && offAt.at - endAt > 1000, `off air ${offAt ? offAt.at - endAt : '?'} ms after End, 1500 Hz ${power(l.since(endAt), 1500).toFixed(4)}`);
+      await sleep(600);
+      check('A18 the station is handed back', !((await api('GET', `/stations/${STATION}`)).json.automation_config || {}).live_show_id);
+      l.ws.close();
+    }
+
+    // ---------- Part B: every control, in a browser ----------
+    if (!ONLY || ONLY === 'screen') {
+      await setConfig({ live_delay_seconds: 5, live_dump_seconds: 0 });
+      const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'delay-'));
+      { const rate = 48000, n = rate * 30, buf = Buffer.alloc(44 + n * 2);
+        buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8);
+        buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+        buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32);
+        buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+        for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(8000 * Math.sin(2 * Math.PI * 440 * i / rate)), 44 + i * 2);
+        fs.writeFileSync(path.join(DIR, 'host.wav'), buf); }
+      const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${path.join(DIR, 'host.wav')}`, '--autoplay-policy=no-user-gesture-required'] });
+      const problems = [];
+      const open = async (url, opts = {}) => {
+        const page = await (await browser.newContext({ permissions: ['microphone'], ...opts })).newPage();
+        await page.addInitScript((t) => localStorage.setItem('access_token', t), token);
+        page.on('console', (m) => { if (m.type() === 'error' && !/favicon|ERR_CONNECTION|WebSocket/.test(m.text())) problems.push(`${url}: ${m.text().slice(0, 200)}`); });
+        page.on('pageerror', (e) => problems.push(`${url}: ${e.message}`));
+        await page.goto(`${SITE}${url}`);
+        return page;
+      };
+      const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, name + '.png'), fullPage: true }); } };
+      const T = (page, id) => page.getByTestId(id);
+      try {
+        const show = await newShow('Delay test B');
+        const l = listener();
+        const host = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 900 } });
+        await T(host, 'delay-panel').waitFor({ timeout: 15000 });
+        check('B1 before broadcasting: NOT ON AIR and Dump is off', (await T(host, 'delay-state').innerText()) === 'NOT ON AIR' && await T(host, 'dump-button').isDisabled(), await T(host, 'dump-button').innerText());
+        const sized = await host.getByText('of 5 s').waitFor({ timeout: 6000 }).then(() => true, () => false);
+        check('B2 it shows the station\'s delay length', sized, (await T(host, 'delay-panel').innerText()).slice(0, 60).replace(/\n/g, ' | '));
+        check('B3 delay controls wait for the show to be on air', await T(host, 'delay-length').isDisabled() && await T(host, 'delay-build').isDisabled());
+        await shot(host, 'host-1-before');
+
+        await host.getByText('Start Broadcasting').click();
+        await T(host, 'preroll-note').waitFor({ timeout: 4000 });
+        check('B4 filling: the host is told when listeners will hear them', /Listeners hear you in \d s\. Start talking now\./.test(await T(host, 'preroll-note').innerText()) && (await T(host, 'delay-state').innerText()) === 'FILLING', await T(host, 'preroll-note').innerText());
+        check('B5 listeners hear nothing yet', l.frames.length === 0);
+        await shot(host, 'host-2-filling');
+        await host.getByText('SAFE', { exact: true }).waitFor({ timeout: 9000 });
+        const secs = parseFloat(await T(host, 'delay-seconds').innerText());
+        check('B6 SAFE with the full delay shown', Math.abs(secs - 5) < 0.6 && /Listeners hear you 5 s later/.test(await T(host, 'heard-note').innerText()), `${secs} s; ${await T(host, 'heard-note').innerText()}`);
+        check('B7 listeners now hear the show', l.live() && l.frames.length > 0);
+        check('B8 Dump says what it will cut', /cuts all 5 s waiting \(Shift\+D\)/.test(await T(host, 'dump-button').innerText()), (await T(host, 'dump-button').innerText()).replace(/\n/g, ' | '));
+        await shot(host, 'host-3-safe');
+
+        // The screener sees the same panel, compact
+        const screener = await open(`/admin/live/${show.id}/screen`, { viewport: { width: 1440, height: 900 } });
+        await screener.getByText('SAFE', { exact: true }).waitFor({ timeout: 8000 });
+        check('B9 Call Screener has the Dump and the live delay number', await T(screener, 'dump-button').isEnabled() && await T(screener, 'delay-length').count() === 0);
+        await shot(screener, 'screener-1-safe');
+
+        // Dump on the host console
+        await T(host, 'dump-button').click();
+        await T(host, 'delay-message').waitFor({ timeout: 3000 });
+        const msg = await T(host, 'delay-message').innerText();
+        check('B10 Dump: the screen says how much was cut', /^Dumped [45]\.\d s\. Listeners never heard it\.$/.test(msg), msg);
+        await host.getByText('BUILDING', { exact: true }).waitFor({ timeout: 3000 });
+        check('B11 after a Dump: BUILDING, counter 1', /Dumps this show: 1/.test(await T(host, 'dump-count').innerText()));
+        await shot(host, 'host-4-dumped');
+        await T(screener, 'last-dump').waitFor({ timeout: 3000 });
+        check('B12 the screener sees who dumped', /Last dump: [45]\.\d s by admin/.test(await T(screener, 'last-dump').innerText()), await T(screener, 'last-dump').innerText());
+        // A steady tone is non-stop talk: the delay gains 3 % a second (pauses fill it faster)
+        await sleep(40000);
+        const built = parseFloat(await T(host, 'delay-seconds').innerText());
+        check('B13 the delay builds back by itself while the host talks', built > 0.8 && built < 2.5 && (await T(host, 'delay-state').innerText()) === 'BUILDING', `${built} s after 40 s`);
+        check('B13b while building, Dump says how little it would cut', /cuts all [12](\.\d)? s waiting/.test(await T(host, 'dump-button').innerText()), (await T(host, 'dump-button').innerText()).replace(/\n/g, ' | '));
+
+        // Shift+D
+        await host.locator('body').click({ position: { x: 5, y: 5 } });
+        await host.keyboard.press('Shift+D');
+        await T(host, 'dump-count').getByText('Dumps this show: 2').waitFor({ timeout: 3000 });
+        check('B14 Shift+D dumps', true);
+        // Dump from the screener
+        await sleep(2500);
+        await T(screener, 'dump-button').click();
+        await T(host, 'dump-count').getByText('Dumps this show: 3').waitFor({ timeout: 3000 });
+        check('B15 Dump from the Call Screener reaches the host console', true);
+
+        // Exit delay
+        await T(host, 'delay-exit').click();
+        await host.getByText('LIVE, NO DELAY', { exact: true }).waitFor({ timeout: 30000 });
+        check('B16 Exit delay: LIVE, NO DELAY and Dump is off', await T(host, 'dump-button').isDisabled() && /nothing waiting to cut/.test(await T(host, 'dump-button').innerText()) && /Listeners hear you now/.test(await T(host, 'heard-note').innerText()));
+        check('B17 the button turns into Build delay', await T(host, 'delay-build').isVisible() && await T(host, 'delay-exit').count() === 0);
+        await shot(host, 'host-5-no-delay');
+        // Build delay
+        await T(host, 'delay-build').click();
+        await host.getByText('BUILDING', { exact: true }).waitFor({ timeout: 4000 });
+        check('B18 Build delay starts building to the station length', /of 5 s/.test(await T(host, 'delay-panel').innerText()));
+        // Delay length
+        await T(host, 'delay-length').selectOption('10');
+        await T(host, 'delay-apply').click();
+        await host.getByText('of 10 s').waitFor({ timeout: 3000 });
+        check('B19 Delay length 10 s is taken up', /Building the delay to 10 s/.test(await T(host, 'delay-message').innerText()), await T(host, 'delay-message').innerText());
+        check('B20 Set is off when the length is already the chosen one', await T(host, 'delay-apply').isDisabled());
+        await T(host, 'delay-length').selectOption('0');
+        await T(host, 'delay-apply').click();
+        await host.getByText(/EXITING DELAY|LIVE, NO DELAY/).first().waitFor({ timeout: 4000 });
+        check('B21 Delay length None exits the delay', true);
+
+        // Phone size: the same panel, no sideways scroll, buttons tappable
+        const phone = await open(`/admin/live/${show.id}/host`, { ...devices['iPhone 13'] });
+        await T(phone, 'delay-panel').waitFor({ timeout: 15000 });
+        await T(phone, 'delay-state').getByText(/LIVE, NO DELAY|EXITING DELAY/).waitFor({ timeout: 8000 });
+        const m = await phone.evaluate(() => {
+          const b = document.querySelector('[data-testid="dump-button"]').getBoundingClientRect();
+          const small = [...document.querySelectorAll('[data-testid="delay-panel"] button, [data-testid="delay-panel"] select')].map((e) => e.getBoundingClientRect()).filter((r) => r.width && (r.height < 44 || r.width < 44)).length;
+          return { scroll: document.documentElement.scrollWidth - window.innerWidth, h: b.height, w: b.width, small };
+        });
+        check('B22 phone: no sideways scroll, Dump is a big target, nothing under 44 px', m.scroll <= 0 && m.h >= 60 && m.small === 0, JSON.stringify(m));
+        await shot(phone, 'host-phone');
+
+        // End show from the host console
+        host.on('dialog', (d) => d.accept());
+        await host.getByRole('button', { name: 'End Show' }).click();
+        await host.waitForURL(/\/admin\/live$/, { timeout: 8000 });
+        await sleep(1500);
+        check('B23 End Show: off air for listeners', !l.live());
+        check('B24 no errors on any page', problems.length === 0, problems.slice(0, 4).join(' | '));
+        l.ws.close();
+
+        // ---------- Part C: station settings ----------
+        const st = await open('/admin/stations', { viewport: { width: 1440, height: 900 } });
+        await st.getByText(station.name).first().waitFor({ timeout: 15000 });
+        if (!(await T(st, 'live-delay-seconds').count())) {
+          // Open this station's settings
+          const row = st.locator('tr, div').filter({ hasText: station.name }).last();
+          const toggle = row.getByRole('button', { name: /settings|config|automation|expand|▸|▶|edit/i }).first();
+          if (await toggle.count()) await toggle.click(); else await st.getByText(station.name).first().click();
+        }
+        await T(st, 'live-delay-seconds').first().waitFor({ timeout: 8000 });
+        check('C1 the station shows its delay', (await T(st, 'live-delay-seconds').first().inputValue()) === '5');
+        await T(st, 'live-delay-seconds').first().fill('20');
+        await T(st, 'live-dump-seconds').first().fill('8');
+        await T(st, 'live-timed-items').first().selectOption('all');
+        await shot(st, 'station-settings');
+        await st.getByRole('button', { name: 'Save Automation Config' }).first().click();
+        await sleep(1500);
+        const saved = (await api('GET', `/stations/${STATION}`)).json.automation_config;
+        check('C2 delay, dump size and timed items are saved', saved.live_delay_seconds === 20 && saved.live_dump_seconds === 8 && saved.live_timed_items === 'all', JSON.stringify({ d: saved.live_delay_seconds, k: saved.live_dump_seconds, t: saved.live_timed_items }));
+        check('C3 other settings are kept', Object.keys(before).every((k) => k.startsWith('live_') || JSON.stringify(saved[k]) === JSON.stringify(before[k])));
+        const a = await air((await newShow('Delay test C')).id);
+        check('C4 a new show takes the saved settings', a.configured === 20 && a.dump_size === 8, JSON.stringify(a));
+      } finally {
+        await browser.close();
+      }
+    }
+  } finally {
+    await endAll();
+    await api('PUT', `/stations/${STATION}`, { automation_config: before });
+  }
+  console.log(fails ? `\n${fails} check(s) FAILED` : '\nAll checks passed');
+  process.exit(fails ? 1 : 0);
+})().catch((e) => { console.error(e); process.exit(1); });
