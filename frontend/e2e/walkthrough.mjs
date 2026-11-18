@@ -121,7 +121,7 @@ async function loginApi() {
 async function stationSettings(tokens) {
   const r = await fetch(`${API}/stations?skip=0&limit=100`, { headers: { authorization: `Bearer ${tokens.access_token}` } });
   const out = {};
-  for (const s of (await r.json()).stations || []) out[s.id] = JSON.stringify({ active: s.is_active, config: s.automation_config, protected: s.protected });
+  for (const s of (await r.json()).stations || []) out[s.id] = JSON.stringify({ active: s.is_active, config: s.automation_config || {}, protected: s.protected });
   return out;
 }
 
@@ -402,6 +402,7 @@ async function main() {
     guard.allow(/\/tone\d\.mp3/, "the seed's audio comes from a test file server without CORS");
     guard.allow(/warning toast: Loop is on/, 'Loop says so in amber on purpose: it changes what Next does');
     guard.allow(/warning toast: (HS|Spots mode) is off/, 'switching a station mode off says so in amber on purpose');
+    guard.allow(/You cannot disable your own account|PUT .*\/users\/[0-9a-f-]+$|status of 400 .*\/users\//, 'the walk is signed in as the only admin: Disable on itself is refused, and the page says so');
     guard.allow(/preview-weather|Could not load the weather preview/, 'no voice service on the test server');
     await dragInQueue(page, guard, st).catch((e) => finding(st.tag, '/admin/dashboard', 'drag', 'test error', e.message, ''));
     for (const route of ROUTES) {

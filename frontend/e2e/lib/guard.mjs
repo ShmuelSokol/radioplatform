@@ -64,7 +64,16 @@ const IN_PAGE = () => {
 const DEFAULT_ALLOW = [
   [/net::ERR_ABORTED/, 'a request the page itself cancelled (navigation, a newer request)'],
   [/Failed to load resource: net::ERR_ABORTED/, 'same'],
+  [/Failed to read the 'localStorage' property from 'Window'/, 'a start-up script running on the blank page before the site loads'],
 ];
+
+// Every guard made in this process, and what the whole test expects, for guardReport()
+const EVERY = [];
+const EVERYWHERE = [];
+
+/** The whole test expects this (a step that takes the server down, a refused action it
+ *  provokes on purpose). Say why: the reason is the record of what was excused. */
+export function allowEverywhere(pattern, reason = '') { EVERYWHERE.push([pattern, reason]); }
 
 export function guardPage(page, name = 'page', { allow = [] } = {}) {
   const all = [];          // every record, in order
@@ -94,7 +103,7 @@ export function guardPage(page, name = 'page', { allow = [] } = {}) {
     return typeof pat === 'function' ? pat(rec) : pat.test(hay);
   });
 
-  return {
+  const self = {
     name,
     allow(pattern, reason = '') { allowed.push([pattern, reason]); return this; },
     /** Records since the last call that neither the test-wide allow list nor `expected` covers. */
@@ -115,7 +124,40 @@ export function guardPage(page, name = 'page', { allow = [] } = {}) {
     format(recs = unexpected) {
       return recs.map((r) => `[${r.page}${r.step ? ' / ' + r.step : ''}] ${r.kind}: ${r.text}`).join('\n');
     },
+    /** Everything recorded that neither this guard, a step, nor the whole test allowed. */
+    leftOver() {
+      const fresh = all.slice(mark).filter((rec) => !matches(rec, allowed));
+      return [...unexpected, ...fresh].filter((rec) => !matches(rec, EVERYWHERE));
+    },
   };
+  EVERY.push(self);
+  return self;
+}
+
+/** Guard every page of every context this browser opens (existing tests need no change:
+ *  e2e/lib/fake-station.mjs hands out browsers already guarded). */
+export function guardBrowser(browser, name = 'test') {
+  const watch = (ctx) => { ctx.pages().forEach((p) => guardPage(p, name)); ctx.on('page', (p) => guardPage(p, name)); return ctx; };
+  const newContext = browser.newContext.bind(browser);
+  browser.newContext = async (...a) => watch(await newContext(...a));
+  const newPage = browser.newPage.bind(browser);
+  browser.newPage = async (...a) => { const p = await newPage(...a); guardPage(p, name); return p; };
+  return browser;
+}
+
+/** What the whole run showed that nothing expected: one line per distinct thing with how
+ *  often it was seen (ids and numbers folded together). [] = the screen stayed clean. */
+export function guardReport() {
+  const seen = new Map();
+  for (const g of EVERY) {
+    for (const rec of g.leftOver()) {
+      const key = `${rec.kind}: ${rec.text}`.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, '<id>').replace(/\d+/g, 'N');
+      const e = seen.get(key) || { ...rec, count: 0 };
+      e.count++;
+      seen.set(key, e);
+    }
+  }
+  return [...seen.values()];
 }
 
 /** Guard every page a context opens. Returns { guards, findings() }. */
