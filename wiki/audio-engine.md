@@ -116,6 +116,12 @@ The Mac's listener heard 2 to 3 s of near silence at song changes. Causes on our
   whole file: downloading all ~10,600 items would have been ~100 GB of storage egress.
   `POST /assets/bulk-analyze?asset_types=music&limit=N` uses the same path (music only by
   default). Only the upload path and the single-item `analyze-audio` route read whole files.
+- When that analysis says the file itself is bad (its length cannot be measured, or
+  storage answers 404/400), `upcoming_analysis.check_and_take_off_air` measures the whole
+  file once; if that fails too the item goes to `do_not_play` (category kept for "allow
+  again", waiting copies removed, never deleted), `metadata_extra["unplayable"]` says why,
+  and an `asset_missing` alert asks a person to look. A network error changes nothing.
+  (2026-11-18: two items failed again and again with "Could not measure the length".)
 - The player faded the incoming song in over 3 s. Now it comes up in 0.4 s
   (`CROSSFADE_FADE_IN`); only the outgoing song fades over 3 s.
 - The player hands over at `handOverPoint()`: the crossfade point, but never later than
