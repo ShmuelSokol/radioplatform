@@ -57,10 +57,15 @@ SAFE_PAST = 5.0
 FROZEN = 30.0
 # Seconds between looks per station (the scheduler passes every second or two)
 EVERY = 10.0
+# The song the stream server has pre-loaded can still be exchanged (the next tick flushes
+# it when the head of the queue changes), but not when it is about to start: the flush is
+# refused in the last 45 s of the song on air and at most one happens per 15 s
+# (playout_engine.KEEP_CUED_LAST_SECONDS, AUTO_FLUSH_MIN_INTERVAL)
+PRELOADED_FROZEN = 75.0
 CONFIG_KEY = "fit_before_hard_items"  # automation_config: false switches it off
 
 _last_look: dict[str, float] = {}
-_said_nothing: dict[str, datetime] = {}
+_said_nothing: dict[str, tuple] = {}
 
 
 @dataclass
@@ -277,15 +282,23 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
     if loses <= ACCEPTABLE_CUT:
         return False
 
-    from app.services.playout_engine import held_entry_ids
+    from app.services.playout_engine import cued_entry_id, held_entry_ids
 
-    held = held_entry_ids(station.id)
+    # The engine asks for its next song as soon as one starts, so during a long item the
+    # song before the hard item is pre-loaded for many minutes (live 2026-11-18 04:00Z on
+    # KBR Jerusalem: pre-loaded about 12 minutes ahead, never fitted, cut with 140 s left).
+    # It is still exchangeable; only what sits in the engine's timed lane is not.
+    preloaded = cued_entry_id(station.id) if engine else None
+    held = held_entry_ids(station.id) - ({preloaded} if preloaded else set())
 
     def movable(slot_or_entry, start: datetime | None = None) -> bool:
         e = slot_or_entry
         if e.source != "auto" or e.preempt_at is not None or e.id in held:
             return False
-        return start is None or (start - now).total_seconds() >= FROZEN
+        if start is None:
+            return True
+        frozen = PRELOADED_FROZEN if e.id == preloaded else FROZEN
+        return (start - now).total_seconds() >= frozen
 
     if not movable(last.entry, last.start):
         return False
@@ -294,8 +307,11 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
     if _analysis_on():
         # A candidate whose end point is not measured yet is asked for and left out
         # of this look; it can be chosen ten seconds later
-        _ask_for_analysis([e for e in spare if not _measured(e)], engine)
+        unmeasured = [e for e in spare if not _measured(e)]
+        _ask_for_analysis(unmeasured, engine)
         spare = [e for e in spare if _measured(e)]
+    else:
+        unmeasured = []
 
     # One song in the last place...
     best_cut, best = loses, None
@@ -323,11 +339,15 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
     if best is None or loses - best_cut < WORTH_IT:
         # Said once per hard item, so a live report can tell "looked and found nothing"
         # from "did not look"
-        if _said_nothing.get(key) != hard_at:
-            _said_nothing[key] = hard_at
+        # (and again when songs to choose from appear: the first look often has none
+        # because their end points are still being measured)
+        said = (hard_at, bool(spare))
+        if _said_nothing.get(key) != said:
+            _said_nothing[key] = said
             logger.info(
-                "Station %s: queue left as it is before the %s hard item (the song on air then loses %.0f s; no swap among %d songs saves %.0f s or more)",
-                station.id, hard_at.strftime("%H:%M:%S"), loses, len(spare), WORTH_IT,
+                "Station %s: queue left as it is before the %s hard item (the song on air then loses %.0f s; "
+                "no swap among %d songs saves %.0f s or more; %d more songs not measured yet)",
+                station.id, hard_at.strftime("%H:%M:%S"), loses, len(spare), WORTH_IT, len(unmeasured),
             )
         return False
 

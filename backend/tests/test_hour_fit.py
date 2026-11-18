@@ -473,3 +473,90 @@ async def test_songs_that_decide_the_fit_are_analysed_first(db_session: AsyncSes
     assert await fit_before_hard_item(db_session, station_id, ends - timedelta(minutes=13), force=True) is True
     await db_session.commit()
     assert (await _order(db_session, station_id))[0] == "To spare"
+
+
+@pytest.mark.asyncio
+async def test_the_song_the_stream_server_has_pre_loaded_can_still_be_exchanged(db_session: AsyncSession, monkeypatch):
+    """F-HOURFIT-14: live, KBR Jerusalem 2026-11-18 04:00Z. The engine asks for its next
+    song as soon as one starts, so during a 12-minute item the song before the hour was
+    pre-loaded all along, counted as untouchable, and cut with 140 s left. A pre-loaded
+    song is exchanged like any other (the next tick flushes the engine's copy) until
+    75 s before it starts; an item in the engine's timed lane is never moved."""
+    from app.config import settings
+    from app.services import playout_engine
+
+    monkeypatch.setattr(type(settings), "engine_drives", lambda self, station_id: True)
+    station = await _station(db_session)
+    station_id = station.id
+    ends = HOUR - timedelta(seconds=187.6)
+    await _queue(db_session, station, ends, [("Chadesh", 328.6), ("A", 250.0), ("Fits", 196.0)])
+    first = (await db_session.execute(
+        select(QueueEntry).join(Asset, QueueEntry.asset_id == Asset.id).where(Asset.title == "Chadesh")
+    )).scalar_one()
+    first_id = first.id
+    state = playout_engine.get_state(station_id)
+    state.cued_entry_id = str(first_id)
+    try:
+        # In the last 75 s before it starts the engine's copy stays
+        assert await fit_before_hard_item(db_session, station_id, ends - timedelta(seconds=60)) is False
+        assert (await _order(db_session, station_id))[0] == "Chadesh"
+        # Twelve minutes ahead it is exchanged: "Fits" hands over 5.4 s past the hour
+        assert await fit_before_hard_item(db_session, station_id, ends - timedelta(minutes=12)) is True
+        await db_session.commit()
+        assert (await _order(db_session, station_id))[0] == "Fits"
+        assert playout_engine.cued_entry_id(station_id) == first_id  # flushed by the next tick, not here
+
+    finally:
+        playout_engine.reset_state(station_id)
+
+    # What sits in the engine's timed lane is never moved
+    other = await _station(db_session)
+    other_id = other.id
+    await _queue(db_session, other, ends, [("Chadesh", 328.6), ("A", 250.0), ("Fits", 196.0)])
+    sent = (await db_session.execute(
+        select(QueueEntry.id).join(Asset, QueueEntry.asset_id == Asset.id)
+        .where(QueueEntry.station_id == other_id, Asset.title == "Chadesh")
+    )).scalar_one()
+    playout_engine.get_state(other_id).timed_sent = {str(sent)}
+    try:
+        assert await fit_before_hard_item(db_session, other_id, ends - timedelta(minutes=12)) is False
+        assert (await _order(db_session, other_id))[0] == "Chadesh"
+    finally:
+        playout_engine.reset_state(other_id)
+
+
+@pytest.mark.asyncio
+async def test_a_changed_head_flushes_the_engines_pre_loaded_song(db_session: AsyncSession, monkeypatch):
+    """F-HOURFIT-14: the other half. After the fit exchanged the pre-loaded song, the
+    engine tick sees another head of the queue and flushes its copy, so it asks again."""
+    from app.services import playout_engine
+
+    station = await _station(db_session)
+    station_id = station.id
+    ends = datetime.now(UTC) + timedelta(minutes=5)
+    await _queue(db_session, station, ends, [("Chadesh", 328.6), ("Fits", 196.0)])
+    entries = {
+        title: entry for entry, title in (await db_session.execute(
+            select(QueueEntry, Asset.title).join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending", QueueEntry.preempt_at.is_(None))
+        )).all()
+    }
+    flushed: list = []
+
+    async def flush(sid):
+        flushed.append(sid)
+        return True
+
+    monkeypatch.setattr(playout_engine, "engine_flush", flush)
+    state = playout_engine.get_state(station_id)
+    try:
+        state.cued_entry_id = str(entries["Chadesh"].id)
+        state.last_auto_flush = 0.0
+        await playout_engine._flush_if_head_changed(db_session, station_id, state, datetime.now(UTC))
+        assert flushed == []  # the head is what the engine holds
+        entries["Chadesh"].position, entries["Fits"].position = entries["Fits"].position, entries["Chadesh"].position
+        await db_session.commit()
+        await playout_engine._flush_if_head_changed(db_session, station_id, state, datetime.now(UTC))
+        assert flushed == [station_id]
+    finally:
+        playout_engine.reset_state(station_id)
