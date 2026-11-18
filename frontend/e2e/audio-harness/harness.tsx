@@ -62,7 +62,7 @@ function Harness() {
     s?.nextId ?? null, s?.nextCueIn ?? 0, s?.nextRg ?? 0, null, null, s?.startedAt ?? null,
     s?.fade ?? null,
     true, true, true,
-    s?.overlap, s?.nextOverlap,
+    s?.overlap, s?.nextOverlap, s?.endFade,
   );
   w.__listen = engine.initAudio;
   w.__nextNow = (id: string, fade: number | null) =>

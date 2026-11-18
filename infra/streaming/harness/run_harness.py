@@ -47,6 +47,7 @@ CONTROL_PORT = 8181          # Liquidsoap harbor (one engine)
 PROXY_PORT = 8190            # stands in for nginx: /<station id>/<cmd> -> harbor /<cmd>
 AUDIO_PORT = 8191
 BACKEND_PROXY_PORT = 8192    # the engine reaches the backend through this, so a scenario can slow it
+RELAY_PORT = 8193            # --local-box: the local relay between the engine and the backend proxy
 ICECAST_PORT = 8010
 TOKEN = "harness-token"
 STATION_ID = uuid.UUID("0e0e0e0e-0000-4000-8000-00000000a001")
@@ -101,6 +102,10 @@ class Stack:
         self.slow_started = 0.0
         # true = the backend cannot be reached from the engine (every call answers 502)
         self.backend_down = False
+        # true = the backend's commands do not reach the engine (with backend_down: no line at all)
+        self.control_down = False
+        # the local FM box's relay (infra/local/kbr_relay.py) when run with --local-box
+        self.relay = None
         # file name -> seconds the audio server waits before sending it (a slow download)
         self.slow_files: dict[str, float] = {}
 
@@ -172,12 +177,15 @@ class Stack:
 
     def serve_proxy(self) -> None:
         """nginx in production maps /control/<station id>/<cmd> to that engine's harbor."""
+        stack = self
 
         class Proxy(SimpleHTTPRequestHandler):
             def do_POST(self):  # noqa: N802
                 parts = self.path.strip("/").split("/", 1)
                 target = f"http://127.0.0.1:{CONTROL_PORT}/" + (parts[1] if len(parts) > 1 else "")
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                if stack.control_down:
+                    target = "http://127.0.0.1:9/"  # nothing listens: as with the line cut
                 req = urllib.request.Request(target, data=body, method="POST", headers={
                     "X-Playout-Token": self.headers.get("X-Playout-Token", ""),
                     "Content-Type": "application/json",
@@ -244,6 +252,23 @@ class Stack:
                 pass
 
         self._serve(BackendProxy, BACKEND_PROXY_PORT)
+
+    def start_relay(self) -> None:
+        """The local FM box: the engine talks to the relay, the relay to the backend."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("kbr_relay", REPO / "infra" / "local" / "kbr_relay.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        data = self.dir / "relay"
+        data.mkdir()
+        self.relay = mod.Relay(
+            upstream=f"http://127.0.0.1:{BACKEND_PROXY_PORT}/api/v1", station_id=str(STATION_ID),
+            token=TOKEN, data_dir=data, engine_control=f"http://127.0.0.1:{CONTROL_PORT}",
+        )
+        self.relay.silence_file()
+        self.servers.append(mod.serve(self.relay, RELAY_PORT))
+        self.relay.run_background(plan_every=5.0)
 
     def _serve(self, handler, port: int) -> None:
         srv = ThreadingHTTPServer(("127.0.0.1", port), handler)
@@ -331,7 +356,7 @@ class Stack:
     def start_engine(self) -> None:
         env = dict(os.environ)
         env.update({
-            "KBR_BACKEND_URL": f"http://127.0.0.1:{BACKEND_PROXY_PORT}/api/v1",
+            "KBR_BACKEND_URL": f"http://127.0.0.1:{RELAY_PORT if self.relay else BACKEND_PROXY_PORT}/api/v1",
             "KBR_STATION_ID": str(STATION_ID),
             "KBR_PLAYOUT_TOKEN": TOKEN,
             "KBR_CONTROL_PORT": str(CONTROL_PORT),
@@ -1579,6 +1604,70 @@ async def sc_backend_unreachable(h: Harness) -> None:
             f"the site shows what started after the return ({st.asset.title if st else None})")
 
 
+async def sc_local_box_offline(h: Harness) -> None:
+    """The local FM box with its line cut both ways (needs --local-box): the queue plays
+    on in order from the box's own disk, a hard time check airs on the second, nothing
+    from the emergency folder, no silence; when the line returns the site catches up."""
+    name = "local_box_offline"
+    relay = h.stack.relay
+    if relay is None:
+        h.check(name, False, "run with --local-box")
+        return
+    await wait_music(h)
+    await h.queue([("song5", {}), ("song6", {})])
+    due_dt = at(100)
+    due = due_dt.timestamp()
+    await h.queue([("time", {"preempt_at": due_dt, "timing_mode": "hard", "source": "auto"})])
+
+    def copied() -> bool:
+        st = relay.status()
+        timed = [e for e in relay.plan.get("entries", []) if e.get("at") and abs(e["at"] - due) < 1]
+        return st["plan_audio_missing"] == 0 and bool(timed) and st["plan_entries"] >= 5
+    try:
+        wait_for(copied, 30, "the relay's copy of the plan and its audio")
+    except Exception as e:
+        h.check(name, False, f"plan not copied: {e!r} {relay.status()}")
+        return
+    cut = time.time()
+    h.stack.backend_down = h.stack.control_down = True
+    try:
+        await asyncio.sleep(due - time.time() + 6 + 45)
+        heard = h.heard(cut, time.time() - 1)
+    finally:
+        h.stack.backend_down = h.stack.control_down = False
+    back = time.time()
+    h.print_timeline(heard, due)
+    line = timeline(heard)
+    names = [n for _, n in line]
+    runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    h.check(name, "EMERGENCY" not in names, f"no emergency files while the line was cut: {runs}")
+    starts = [t for t, n in line if n == "time"]
+    # 1 s: the recording's own clock is only that exact (as in fit_before_hour)
+    h.check(name, bool(starts) and abs(starts[0] - due) <= 1.0,
+            f"time check heard {starts[0] - due:+.2f} s from its second" if starts else "time check never aired")
+    h.check(name, runs.count("time") == 1, f"time check aired once: {runs}")
+    songs = [n for n in runs if n.startswith("song")]
+    h.check(name, len(songs) == len(set(songs)) and len(songs) >= 3,
+            f"songs carried on in order, none twice: {songs}")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s over {back - cut:.0f} s offline")
+    after = [n for _, n in timeline(h.heard(due + 7, back - 1))]
+    h.check(name, bool(after) and after[0].startswith("song"), f"music after the time check: {after[:3]}")
+    # Line back: kept start reports reach the site, and the time check is not aired again
+    try:
+        wait_for(lambda: relay.status()["online"] and relay.status()["reports_kept"] == 0, 40, "reports sent")
+    except Exception as e:
+        h.check(name, False, f"start reports not delivered: {e!r} {relay.status()}")
+    await asyncio.sleep(20)
+    times = await h.started_times("time", cut)
+    h.check(name, len(times) == 1, f"the site recorded the time check as aired: {times}")
+    late = [n for _, n in timeline(h.heard(back, time.time() - 1))]
+    h.check(name, "time" not in late and "EMERGENCY" not in late, f"after the return: {sorted(set(late))}")
+    st = await h.on_air()
+    h.check(name, st is not None and st.asset.asset_type == "music",
+            f"the site shows a song on air again ({st.asset.title if st else None})")
+
+
 async def sc_control_endpoints(h: Harness) -> None:
     """B-MODE-25: control endpoints refuse a wrong or missing token; /timed with the same
     entry id twice airs it once (an id is remembered, the last 50)."""
@@ -2408,6 +2497,7 @@ SCENARIOS = {
     "two_groups_0.3s_apart": lambda h: sc_two_groups(h, 0.3),
     "two_groups_1s_apart": lambda h: sc_two_groups(h, 1.0),
     "backend_unreachable": sc_backend_unreachable,
+    "local_box_offline": sc_local_box_offline,
     "control_endpoints": sc_control_endpoints,
     "slow_timed_file": sc_slow_timed_file,
     "queue_change_drops_preloaded": sc_queue_change_drops_preloaded,
@@ -2452,7 +2542,7 @@ def _fmt(t: float | None) -> str:
     return "never" if t is None else datetime.fromtimestamp(t).strftime("%H:%M:%S.%f")[:-4]
 
 
-async def main_async(names: list[str], keep: bool) -> int:
+async def main_async(names: list[str], keep: bool, local_box: bool = False) -> int:
     workdir = Path(tempfile.mkdtemp(prefix="kbr-harness-"))
     log(f"work dir {workdir}")
     stack = Stack(workdir)
@@ -2469,6 +2559,8 @@ async def main_async(names: list[str], keep: bool) -> int:
         await h.setup_data()
         h.login()
         stack.start_icecast()
+        if local_box:
+            stack.start_relay()
         stack.start_engine()
         log("engine on air")
         for n in names:
@@ -2494,12 +2586,14 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("scenarios", nargs="*", help=f"default: all of {', '.join(SCENARIOS)}")
     ap.add_argument("--keep", action="store_true", help="keep the work dir (logs, recording)")
+    ap.add_argument("--local-box", action="store_true",
+                    help="run the engine behind the local FM box relay (infra/local/kbr_relay.py)")
     args = ap.parse_args()
-    names = args.scenarios or list(SCENARIOS)
+    names = args.scenarios or [n for n in SCENARIOS if args.local_box or n != "local_box_offline"]
     for n in names:
         if n not in SCENARIOS:
             sys.exit(f"unknown scenario {n}")
-    sys.exit(asyncio.run(main_async(names, args.keep)))
+    sys.exit(asyncio.run(main_async(names, args.keep, args.local_box)))
 
 
 if __name__ == "__main__":

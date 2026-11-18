@@ -83,6 +83,7 @@ radioplatform/
 ├── docs/                         # API reference documentation
 ├── docker/                       # Dockerfiles, nginx.conf
 ├── infra/streaming/              # Playout engine server: radio.liq, setup.sh, Icecast, nginx, systemd
+├── infra/local/                  # Local FM box: kbr_relay.py keeps the engine on air with no internet (wiki/local-fm-box.md)
 └── infra/terraform/              # Terraform IaC (Vercel frontend provisioning)
 ```
 
@@ -134,7 +135,7 @@ radioplatform/
 |--------|------|--------|
 | auth | auth.py | /auth |
 | stations | stations.py | /stations |
-| assets | assets.py | /assets |
+| assets | assets.py | /assets (`POST /{id}/do-not-play`: the control room's quick "do not play" / "allow again", see `wiki/control-room.md`) |
 | streams | streams.py | /streams |
 | controls | controls.py | /controls |
 | users | users.py | /users |
@@ -164,7 +165,7 @@ radioplatform/
 | live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
-| playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login) |
+| playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login); /plan and /library (token only) for a local FM box's relay |
 | site_release | site_release.py | /site-release (GET public; PUT mode, POST/DELETE push, GET tabs: admin) and WebSocket /ws/site that every tab keeps open (see `wiki/release-pickup.md`) |
 | playout_status | playout_status.py | /playout-status (public): per station, server stream or browser player, and whether the engine answers and matches the queue (badge in control room, station list, Listen) |
 | call_in | call_in.py | /call-in/{station_id} (public): a listener joins the live show's caller queue from the browser; their mic goes on `/ws/live/call/{call_id}` (see `wiki/live-shows.md`) |
@@ -218,6 +219,7 @@ radioplatform/
 | air_watch.py | On-air self-check every 5 s: hard timed items late or not started, no time check at hh:00, dead air, item shown past its end, engine vs site drift, skipped time/weather/sponsorship; alerts + ntfy (see `wiki/air-watch.md`) |
 | station_modes.py | HS (hard start) and Spots mode switches: softens hard timed items while HS is off and restores them; Spots off plans no sponsorships (see `wiki/station-modes.md`) |
 | queue_positions.py | Renumbers a station's playing and pending queue entries from 1 in one statement; shared by the browser player's song change, the engine's start report and the blackout fill |
+| playout_plan.py | Read-only plan (pending queue with engine URIs, blackouts) and library pages for a local FM box's relay (see `wiki/local-fm-box.md`) |
 | sponsor_delivery.py | What a sponsor was promised against what aired: missed plays of the last 14 days and coming plays with no room or moved, for `GET /sponsor-portal/missed-plays` (see `wiki/spot-schedules.md`) |
 | playout_engine.py | Link to the playout engine: hands it the next track, records what really went on air, sends Next/flush/timed commands (see `wiki/streaming-architecture.md`) |
 
@@ -225,7 +227,7 @@ radioplatform/
 
 ### Pages
 **Admin** (`frontend/src/pages/admin/`):
-- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel. Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
+- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, do not play, details). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
 - Stations.tsx — Station management
 - Assets.tsx — Audio asset management
 - AssetUpload.tsx — File upload
@@ -479,6 +481,9 @@ cd frontend && npm run build && (npx vite preview --port 4173 &) && node e2e/con
 
 # The control room with a phone held sideways (9 phone sizes, tap targets, every control, turning the phone)
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-landscape.mjs
+
+# The control room's Song panel (category, do not play, details) on desktop and phone sizes
+cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs
 
 # Sound in the control room on an iPhone: the Listen button and tap-to-sound time, in Chromium made to follow Safari's tap rule
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-iphone-sound.mjs

@@ -286,3 +286,73 @@ async def bulk_update_category(
     )
     await db.flush()
     return result.rowcount
+
+
+DO_NOT_PLAY = "do_not_play"
+# Where the category a song had before "do not play" is kept, so switching it back
+# on returns the song to its rotation.
+CATEGORY_BEFORE_KEY = "category_before_do_not_play"
+
+
+def is_do_not_play(asset: Asset) -> bool:
+    return (asset.category or "").strip().lower() == DO_NOT_PLAY
+
+
+async def set_do_not_play(db: AsyncSession, asset_id: uuid.UUID, on: bool) -> dict:
+    """Take a song off the air for good (or put it back), in one step from the control room.
+
+    On: the category becomes do_not_play (no automatic pick uses it, see
+    models/asset.py) and the copies waiting in every station's queue are removed.
+    Left alone: the copy on air, a copy the playout engine already holds as its next
+    track (deleting that lost track of what Main was playing), and timed copies
+    (their time slot would be left empty). Off: the category it had before comes back;
+    nothing is queued again, the next automatic draw may pick it.
+    """
+    from sqlalchemy import delete, select
+
+    from app.models.queue_entry import QueueEntry
+    from app.services.playout_engine import held_entry_ids
+
+    asset = await get_asset(db, asset_id)
+    extra = dict(asset.metadata_extra or {})
+    removed = kept = 0
+    if on:
+        if not is_do_not_play(asset):
+            extra[CATEGORY_BEFORE_KEY] = asset.category
+            asset.metadata_extra = extra
+            asset.category = DO_NOT_PLAY
+        rows = (await db.execute(
+            select(QueueEntry.id, QueueEntry.station_id, QueueEntry.status, QueueEntry.preempt_at).where(
+                QueueEntry.asset_id == asset.id, QueueEntry.status.in_(("pending", "playing"))
+            )
+        )).all()
+        held: dict = {}
+        drop = []
+        for entry_id, station_id, status, preempt_at in rows:
+            if station_id not in held:
+                held[station_id] = held_entry_ids(station_id)
+            if status == "playing" or preempt_at is not None or entry_id in held[station_id]:
+                kept += 1
+            else:
+                drop.append(entry_id)
+        if drop:
+            # status again in SQL: an entry that went on air since the read stays
+            result = await db.execute(
+                delete(QueueEntry)
+                .where(QueueEntry.id.in_(drop), QueueEntry.status == "pending")
+                .execution_options(synchronize_session=False)
+            )
+            removed = result.rowcount or 0
+            kept += len(drop) - removed
+    elif is_do_not_play(asset):
+        asset.category = extra.pop(CATEGORY_BEFORE_KEY, None)
+        asset.metadata_extra = extra
+    await db.flush()
+    await db.refresh(asset)
+    return {
+        "id": str(asset.id),
+        "category": asset.category,
+        "do_not_play": is_do_not_play(asset),
+        "removed_from_queue": removed,
+        "still_to_play": kept,
+    }

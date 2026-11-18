@@ -485,19 +485,66 @@ def is_crossfaded(asset) -> bool:
     return asset is not None and (getattr(asset, "asset_type", None) or "music").lower() in CROSSFADE_TYPES
 
 
-def overlap_seconds(entry) -> float:
-    """How long the item on air overlaps the one after it when it ends by itself:
-    the station's song crossfade for a song, 0 for everything else."""
+# Shmuel, 2026-11-17 (9:39 PM ET): "Song ends first, then speech". A song followed by
+# anything spoken (sponsorship, announcement, weather, jingle, shiur) is not crossfaded
+# into it: it fades out to its end and the spoken item starts after it. On Main the
+# last second of a song played under the first words of a sponsorship.
+# Which item follows is only known from the queue, so predict_next_entry() notes it
+# here per entry on air and the one hand-over rule below reads it without a database
+# read. Not noted yet = a song follows (the station's crossfade).
+_speech_follows: dict[str, bool] = {}
+# The song's last moments fade out over at least this long before the spoken item
+MIN_END_FADE_SECONDS = 0.3
+
+
+def is_song(entry) -> bool:
+    """A song that crossfades at its end: music, not short, not a timed or block item."""
     asset = entry.asset if entry is not None else None
     duration = (asset.duration if asset else None) or DEFAULT_DURATION
-    if (
+    return not (
         not is_crossfaded(asset)
         or duration < SHORT_ITEM_SECONDS
         or getattr(entry, "preempt_at", None) is not None
         or getattr(entry, "source", None) in ("ad_slot", "block")
-    ):
+    )
+
+
+def note_speech_follows(entry, next_entry) -> bool:
+    """Record whether the item after `entry` is spoken. Returns True when that changed."""
+    key = str(getattr(entry, "id", "") or "")
+    if not key:
+        return False
+    value = bool(next_entry is not None and is_song(entry) and not is_song(next_entry))
+    if len(_speech_follows) > 2000:
+        _speech_follows.clear()
+    changed = _speech_follows.get(key, False) != value
+    _speech_follows[key] = value
+    return changed
+
+
+def speech_follows(entry) -> bool:
+    return _speech_follows.get(str(getattr(entry, "id", "") or ""), False)
+
+
+def overlap_seconds(entry, speech_next: bool | None = None) -> float:
+    """How long the item on air overlaps the one after it when it ends by itself:
+    the station's song crossfade for a song followed by a song, 0 for everything else
+    (anything spoken, and a song followed by something spoken). `speech_next` None =
+    what predict_next_entry() last noted for this entry."""
+    if not is_song(entry):
+        return 0.0
+    if speech_follows(entry) if speech_next is None else speech_next:
         return 0.0
     return _station_crossfade.get(str(getattr(entry, "station_id", "")), DEFAULT_CROSSFADE_SECONDS)
+
+
+def end_fade_seconds(entry) -> float:
+    """How long a song fades out at its end when a spoken item follows it (the spoken
+    item starts once the fade is done); 0 for everything else."""
+    if not (is_song(entry) and speech_follows(entry)):
+        return 0.0
+    crossfade = _station_crossfade.get(str(getattr(entry, "station_id", "")), DEFAULT_CROSSFADE_SECONDS)
+    return max(MIN_END_FADE_SECONDS, crossfade)
 
 
 def handover_seconds(entry) -> float:
@@ -510,9 +557,7 @@ def handover_seconds(entry) -> float:
     analysis = stored_analysis(extra) if extra else {}
     cross_start = analysis.get("cross_start_seconds")
     overlap = overlap_seconds(entry)
-    if not is_crossfaded(asset) or duration < SHORT_ITEM_SECONDS or (
-        getattr(entry, "preempt_at", None) is not None or getattr(entry, "source", None) in ("ad_slot", "block")
-    ):
+    if not is_song(entry):
         # A time check, weather or sponsorship is not crossfaded: handing over at
         # half its length cut a 5 s time check after 2.5 s and the shiur it had
         # paused started over it (Main, 15:00 ET 2026-11-16; All Day Stories,
@@ -544,15 +589,23 @@ async def predict_next_entry(db: AsyncSession, station_id, playing_entry) -> Que
     at the hand-over (a soft sponsorship due by then wins over the next song).
     Listeners pre-load this, so it must match the server's choice exactly;
     picking by 'now' sent them the next song while a sponsorship was waiting."""
-    now_utc = datetime.now(timezone.utc)
-    at = switch_time(playing_entry) or now_utc
-    picked = await _pick_next_pending(db, station_id, max(at, now_utc))
-    if picked is None:
-        return None
     from sqlalchemy.orm import joinedload
-    return (await db.execute(
-        select(QueueEntry).options(joinedload(QueueEntry.asset)).where(QueueEntry.id == picked.id)
-    )).unique().scalar_one_or_none()
+
+    now_utc = datetime.now(timezone.utc)
+    entry = None
+    # A song hands over later when a spoken item follows it (it is not crossfaded into
+    # it), which can bring one more item due: at most one second look.
+    for _ in range(2):
+        at = switch_time(playing_entry) or now_utc
+        picked = await _pick_next_pending(db, station_id, max(at, now_utc))
+        entry = None
+        if picked is not None:
+            entry = (await db.execute(
+                select(QueueEntry).options(joinedload(QueueEntry.asset)).where(QueueEntry.id == picked.id)
+            )).unique().scalar_one_or_none()
+        if not note_speech_follows(playing_entry, entry):
+            break
+    return entry
 
 
 async def _refill_for_next(db: AsyncSession, station_id) -> QueueEntry | None:

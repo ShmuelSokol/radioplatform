@@ -1,0 +1,14 @@
+[Unit]
+Description=KBR Live local relay (keeps the FM box on air without internet)
+After=network.target
+Before=kbr-engine@.service
+
+[Service]
+EnvironmentFile=/etc/kbr-engine/relay.env
+ExecStart=/usr/bin/python3 /opt/kbr-engine/kbr_relay.py
+Restart=always
+RestartSec=2
+User=liquidsoap
+
+[Install]
+WantedBy=multi-user.target

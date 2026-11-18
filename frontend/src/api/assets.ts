@@ -293,3 +293,19 @@ export const detectAudience = async (
   });
   return res.data;
 };
+
+export interface DoNotPlayResult {
+  id: string;
+  category: string | null;
+  do_not_play: boolean;
+  /** Waiting copies taken out of the queues (all stations) */
+  removed_from_queue: number;
+  /** Copies left: on air, already loaded by the stream server, or timed */
+  still_to_play: number;
+}
+
+/** Control room quick action: stop a song from being played again, or allow it again. */
+export const setDoNotPlay = async (id: string, on: boolean): Promise<DoNotPlayResult> => {
+  const res = await apiClient.post<DoNotPlayResult>(`/assets/${id}/do-not-play`, { on });
+  return res.data;
+};

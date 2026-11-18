@@ -58,6 +58,22 @@ function playsToEnd(fileDuration: number, overlap: number | undefined): boolean 
   if (!(isFinite(fileDuration) && fileDuration > 0)) return false;
   return fileDuration < SHORT_ITEM_SECONDS || (overlap != null && overlap < NO_OVERLAP_BELOW_SECONDS);
 }
+// A song followed by a spoken item (asset.end_fade_seconds > 0) is not crossfaded into
+// it: it fades out to its end and the spoken item starts after it (Shmuel, 2026-11-17:
+// "Song ends first, then speech"; the last second of a song played under the first
+// words of a sponsorship). The server hands over SHORT_ITEM_HANDOVER_SECONDS before
+// the song's end, so its end is that long after the hand-over point it sent.
+function songEndPoint(crossStart: number, fileDuration: number): number {
+  const fileEnd = isFinite(fileDuration) && fileDuration > 0 ? fileDuration - 0.1 : 0;
+  const end = crossStart > 0 ? crossStart + SHORT_ITEM_HANDOVER_SECONDS : fileEnd;
+  return fileEnd > 0 ? Math.min(end, fileEnd) : end;
+}
+// The server's change is the song's own end (not a timed item cutting in) when it
+// arrives this close to that end
+const SONG_END_WAIT_MAX_SECONDS = 1.5;
+// The page's own check runs every 100 ms: it brings the spoken item in this close to
+// the song's end, when the fade has left nothing of the song
+const SONG_END_TICK_SECONDS = 0.05;
 function handOverPoint(crossStart: number, fileDuration: number, overlap?: number): number {
   const short = playsToEnd(fileDuration, overlap);
   const fade = overlap ?? CROSSFADE_DURATION;
@@ -211,9 +227,13 @@ export function useAudioEngine(
   // spoken). undefined = not told.
   currentOverlap?: number,
   nextOverlap?: number,
+  // How long the song on air fades out at its end because a spoken item follows it
+  // (asset.end_fade_seconds); 0 or undefined = it ends as usual.
+  currentEndFade?: number,
 ): AudioEngineState {
   // Overlap by item, as the server told it; decks are looked up by the item they hold
   const overlapByAssetRef = useRef<Map<string, number>>(new Map());
+  const endFadeStartedRef = useRef<string | null>(null);
   if (nowPlayingAsset?.id && currentOverlap != null) overlapByAssetRef.current.set(nowPlayingAsset.id, currentOverlap);
   if (nextAssetId && nextOverlap != null) overlapByAssetRef.current.set(nextAssetId, nextOverlap);
   if (overlapByAssetRef.current.size > 200) {
@@ -222,6 +242,15 @@ export function useAudioEngine(
   }
   const overlapOf = useCallback((id: string | null | undefined): number | undefined =>
     (id ? overlapByAssetRef.current.get(id) : undefined), []);
+  // The song on air that fades out before a spoken item, and over how long
+  const endFadeRef = useRef<{ id: string; seconds: number } | null>(null);
+  if (nowPlayingAsset?.id && currentOverlap != null) {
+    endFadeRef.current = currentEndFade && currentEndFade > 0
+      ? { id: nowPlayingAsset.id, seconds: currentEndFade }
+      : endFadeRef.current && endFadeRef.current.id !== nowPlayingAsset.id ? endFadeRef.current : null;
+  }
+  const endFadeOf = useCallback((id: string | null | undefined): number =>
+    (id && endFadeRef.current?.id === id ? endFadeRef.current.seconds : 0), []);
   // ── Operator's Next heard at once (control room) ──
   // The item the operator moved to, played here before the server confirms it. While
   // it stands, the player follows it instead of the server's now-playing.
@@ -726,10 +755,15 @@ export function useAudioEngine(
     // still talking when the server moves on: let it finish, never talk over it.
     // All Day Stories, 10 PM 2026-11-16: the paused story came back 1.8 s into the
     // time check. An operator's Next still cuts at once.
+    // A song before a spoken item is let finish too: to its own end, fading out
+    const outEndFade = endFadeOf(deckAssetRef.current[outLabel]);
+    const outSongEnd = outEndFade > 0 ? songEndPoint(outCross, outDur) : NaN;
+    const outFinishesAt = outEndFade > 0 ? outSongEnd : outDur;
     const letFinish = operatorFade == null && !replay && !outDeck.audio.paused && !outDeck.audio.ended
       && deckAssetRef.current[outLabel] != null
       && playsToEnd(outDur, outOverlap)
-      && outDur - outTime > 0.05 && outDur - outTime < LET_FINISH_MAX_SECONDS;
+      && outFinishesAt - outTime > 0.05
+      && outFinishesAt - outTime < (outEndFade > 0 ? SONG_END_WAIT_MAX_SECONDS : LET_FINISH_MAX_SECONDS);
 
     const outWasPlaying = !outDeck.audio.paused && !outDeck.audio.ended && deckAssetRef.current[outLabel] != null;
     // A short spoken item on air here (or one that has just ended) hands over to this one
@@ -828,8 +862,17 @@ export function useAudioEngine(
     // Bring the new item on air, after the short item on air has finished if it should
     const goLiveAfterOut = () => {
       if (!letFinish) { goLive(); return; }
-      const left = outDeck.audio.paused || outDeck.audio.ended ? 0 : outDur - outDeck.audio.currentTime;
+      const left = outDeck.audio.paused || outDeck.audio.ended ? 0 : outFinishesAt - outDeck.audio.currentTime;
       if (left <= 0.05) { goLive(); return; }
+      if (outEndFade > 0) {
+        // The song fades out to its end; the spoken item starts once it is silent
+        const t = ctx.currentTime;
+        outDeck.gain.gain.cancelScheduledValues(t);
+        outDeck.gain.gain.setValueAtTime(outDeck.gain.gain.value, t);
+        outDeck.gain.gain.linearRampToValueAtTime(0, t + left);
+        setTimeout(goLive, left * 1000);
+        return;
+      }
       const onEnded = () => goLive();
       outDeck.audio.addEventListener('ended', onEnded, { once: true });
       setTimeout(() => {
@@ -1205,17 +1248,33 @@ export function useAudioEngine(
       // change is pending (Next was pressed and the new track is not up yet) the active
       // deck still holds the old track, so that point must not be applied to it.
       if (deckAssetRef.current[activeLabel] !== lastAssetId.current) return;
+      const ct = activeDeck.audio.currentTime;
+      const dur = activeDeck.audio.duration;
+      // A song before a spoken item fades out over its last moments, and the spoken
+      // item starts when it is silent (never over it)
+      const endFade = endFadeOf(deckAssetRef.current[activeLabel]);
+      const songEnd = endFade > 0 ? songEndPoint(crossStartRef.current, dur) : 0;
+      if (endFade > 0 && songEnd > 0 && !activeDeck.audio.paused && ct >= songEnd - endFade && ct < songEnd) {
+        const key = `${deckAssetRef.current[activeLabel]}|${startedAtRef.current}`;
+        const ctx = ctxRef.current;
+        if (ctx && endFadeStartedRef.current !== key) {
+          endFadeStartedRef.current = key;
+          const t = ctx.currentTime;
+          activeDeck.gain.gain.cancelScheduledValues(t);
+          activeDeck.gain.gain.setValueAtTime(activeDeck.gain.gain.value, t);
+          activeDeck.gain.gain.linearRampToValueAtTime(0, t + (songEnd - ct));
+        }
+      }
       // Only crossfade when the idle deck really holds the next track
       if (deckAssetRef.current[otherDeck(activeLabel)] !== nextId) return;
 
-      const ct = activeDeck.audio.currentTime;
-      const dur = activeDeck.audio.duration;
       // A short spoken item (time check, station ID) is never crossfaded: the next item
       // comes in when it has really finished. All Day Stories, 03:00Z 2026-11-17: the
       // paused story was faded in over the last seconds of the time check.
       const overlap = overlapOf(deckAssetRef.current[activeLabel]);
       const short = playsToEnd(dur, overlap);
-      const crossPoint = short ? Math.max(0.1, dur - SHORT_END_HANDOVER_SECONDS) : handOverPoint(crossStartRef.current, dur, overlap);
+      const crossPoint = endFade > 0 && songEnd > 0 ? songEnd - SONG_END_TICK_SECONDS
+        : short ? Math.max(0.1, dur - SHORT_END_HANDOVER_SECONDS) : handOverPoint(crossStartRef.current, dur, overlap);
       if (crossPoint > 0 && ct >= crossPoint) {
         // Do not run ahead of the server: wait until it is (nearly) at the crossfade
         // point too. It announces the next track there, which brings it on air anyway.
@@ -1226,7 +1285,7 @@ export function useAudioEngine(
           if (serverPos < crossPoint - MAX_LEAD_SECONDS) return;
         }
         crossfadeTriggeredRef.current = true;
-        executeCrossfade(short ? SHORT_END_HANDOVER_SECONDS : (overlap ?? CROSSFADE_DURATION));
+        executeCrossfade(endFade > 0 ? SONG_END_TICK_SECONDS : short ? SHORT_END_HANDOVER_SECONDS : (overlap ?? CROSSFADE_DURATION));
       }
     }, CROSSFADE_CHECK_MS);
     return () => clearInterval(timer);
