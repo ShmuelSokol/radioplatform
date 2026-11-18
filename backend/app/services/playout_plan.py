@@ -12,13 +12,14 @@ Read-only: nothing here changes the queue.
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.models.asset import Asset, not_placeholder
 from app.models.queue_entry import QueueEntry, is_soft_timed
 from app.services import playout_engine
+from app.services.station_blocks import blocked_asset_ids
 
 # Songs ahead that go in the plan. At about 4 minutes each this is well past two days;
 # timed items are cut off by the hours asked for instead.
@@ -45,7 +46,11 @@ async def build_plan(db: AsyncSession, station_id, hours: float = 48.0) -> dict:
     # Same rule as /next: a placeholder or do-not-play item queued automatically never airs
     may_air = or_(
         QueueEntry.source.in_(OPERATOR_SOURCES),
-        QueueEntry.asset_id.notin_(select(Asset.id).where(~not_placeholder())),
+        and_(
+            QueueEntry.asset_id.notin_(select(Asset.id).where(~not_placeholder())),
+            # nor an item this station alone was told not to play
+            QueueEntry.asset_id.notin_(blocked_asset_ids(station_id)),
+        ),
     )
     res = await db.execute(
         select(QueueEntry)
