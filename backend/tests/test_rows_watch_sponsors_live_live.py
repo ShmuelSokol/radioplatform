@@ -135,8 +135,6 @@ async def test_caller_on_air_when_the_show_ends_keeps_their_air_time(client, db_
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="found 2026-11-19: a second show can be started on a station while "
-                   "another show is live there; nothing refuses it")
 async def test_second_show_on_a_station_with_a_live_show_is_refused(client, db_session, _clean_relay):
     """V3-53: two people start a show on one station: the second start is refused while
     the first is live, and the first stays on air."""

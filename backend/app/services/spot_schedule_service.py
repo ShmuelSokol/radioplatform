@@ -786,6 +786,12 @@ async def plan_for_station(
         # so its own list from before the delete is the true one (Main 2026-11-18:
         # a sponsorship queued at 8:15 inside the Daf Yomi after a rebuild).
         quiet = TALKS_BEFORE_REBUILD.get() or await talk_windows(db, station, tz, now)
+        # and the blocks' own shiurim, queued yet or not
+        from app.services.program_block_service import block_talk_windows
+
+        quiet = list(quiet) + await block_talk_windows(
+            db, station, now - timedelta(days=1), now + timedelta(days=days + 1)
+        )
     placements, unplaced = plan_spots(
         schedules,
         tz,

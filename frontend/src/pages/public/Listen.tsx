@@ -924,8 +924,9 @@ export default function Listen({ stationId: given }: { stationId?: string } = {}
                 </div>
               </div>
 
-              {/* Rating widget — only when a song is playing */}
-              {isWsPlaying && wsNowPlaying?.asset_id && (
+              {/* Rating widget: only when a song is playing. Not in a live show: the
+                  now-playing record still names the last song, which nobody is hearing */}
+              {isWsPlaying && wsNowPlaying?.asset_id && !live.onAir && !activeShow?.active && (
                 <div className="flex items-center gap-3 bg-gray-50 rounded-lg p-3">
                   <span className="text-sm text-gray-600 flex-shrink-0">Rate this song:</span>
                   <div className="flex items-center gap-1">

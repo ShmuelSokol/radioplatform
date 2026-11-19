@@ -3,7 +3,7 @@
  * the page's volume and mute carry over to the host's audio (F-LISTEN-40), and the
  * live-audio socket reconnects with back-off 1, 2, 4, 8, 15 s after it drops, the
  * music being allowed again meanwhile (F-LISTEN-45); the rating widget during a show
- * (F-LISTEN-30, a known bug: XFAIL); a 5 s time check handed over on the second
+ * (F-LISTEN-30); a 5 s time check handed over on the second
  * (F-HANDOVER-8). Parts (ONLY=): handover live rating.
  *
  *   cd frontend && npm run build && (npx vite preview --port 4301 --strictPort &)
@@ -16,9 +16,7 @@ import {
 } from './lib/fake-station.mjs';
 
 const BASE = process.env.BASE_URL || 'http://localhost:4301';
-const { check, done } = checker({
-  'rating widget hidden during the live show': 'found 2026-11-19: the widget follows now-playing (isWsPlaying), which keeps the last song during a show, so it shows over the live show',
-});
+const { check, done } = checker({});
 
 // The live-audio socket: counted, and refused (closed before it opens, as when the
 // server cannot be reached) once window.__liveRefuse is set. The host's audio

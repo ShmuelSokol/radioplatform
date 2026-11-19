@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { newRequestId, recordRequest } from '../lib/diagnostics';
+import { markDeleted } from '../lib/navMemory';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -70,6 +71,8 @@ export const FORBIDDEN_EVENT = 'kbr:forbidden';
 apiClient.interceptors.response.use(
   (response) => {
     recordAxios(response.config, response.status);
+    // Back never returns to a page about something just deleted (lib/navMemory.ts)
+    if (response.config.method?.toLowerCase() === 'delete' && response.config.url) markDeleted(response.config.url);
     return response;
   },
   async (error) => {

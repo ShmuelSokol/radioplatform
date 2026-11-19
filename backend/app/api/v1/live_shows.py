@@ -1,7 +1,9 @@
 """
 Live Shows API — create, manage, and control live broadcasts with call-in support.
 """
+import asyncio
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -14,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import station_guard as sg
 from app.core.dependencies import get_db, require_admin, require_dj_or_manager, require_staff
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.models.live_show import LiveShow, LiveShowStatus
 from app.models.call_in_request import CallInRequest, CallStatus
 from app.models.user import User
@@ -118,7 +120,12 @@ async def start_show(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_dj_or_manager),
 ):
-    """Start a live show (go live)."""
+    """Start a live show (go live). 409 while another show is live on the station."""
+    asked = await live_show_service.get_show(db, show_id)
+    if asked is not None and asked.status != LiveShowStatus.LIVE:
+        other = await live_show_service.other_live_show(db, asked)
+        if other is not None:
+            raise ConflictError(f'"{other.title}" is live on this station. End it before starting another show.')
     show = await live_show_service.start_show(db, show_id, host_user_id=user.id)
     if not show:
         raise NotFoundError("Live show not found")
@@ -587,6 +594,16 @@ async def hold_call(
     return call
 
 
+# Next pressed twice (a double click, or the host and the screener together): the two
+# requests both read "Avi is next" and both put him on air, or the second, a moment
+# later, ended the caller the first had just put on and took the one after: a caller
+# lost after a fraction of a second on air. One Next at a time per show, and a second
+# one inside NEXT_REPEAT_SECONDS gets the first one's answer and changes nothing.
+NEXT_REPEAT_SECONDS = 1.0
+_next_locks: dict[str, asyncio.Lock] = {}
+_next_last: dict[str, tuple[float, dict]] = {}
+
+
 @router.post("/{show_id}/calls/next")
 async def next_caller(
     show_id: uuid.UUID,
@@ -594,6 +611,29 @@ async def next_caller(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
+    """One press between callers (see `_next_caller`). Pressed twice within a second,
+    the second press answers what the first did, with `"repeat": true`."""
+    key = str(show_id)
+    async with _next_locks.setdefault(key, asyncio.Lock()):
+        last = _next_last.get(key)
+        if last is not None and time.monotonic() - last[0] < NEXT_REPEAT_SECONDS:
+            return {**last[1], "repeat": True}
+        result = await _next_caller(show_id, force, db)
+        # Written before the lock opens, so a press waiting behind this one reads it
+        await db.commit()
+        _next_last[key] = (time.monotonic(), result)
+        if len(_next_last) > 200:
+            for old in sorted(_next_last, key=lambda k: _next_last[k][0])[:100]:
+                _next_last.pop(old, None)
+                _next_locks.pop(old, None)
+        return result
+
+
+async def _next_caller(
+    show_id: uuid.UUID,
+    force: bool,
+    db: AsyncSession,
+) -> dict:
     """One press between callers: the call on air ends and the approved caller who
     has waited longest goes on air. With nobody approved it only ends the call on air;
     409 when there is neither. Like Put On Air, refused (409 delay_not_safe) while the
