@@ -66,7 +66,7 @@ async function context(browser, role, api = () => undefined, opts = {}) {
 }
 
 // ---- V3-83: the Sponsors menu per role ------------------------------------------------
-const ALL_SPONSOR_LINKS = ['All Clients', 'Spot Schedule', 'Record Spots', 'Campaigns', 'Sponsorship Rules'];
+const ALL_SPONSOR_LINKS = ['All Clients', 'Book a sponsorship', 'Spot Schedule', 'Record Spots', 'Campaigns', 'Sponsorship Rules'];
 const EXPECT_MENU = {
   admin: ALL_SPONSOR_LINKS,
   manager: ALL_SPONSOR_LINKS,

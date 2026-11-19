@@ -711,13 +711,14 @@ section('shell', async () => {
 
   // F-GLOBAL-3 dropdown groups: every link navigates; hidden for roles that cannot open it
   const groups = {
-    Sponsors: [['All Clients', '/admin/sponsors'], ['Spot Schedule', '/admin/spot-schedule'], ['Record Spots', '/admin/spot-recordings'], ['Campaigns', '/admin/campaigns'], ['Sponsorship Rules', '/admin/sponsorship-rules']],
+    Sponsors: [['All Clients', '/admin/sponsors'], ['Book a sponsorship', '/admin/sponsors?book=1'], ['Spot Schedule', '/admin/spot-schedule'], ['Record Spots', '/admin/spot-recordings'], ['Campaigns', '/admin/campaigns'], ['Sponsorship Rules', '/admin/sponsorship-rules']],
     Content: [['Library', '/admin/assets'], ['Categories', '/admin/categories'], ['Types', '/admin/asset-types'], ['Playlists', '/admin/playlists'], ['Studio', '/admin/studio'], ['Reviews', '/admin/reviews']],
     Broadcast: [['Schedules', '/admin/schedules'], ['Program Blocks', '/admin/program-blocks'], ['Schedule Check', '/admin/schedule-check'], ['Rules', '/admin/rules'], ['Blackouts', '/admin/holidays'], ['Program Clock', '/admin/program-clock'], ['Live Shows', '/admin/live']],
     Audience: [['Listeners', '/admin/listeners'], ['Analytics', '/admin/analytics'], ['Requests', '/admin/requests'], ['Public Schedule', '/guide'], ['Archives', '/archives'], ['DJs', '/hosts']],
     Settings: [['Users', '/admin/users'], ['Activity', '/admin/activity'], ['Alerts', '/admin/alerts'], ['Bug Reports', '/admin/bug-reports'], ['Site Updates', '/admin/site-updates'], ['Manage Stations', '/admin/stations'], ['CRM', '/admin/crm']],
   };
   const canOpen = (role, p) => {
+    p = p.split('?')[0];
     if (!p.startsWith('/admin')) return true;
     const hit = adminRoutes().find(([r]) => r === p);
     return hit ? hit[1].includes(role) : false;
@@ -740,7 +741,8 @@ section('shell', async () => {
           if (!canOpen(role, p)) { assert(!shown, `${g} > ${label} shown to ${role}`); await page.mouse.click(5, 400); continue; }
           assert(shown, `${g} > ${label} missing for ${role}`);
           await link.click();
-          await waitPath(page, p);
+          await waitPath(page, p.split('?')[0]);
+          if (p.includes('book=1')) await page.keyboard.press('Escape');
           assert(!(await menu.isVisible().catch(() => false)), 'menu stayed open after navigating');
           n++;
         }
