@@ -142,7 +142,16 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
         w_result = await db.execute(select(HolidayWindow).where(HolidayWindow.id == wid))
         w = w_result.scalar_one_or_none()
         if w:
+            w_start, w_end = _aware(w.start_datetime), _aware(w.end_datetime)
             total += await _fill_single_blackout(db, station_id, w)
+            try:
+                if w_start <= now:
+                    await _drop_leftovers(db, station_id, w_start, w_end)
+                elif w_start - now <= SPOT_CUT_LOOKAHEAD:
+                    await _drop_spots_cut_by(db, station_id, w_start)
+            except Exception:
+                logger.exception("Station %s: tidying the queue around the blackout failed", station_id)
+                await db.rollback()
 
     # Compact positions after fill to prevent bloat from repeated bump operations
     if total > 0:
@@ -153,6 +162,113 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
         logger.info("Compacted queue positions for station %s", station_id)
 
     return total
+
+
+# How long before a blackout the item that would be cut by its silence is looked for
+SPOT_CUT_LOOKAHEAD = timedelta(minutes=20)
+# What may never be cut off by the blackout's silence (music just fades, as at :00)
+_SPOKEN_TYPES = (
+    "spot", "jingle", "sweeper", "station_id", "time", "weather", "psa", "announcement",
+    "zmanim", "sponsorship", "promo",
+)
+
+
+def _blackout_keeps(source) -> bool:
+    from app.services.shabbos_ending import SOURCE as SHABBOS_END
+
+    return source == SHABBOS_END
+
+
+async def _drop_leftovers(db: AsyncSession, station_id, start, end) -> int:
+    """Once a blackout has begun, what was queued for before it leaves the queue.
+
+    The silences go on air at the window's start whatever is still waiting before them
+    (they are hard timed). Songs, shiurim and sponsorships queued ahead of them stayed
+    pending and aired first after Shabbos: Main's Friday-afternoon block, a sponsorship
+    timed for 21:15 Friday and Jerusalem's Erev Shabbos daf ("Yoma 9") were lined up for
+    Motzei Shabbos (queue read 2026-11-19 21:22Z). The window had moved earlier (candle
+    lighting 14:19Z -> 13:57Z on Jerusalem) after those rows were drawn.
+
+    Taken out: every waiting row other than silence that sits before the window's first
+    waiting silence, and every waiting row timed before the window. Rows after the
+    silences (what was drawn for after the window) and rows timed for after it stay."""
+    silence_id = (await db.execute(
+        select(Asset.id).where(Asset.asset_type == "silence").limit(1)
+    )).scalar_one_or_none()
+    if silence_id is None:
+        return 0
+    first_silence = (await db.execute(
+        select(func.min(QueueEntry.position)).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.asset_id == silence_id,
+        )
+    )).scalar()
+    rows = (await db.execute(
+        select(QueueEntry.id, QueueEntry.position, QueueEntry.preempt_at, QueueEntry.source).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.asset_id != silence_id,
+        )
+    )).all()
+    ids = []
+    for rid, pos, pa, src in rows:
+        if _blackout_keeps(src):
+            continue
+        if pa is not None:
+            if _aware(pa) < start:
+                ids.append(rid)  # its time came before the window: it cannot air now
+            continue  # timed inside the window (dropped already) or after it: stays
+        if first_silence is not None and pos < first_silence:
+            ids.append(rid)
+    if not ids:
+        return 0
+    await db.execute(
+        update(QueueEntry).where(QueueEntry.id.in_(ids)).values(status="skipped")
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
+    logger.warning("Station %s: %d item(s) queued for before the blackout (from %s) left the queue",
+                   station_id, len(ids), start)
+    if settings.engine_drives(station_id):
+        # the engine may hold one of them pre-loaded: it would play it when the silence ends
+        from app.services import playout_engine
+
+        state = playout_engine.get_state(station_id)
+        held = {str(i) for i in ids} & ({state.cued_entry_id} | set(state.given))
+        if held:
+            await playout_engine.engine_flush(station_id)
+    return len(ids)
+
+
+async def _drop_spots_cut_by(db: AsyncSession, station_id, start) -> int:
+    """A sponsorship (or any spoken item) that would still be on air when the blackout
+    starts is not started: the silence would cut it mid-sentence. Main's TEST SPONSOR 29
+    (29 s) was estimated to start 7 s before Friday's silence (2026-11-19 21:22Z read).
+    Worked out on the queue's own timeline in the last minutes before the window."""
+    data = await _get_queue_impl(station_id, 500, db)
+    ids = []
+    for d in data.get("entries", []):
+        if d.get("status") != "pending" or not d.get("estimated_start"):
+            continue
+        asset = d.get("asset") or {}
+        if asset.get("asset_type") not in _SPOKEN_TYPES or _blackout_keeps(d.get("source")):
+            continue
+        est = _aware(datetime.fromisoformat(d["estimated_start"]))
+        if est >= start:
+            continue
+        if est + timedelta(seconds=float(asset.get("duration") or DEFAULT_DURATION)) > start:
+            ids.append(d["id"])
+    if not ids:
+        return 0
+    await db.execute(
+        update(QueueEntry).where(QueueEntry.id.in_([uuid.UUID(i) for i in ids])).values(status="skipped")
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
+    logger.warning("Station %s: %d spoken item(s) that the blackout at %s would cut left the queue",
+                   station_id, len(ids), start)
+    return len(ids)
 
 
 async def _drop_timed_inside(db: AsyncSession, station_id, silence_id, start, end) -> int:
