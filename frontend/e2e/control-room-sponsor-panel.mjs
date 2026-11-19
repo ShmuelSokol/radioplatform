@@ -79,15 +79,19 @@ function sponsorStation(sid, opts = {}) {
     }
     if (path === '/spot-schedules/station-day' && method === 'GET') {
       if (opts.failDay) return { __status: 500 };
-      const midnight = new Date(); midnight.setHours(24, 0, 0, 0);
-      const plays = station.queue.filter((e) => e.source === 'ad_slot' && e.preempt_at && new Date(e.preempt_at) < midnight)
+      // "today": the next 20 hours, so the check does not depend on the hour it runs (at
+      // 11:30 PM a play 40 minutes away fell on tomorrow and the list had one row)
+      const dayEnd = new Date(Date.now() + 20 * 3600e3);
+      const plays = station.queue.filter((e) => (e.source === 'ad_slot' || e.dayPlay) && e.preempt_at && new Date(e.preempt_at) < dayEnd)
         .sort((x, y) => x.preempt_at.localeCompare(y.preempt_at))
         .map((e) => {
           const a = station.byId[e.asset_id];
           return {
             entry_id: e.id, status: e.status, status_text: { pending: 'Waiting', played: 'Aired', playing: 'On air', cancelled: 'Skipped by staff' }[e.status],
             source: e.source, at: e.preempt_at, local_time: fmt(e.preempt_at, st.timezone),
-            asset: { id: a.id, title: a.title, artist: a.artist, asset_type: 'spot', category: 'Spots', duration: a.duration },
+            asset: { id: a.id, title: a.title, artist: a.artist, asset_type: 'spot', category: a.category === undefined ? 'Spots' : a.category, duration: a.duration },
+            // no sponsor_id, as the server sent before 2026-11-19: the list's rows must open the
+            // Sponsor panel on their own (the server now sends it too, test_sponsor_panel.py)
             sponsor_name: SPONSOR.name,
           };
         });
@@ -128,6 +132,14 @@ function sponsorStation(sid, opts = {}) {
     later: station.add({ asset_id: 's1', position: 6, source: 'ad_slot', preempt_at: soon(40), hard_timed: false }),
     tomorrow: station.add({ asset_id: 's1', position: 90, source: 'ad_slot', preempt_at: soon(26 * 60), hard_timed: false }),
   };
+  if (opts.blockPlay) {
+    // live 2026-11-19 on Main: a sponsor's recording placed by a half-hour program block
+    // (source "block"), filed under no spots category; only its sponsor link marks it
+    const smoke = { id: 'sb', title: 'TEST - Southside Smokehouse', artist: null, album: null, duration: 30, asset_type: 'spot', category: null, sponsor_id: SPONSOR.id };
+    station.assets.push(smoke); station.byId.sb = smoke;
+    station.ad.block = station.add({ asset_id: 'sb', position: 4, source: 'block', preempt_at: soon(5), hard_timed: false });
+    station.ad.block.dayPlay = true;
+  }
   return station;
 }
 
@@ -396,7 +408,7 @@ async function finding(browser, sid) {
       .observe(document.body, { subtree: true, childList: true, characterData: true });
   });
   const tOpen = Date.now();
-  await page.getByRole('tab', { name: 'Sponsors' }).or(page.getByRole('button', { name: 'Sponsors', exact: true })).first().click();
+  await page.getByTestId('control-room').getByRole('tab', { name: 'Sponsors' }).or(page.getByTestId('control-room').getByRole('button', { name: 'Sponsors', exact: true })).first().click();
   await page.getByTestId('sponsors-today-row').first().waitFor();
   const rows = page.getByTestId('sponsors-today-row');
   check(`${tag}: the list shows at once, no Loading`, Date.now() - tOpen < 700 && !(await page.evaluate(() => window.__sawLoading)), `${Date.now() - tOpen} ms`);
@@ -427,7 +439,7 @@ async function findingPhone(browser, contextOpts, tag) {
   check(`${tag}: tapping the tag opens the Sponsor panel`, await page.getByTestId('song-panel').count() === 0);
   await page.getByRole('button', { name: 'Close' }).tap();
   await page.getByRole('button', { name: /^More/ }).first().tap();
-  await page.getByRole('button', { name: 'Sponsors', exact: true }).tap();
+  await page.getByTestId('control-room').getByRole('button', { name: 'Sponsors', exact: true }).tap();
   await page.getByTestId('sponsors-today-row').first().waitFor();
   const r = await page.getByTestId('sponsors-today-row').first().boundingBox();
   check(`${tag}: More → Sponsors lists today's plays, rows at least 44 px tall and full width`, r.height >= 43.5 && r.x + r.width <= vp.width + 0.5, JSON.stringify(r));
@@ -440,17 +452,40 @@ async function findingPhone(browser, contextOpts, tag) {
   await ctx.close();
 }
 
+/** A play a program block placed (Main's half-hour blocks) opens the Sponsor panel, not the
+ *  song options, from the Sponsors list and from the queue (PC live check 2026-11-19). */
+async function findingBlock(browser, contextOpts, tag) {
+  const station = sponsorStation('st-main', { blockPlay: true });
+  const { ctx, page, errors } = await openRoom(browser, contextOpts, station);
+  const phone = (contextOpts.viewport?.width ?? 1440) < 700;
+  if (phone) {
+    await page.getByRole('button', { name: /^More/ }).first().click();
+    await page.getByTestId('control-room').getByRole('button', { name: 'Sponsors', exact: true }).click();
+  } else {
+    await page.getByTestId('control-room').getByRole('tab', { name: 'Sponsors' }).click();
+  }
+  const row = page.getByTestId('sponsors-today-row').filter({ hasText: 'Southside' });
+  await row.waitFor();
+  await row.click();
+  await panel(page).waitFor({ timeout: 5000 }).catch(() => {});
+  check(`${tag}: a block-placed sponsorship in the Sponsors list opens the Sponsor panel`,
+    await panel(page).count() === 1 && await page.getByTestId('song-panel').count() === 0,
+    `sponsor panel ${await panel(page).count()}, song panel ${await page.getByTestId('song-panel').count()}`);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 async function findingEdges(browser) {
   let station = sponsorStation('st-stories', { noDay: true });
   let r = await openRoom(browser, DESKTOP, station);
-  await r.page.getByRole('button', { name: 'Sponsors', exact: true }).or(r.page.getByRole('tab', { name: 'Sponsors' })).first().click();
+  await r.page.getByTestId('control-room').getByRole('button', { name: 'Sponsors', exact: true }).or(r.page.getByTestId('control-room').getByRole('tab', { name: 'Sponsors' })).first().click();
   await r.page.getByTestId('sponsors-today-empty').waitFor();
   check('no sponsorships today: the list says so', /No sponsorships on this station today/.test(await r.page.getByTestId('sponsors-today-empty').innerText()));
   check('no sponsorships today: no script errors', r.errors.length === 0, r.errors.join(' | '));
   await r.ctx.close();
   station = sponsorStation('st-main', { failDay: true });
   r = await openRoom(browser, DESKTOP, station);
-  await r.page.getByRole('button', { name: 'Sponsors', exact: true }).or(r.page.getByRole('tab', { name: 'Sponsors' })).first().click();
+  await r.page.getByTestId('control-room').getByRole('button', { name: 'Sponsors', exact: true }).or(r.page.getByTestId('control-room').getByRole('tab', { name: 'Sponsors' })).first().click();
   await r.page.getByText('Could not load today').waitFor({ timeout: 15000 });
   check('failed list: says it could not load and offers Try again', await r.page.getByRole('button', { name: 'Try again' }).isVisible());
   await r.ctx.close();
@@ -468,6 +503,8 @@ try {
     for (const s of STATIONS) await finding(browser, s.id);
     await findingPhone(browser, PHONE, 'find iPhone 13');
     await findingPhone(browser, PHONE_SE, 'find iPhone SE');
+    await findingBlock(browser, DESKTOP, 'block play desktop');
+    await findingBlock(browser, PHONE, 'block play iPhone 13');
     await findingEdges(browser);
   }
   if (run('phone')) {

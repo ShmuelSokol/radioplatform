@@ -246,7 +246,9 @@ export default function Dashboard() {
   });
   // The Sponsors list: one tap opens that play's Sponsorship panel
   const openSponsorPlay = useCallback((play: StationDayPlay) => {
-    setSongTarget({ asset: play.asset, onAir: play.status === 'playing', source: play.source || 'ad_slot' });
+    // Every row of that list is a sponsorship, also one a program block placed (source "block"):
+    // on Main those opened the song options instead (2026-11-19)
+    setSongTarget({ asset: play.asset, onAir: play.status === 'playing', source: play.source || 'ad_slot', sponsorship: true });
   }, [setSongTarget]);
   const songToast = useCallback((text: string, type: Toast['type']) => setToast({ text, type }), []);
   const [busyId, setBusyId] = useState<string | null>(null);
