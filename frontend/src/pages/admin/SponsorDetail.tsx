@@ -1,6 +1,7 @@
 import { totalsLine } from '../../components/sponsors/contractTotals';
 import { useEffect, useMemo, useState } from 'react';
 import ContractEditor from '../../components/sponsors/ContractEditor';
+import BookSponsorship from '../../components/sponsors/BookSponsorship';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -55,6 +56,8 @@ export default function SponsorDetail() {
     if (t === 'spots') next.delete('tab'); else next.set('tab', t);
     setParams(next, { replace: true });
   };
+  const mayBook = useMayChange('/admin/spot-schedule');
+  const [booking, setBooking] = useState(false);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['sponsor-account', sponsorId],
@@ -80,6 +83,7 @@ export default function SponsorDetail() {
 
   return (
     <div className="w-full space-y-4">
+      {booking && <BookSponsorship start={{ sponsorId: c.id }} onClose={() => setBooking(false)} />}
       <Link to="/admin/sponsors" className="text-sm text-blue-700 hover:underline">← All clients</Link>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
@@ -91,7 +95,11 @@ export default function SponsorDetail() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link to={`/admin/spot-schedule?sponsor=${c.id}`} className="px-3 py-2 border rounded-lg text-sm">New contract</Link>
+          {mayBook && (
+            <button onClick={() => setBooking(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm" data-testid="book-open">
+              Book a sponsorship
+            </button>
+          )}
           <Link to={`/admin/spot-recordings?sponsor=${c.id}`} className="px-3 py-2 border rounded-lg text-sm">Record a spot</Link>
           <Link to={`/admin/campaigns?sponsor=${c.id}`} className="px-3 py-2 border rounded-lg text-sm">Campaigns</Link>
         </div>
@@ -277,7 +285,7 @@ function ContractsTab({ account }: { account: ClientAccount }) {
   if (!account.contracts.length)
     return (
       <p className="p-6 bg-white rounded-lg shadow text-gray-500">
-        No contracts yet. Add one with <Link className="text-blue-700 underline" to={`/admin/spot-schedule?sponsor=${account.client.id}`}>New contract</Link>.
+        No contracts yet. Add one with Book a sponsorship at the top of the page.
       </p>
     );
   return (

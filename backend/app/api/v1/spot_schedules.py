@@ -286,6 +286,22 @@ async def preview_spot_plan(
     )
 
 
+@router.get("/room")
+async def slot_room_view(
+    station_id: UUID,
+    days: int = Query(7, ge=1, le=14),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_manager),
+):
+    """How full each time slot is for the next N days on a station: room for
+    sponsorships, plays booked, plays with no room, and who is booked (the
+    Sponsorship board and the Book a sponsorship window)."""
+    from app.services.sponsor_room import slot_room
+
+    station = await _get_or_404(db, Station, station_id, "Station")
+    return await slot_room(db, station, days=days)
+
+
 class TimingDefaults(BaseModel):
     station_id: UUID
     on_the_hour: Literal["hard", "soft"]
