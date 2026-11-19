@@ -149,6 +149,66 @@ async def load_breaks(db: AsyncSession, station: Station, start: datetime, end: 
     ]
 
 
+# Rough length of a time check, weather or one sponsorship when working out where a
+# block's shiur starts inside it
+SHORT_ITEM_SECONDS = 30.0
+
+
+async def block_talk_windows(
+    db: AsyncSession, station: Station, start: datetime, end: datetime
+) -> list[tuple[datetime, datetime]]:
+    """When the shiurim and stories in the station's blocks will be on air (station
+    local), from the blocks themselves, queued or not. The queue alone misses a
+    block queued in the same pass as the sponsor breaks around it (a fresh fill, a
+    new day's Daf Yomi block): the simulator showed Main's 8 PM Daf with
+    sponsorships at 8:15, 8:30, 8:45 and 9:00 after PR 394."""
+    from app.services.long_items import LONG_FORM_MIN_SECONDS, LONG_FORM_TYPES, is_long_form
+
+    blocks = await load_blocks(db, station.id)
+    tz = station_tz(station.timezone)
+    assets: dict[str, Asset | None] = {}
+    pools: dict[tuple, float] = {}
+
+    async def item_length(item: dict) -> tuple[float, bool]:
+        kind = item.get("kind")
+        if kind == "asset":
+            key = str(item.get("asset_id"))
+            if key not in assets:
+                try:
+                    assets[key] = await db.get(Asset, uuid.UUID(key))
+                except (ValueError, TypeError):
+                    assets[key] = None
+            asset = assets[key]
+            if asset is None:
+                return 0.0, False
+            return float(asset.duration or 0), is_long_form(asset)
+        if kind == "category":
+            asset_type, category = item.get("asset_type"), item.get("category")
+            key = (asset_type, category)
+            if key not in pools:
+                stmt = select(func.max(Asset.duration)).where(Asset.asset_type == asset_type)
+                if category:
+                    stmt = stmt.where(in_category(category))
+                pools[key] = float((await db.execute(stmt)).scalar() or 0)
+            length = pools[key]
+            kind_long = (asset_type or "").strip().lower() in LONG_FORM_TYPES
+            return length, kind_long or length >= LONG_FORM_MIN_SECONDS
+        if kind == "sponsors":
+            return float(item.get("max_seconds") or item_places(item) * SHORT_ITEM_SECONDS), False
+        return SHORT_ITEM_SECONDS, False
+
+    windows: list[tuple[datetime, datetime]] = []
+    for occurrence in occurrences_between(blocks, tz, start, end):
+        offset = 0.0
+        for item in occurrence.block.items or []:
+            length, long_form = await item_length(item)
+            if long_form and length > 0:
+                begin = occurrence.at + timedelta(seconds=offset)
+                windows.append((begin.astimezone(tz), (begin + timedelta(seconds=length)).astimezone(tz)))
+            offset += length
+    return windows
+
+
 def hard_by(block: ProgramBlock, at: datetime) -> datetime | None:
     """For a soft block with a limit: when to stop waiting for the song."""
     if block.timing_mode == "soft" and block.latest_minutes:
@@ -472,6 +532,7 @@ class _SponsorGuard:
         talks = TALKS_BEFORE_REBUILD.get()
         if talks is None:
             talks = await talk_windows(db, station, station_tz(station.timezone), now)
+        talks = list(talks) + await block_talk_windows(db, station, now - timedelta(hours=2), now + timedelta(days=3))
         near: dict[str, list[datetime]] = {}
         queued = await db.execute(
             select(QueueEntry.asset_id, QueueEntry.preempt_at, QueueEntry.started_at, QueueEntry.status).where(
