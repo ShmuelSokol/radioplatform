@@ -1077,6 +1077,14 @@ class SchedulerEngine:
             logger.warning("Shabbos ending failed for station %s", station.id, exc_info=True)
             await _safe_rollback(db)
         if is_blacked_out:
+            # Just before it ends, the songs after it are drawn again from the real end
+            # time, so the block starting then (Motzei Shabbos) starts with its first step
+            try:
+                from app.services.schedule_refresh_service import redraw_before_blackout_end
+                await redraw_before_blackout_end(db, station, now)
+            except Exception:
+                logger.warning("Redraw before the blackout ends failed for station %s", station.id, exc_info=True)
+                await _safe_rollback(db)
             # Let normal queue advancement handle the silence entries
             return
 

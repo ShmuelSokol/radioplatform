@@ -223,6 +223,58 @@ async def realign_before_block_change(
     return True
 
 
+# station id -> the blackout end the songs after it were last redrawn for
+_blackout_redrawn: dict[str, str] = {}
+
+
+async def redraw_before_blackout_end(db: AsyncSession, station: Station, now: datetime) -> bool:
+    """Shortly before Shabbos or Yom Tov ends, draw the songs after it again.
+
+    The queue is not topped up during a blackout, so the redraw a block gets 15
+    minutes before it starts (`realign_before_block_change`) never runs for the
+    block that begins as the station comes back (Motzei Shabbos, sunset + 72 min).
+    The songs waiting then were drawn a day or more earlier, and songs drawn for
+    before the blackout that did not air were still ahead of them. Once per
+    blackout, REALIGN_WINDOW before its end: every unplayed automatic song is
+    replaced from the real end time, so the first song back is the first step of
+    the block that starts then. New songs go after the silences (positions after
+    them), which the blackout's own clean-up leaves alone. Returns True when it ran.
+    """
+    from app.models.holiday_window import HolidayWindow
+    from app.services.station_service import window_covers_station
+
+    windows = (
+        await db.execute(
+            select(HolidayWindow).where(
+                HolidayWindow.is_blackout.is_(True),
+                HolidayWindow.start_datetime <= now,
+                HolidayWindow.end_datetime > now,
+                HolidayWindow.end_datetime <= now + REALIGN_WINDOW,
+            )
+        )
+    ).scalars().all()
+    window = next((w for w in windows if window_covers_station(w, station.id)), None)
+    if window is None:
+        return False
+    key = f"{window.id}@{window.end_datetime:%Y-%m-%dT%H:%M}"
+    if _blackout_redrawn.get(str(station.id)) == key:
+        return False
+    _blackout_redrawn[str(station.id)] = key
+    if not await uses_block_playlists(db, station.id):
+        return False
+    from app.services.queue_replenish_service import QueueReplenishService
+
+    service = QueueReplenishService(db, station.id)
+    service.replace_all = True
+    service.keep_next = 0  # nothing is on air but silence: every waiting song is redrawn
+    await service.replenish()
+    logger.info(
+        "Station %s: songs after the blackout ending %s drawn again (%d replaced)",
+        station.id, window.end_datetime.isoformat(), service.replaced,
+    )
+    return True
+
+
 async def refresh_station(db: AsyncSession, station_id, *, had_playlists: bool = False) -> int:
     """Regenerate the automatic part of the queue after a schedule change.
 
