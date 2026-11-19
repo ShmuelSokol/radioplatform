@@ -23,6 +23,7 @@ from app.models.station import Station
 from app.models.user import User, UserRole
 from app.services.station_modes import set_modes
 from tests.conftest import TestSessionLocal
+from tests.timing import limit
 
 MANY = 80
 
@@ -121,7 +122,7 @@ async def test_every_station_spot_schedule_save_answers_at_once(client, auth_hea
     took = time.perf_counter() - started
     assert r.status_code == 201, r.text
     assert calls.at_commit == 0, "no station is re-planned inside the save"
-    assert took < 1.0, f"save took {took:.2f} s"
+    assert took < limit(1.0), f"save took {took:.2f} s"
     schedule_id = r.json()["id"]
 
     await spot_api.wait_for_background()
@@ -272,7 +273,7 @@ async def test_station_less_end_date_with_many_stations_answers_at_once(
                            json={"end_date": later.isoformat()}, headers=auth_headers)
     took = time.perf_counter() - started
     assert r.status_code == 200, r.text
-    assert calls.at_commit == 0 and took < 1.0, f"took {took:.2f} s"
+    assert calls.at_commit == 0 and took < limit(1.0), f"took {took:.2f} s"
     await spot_api.wait_for_background()
     assert len(calls) == MANY
     tomorrow = datetime.combine(date.today() + timedelta(days=1), datetime.min.time(), UTC)
