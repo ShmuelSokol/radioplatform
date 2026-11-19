@@ -2937,9 +2937,17 @@ async def sc_engine_rows(h: Harness) -> None:
     log(f"    empty answers after Next: {len(early)} asks in the first 3 s, {len(late)} from 20 to 30 s")
     h.print_timeline(h.heard(t0, time.time() - 1), t0)
     blog = backend_log()
-    h.check(name, "Engine started -> entry=- lane=emergency" in blog
-            and f"Alert created: [critical] {EMERGENCY_ALERT_TITLE}" in blog,
-            "F-ENGINE2-10 the emergency files were reported (no entry, lane emergency) and raised the alert")
+    from sqlalchemy import select
+
+    from app.db.engine import async_session_factory
+    from app.models.alert import Alert
+
+    async with async_session_factory() as db:
+        kept = (await db.execute(select(Alert).where(
+            Alert.title == EMERGENCY_ALERT_TITLE, Alert.station_id == STATION_ID))).scalars().all()
+    # Read from the alerts table: the row used to be rolled back after the log line (fixed 2026-11-19)
+    h.check(name, "Engine started -> entry=- lane=emergency" in blog and len(kept) >= 1,
+            f"F-ENGINE2-10 the emergency files were reported (no entry, lane emergency) and raised the alert ({len(kept)} row(s))")
     h.check(name, len(early) <= 6, f"V1-12h asks while Next waits stay slow ({len(early)} asks in 3 s)")
     h.check(name, len(late) <= 7, f"V1-3 on emergency music a 204 is asked again every 2 s ({len(late)} asks in 10 s)")
     gap, _ = longest_silence(h.heard(t0 + 20, time.time() - 1))

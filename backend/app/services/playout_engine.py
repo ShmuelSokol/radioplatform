@@ -1371,6 +1371,9 @@ async def _emergency_alert_later(station_id, spell: int) -> None:
 
         async with async_session_factory() as own:
             await _emergency_alert(own, station_id, state)
+            # create_alert only flushes: without this the row was rolled back when the
+            # session closed (seen in the log, gone from the alerts table, harness 2026-11-19)
+            await own.commit()
     except Exception as e:
         logger.warning("Could not raise the emergency alert: %s", e)
 

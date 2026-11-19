@@ -1726,6 +1726,28 @@ async def test_a_moment_of_emergency_music_raises_no_alert(client, db_session, e
 
 
 @pytest.mark.asyncio
+async def test_the_emergency_music_alert_is_kept(client, db_session, eng, monkeypatch):
+    """Harness engine_rows 2026-11-19: the alert for lasting emergency music was logged
+    and then gone from the alerts table about 25 s later: its own session only flushed
+    it, so closing the session rolled it back."""
+    import asyncio
+
+    import app.db.session as db_session_module
+    from app.models.alert import Alert
+    from tests.conftest import TestSessionLocal
+
+    station, _, _, _ = eng
+    monkeypatch.setattr(db_session_module, "async_session_factory", TestSessionLocal)
+    monkeypatch.setattr(playout_engine, "EMERGENCY_ALERT_AFTER", 0.05)
+    await _on_air(client, station, "", lane="emergency")
+    await asyncio.sleep(0.4)
+    async with TestSessionLocal() as other:
+        rows = (await other.execute(select(Alert).where(
+            Alert.title == playout_engine.EMERGENCY_ALERT_TITLE))).scalars().all()
+    assert len(rows) == 1 and not rows[0].is_resolved
+
+
+@pytest.mark.asyncio
 async def test_a_timed_item_still_loading_counts_as_taken_only_when_asked(monkeypatch):
     """Next sends its item down the timed lane and the engine answers once the file is
     loaded. No answer in time means "still loading", not "refused": a skip then would end
