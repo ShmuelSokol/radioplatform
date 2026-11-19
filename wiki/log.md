@@ -415,6 +415,7 @@ UPDATE 2026-11-18 daf-yomi-intro.md speech check uses whisper_prompt() (all mase
 UPDATE 2026-11-18 spot-schedules.md spread sponsorships skip soft breaks inside a timed shiur/story (talk_windows); hard :00/:30 breaks stay usable
 UPDATE 2026-11-18 spot-schedules.md a break next to the same sponsor's play counts one fuller (no back-to-back sponsor; levelling may be off by one)
 INGEST 2026-11-18 live-shows.md End Show right after GO LIVE: take-over landed after End, stale-show check waited for ever on an open delay; it now stops it
+INGEST 2026-11-19 live-shows.md one station, one show: start answers 409 and the audio socket closes 4010 while another show is live there
 INGEST 2026-11-18 deploys.md deploy gate: CI's last job on main waits while a live show is on air and around :00/:30; needs Railway Wait for CI; [deploy-now] skips it
 UPDATE 2026-11-19 spot-schedules.md a block rebuild reads talk windows before deleting the queued shiur (TALKS_BEFORE_REBUILD), so it no longer queues sponsorships inside it
 UPDATE 2026-11-19 spot-schedules.md sponsorships avoid hard breaks inside a shiur too (talk_tier: outside, then hard inside, then soft inside)
@@ -422,5 +423,4 @@ UPDATE 2026-11-19 playlist-generation.md station IDs: generic "any jingle" picks
 UPDATE 2026-11-19 spot-schedules.md rebuild-steering test checks only dayparts not yet begun (late in a daypart a shiur break is the right overflow; the test failed on main at 7:47 PM ET)
 INGEST 2026-11-19 engine-harness.md harness engine_rows (checklist rows V1-3/12/12h/14/16, F-ENGINE2-10/11): proxy counts /next asks (stack.next_asks) and can answer 204 (next_empty); found a 204 while a song plays is asked ~25/s (retry_delay only holds for errors and on emergency music); emergency folder needs chmod 777 in the harness (engine runs as nobody); frontend/e2e/live-stream-unit.mjs runs liveStream.ts in Node with a fake audio element
 UPDATE 2026-11-19 spot-schedules.md never a sponsorship inside a shiur or one sponsor within 20 min (rules, not preferences); paused shiur (resume@ entry) is a talk window; _SponsorGuard last check before queueing block sponsorships
-INGEST 2026-11-19 live-shows.md one station, one show: start answers 409 and the audio socket closes 4010 while another show is live there
 INGEST 2026-11-19 spot-schedules.md contract totals (plays a day, days and plays over the dates, spot length) in Edit contract, client contract rows and Spot Schedule: components/sponsors/contractTotals.ts
