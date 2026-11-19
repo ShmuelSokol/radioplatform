@@ -103,3 +103,8 @@ Two mistakes of the stand-in found on the first run, both fixed:
 Check added: "weather report is today's, never drawn as filler" (a weather clip airs only
 on its own local date, in a timed place or block).
 
+
+The "paused shiur" check counts resume entries against pauses, not per item: the Daf Yomi
+airs every night and is paused at the same second each night, so a run over several days
+has one `resume@N` entry per night for the same shiur. Counting them per item reported
+"2 resume entries" on Main's Shabbos/Yom Kippur run (2026-11-19) where each night had one.
