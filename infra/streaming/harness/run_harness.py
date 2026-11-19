@@ -125,6 +125,10 @@ class Stack:
         # The host's show is heard: the proxy serves live.mp3 (a 1200 Hz tone in real time)
         # instead of the backend's 204
         self.live_audio = False
+        # When the engine asked for its next item (GET .../next), and true = answer it 204
+        # (the backend has nothing for it) while every other call goes through
+        self.next_asks: list[float] = []
+        self.next_empty = False
 
     # audio files
     def make_audio(self) -> None:
@@ -299,6 +303,12 @@ class Stack:
                 if method == "GET" and self.path.split("?")[0].endswith("/live.mp3"):
                     return self._live_mp3()
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0)) if method != "GET" else None
+                if method == "GET" and self.path.split("?")[0].endswith("/next"):
+                    stack.next_asks.append(time.time())
+                    if stack.next_empty and not stack.backend_down:
+                        self.send_response(204)
+                        self.end_headers()
+                        return
                 if stack.backend_down:
                     data = b"backend down (harness)"
                     self.send_response(502)
@@ -487,6 +497,8 @@ class Stack:
         })
         self.hls.mkdir(exist_ok=True)
         os.chmod(self.hls, 0o777)  # the engine runs as another user here
+        # and copies aired songs into its emergency folder (keep_for_emergency)
+        os.chmod(self.dir / "emergency", 0o777)
         out = open(self.dir / "engine.log", "a")
         cmd = ["liquidsoap", str(RADIO_LIQ)]
         if os.geteuid() == 0:  # Liquidsoap refuses to run as root
@@ -2780,6 +2792,130 @@ async def sc_backend_unreachable(h: Harness) -> None:
             f"the site shows what started after the return ({st.asset.title if st else None})")
 
 
+def _control_raw(path: str, data: bytes, token: str = TOKEN, method: str = "POST") -> tuple[int, bytes]:
+    """A call to the engine's control port with exactly this body (or none)."""
+    req = urllib.request.Request(f"http://127.0.0.1:{CONTROL_PORT}{path}", method=method,
+                                 data=data if method == "POST" else None,
+                                 headers={"X-Playout-Token": token, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+    except Exception as e:
+        return -1, str(e).encode()
+
+
+async def sc_engine_rows(h: Harness) -> None:
+    """Checklist rows V1-3, V1-12, V1-12h, V1-14, V1-16, F-ENGINE2-10, F-ENGINE2-11 (2026-11-19):
+    the emergency folder fills itself with aired songs; the control port answers 403 JSON
+    to a wrong token and only takes POST; /skip with fade 0, with {} and with a body that
+    is not JSON; an empty answer from the backend puts the emergency files on air and the
+    backend raises its alert; how often the engine asks while it has nothing (after a
+    flush, and with the backend down); the return once the backend answers again."""
+    from app.services.playout_engine import EMERGENCY_ALERT_TITLE
+
+    def backend_log() -> str:
+        # The backend's own log: the alert row itself was gone again from the table within
+        # 25 s in the 2026-11-19 runs (something else removes it), so the log is the record
+        return (h.stack.dir / "backend.log").read_text(errors="replace")
+
+    name = "engine_rows"
+    await wait_music(h)
+    await asyncio.sleep(10)
+    emerg = h.stack.dir / "emergency"
+    files = sorted(p.name for p in emerg.iterdir())
+    h.check(name, 2 <= len(files) <= 41 and not any(f.endswith(".part") for f in files),
+            f"F-ENGINE2-11 emergency folder holds copies of aired songs, no .part left: {files}")
+
+    # V1-16: wrong token -> 403 with a JSON body; GET is not served even with the right token
+    code, body = _control_raw("/status", b"{}", token="wrong")
+    try:
+        parsed = json.loads(body or b"null")
+    except ValueError:
+        parsed = None
+    h.check(name, code == 403 and parsed == {"ok": False, "error": "forbidden"},
+            f"V1-16 wrong token -> {code} {body[:60]!r}")
+    code, body = _control_raw("/status", b"", method="GET")
+    h.check(name, code != 200, f"V1-16 GET /status with the right token is not served -> {code}")
+
+    # V1-12: skips with fade 0, {} (default fade), no body, a body that is not JSON
+    await h.queue([("song5", {}), ("song6", {}), ("song1", {}), ("song2", {}), ("song3", {})])
+    await asyncio.sleep(6)
+    results = {}
+    for label, data in (("fade0", b'{"fade":0}'), ("empty_json", b"{}"), ("no_body", b""),
+                        ("not_json", b"not json")):
+        before = await h.on_air()
+        pressed = time.time()
+        code, body = _control_raw("/skip", data)
+        await asyncio.sleep(5)
+        after = await h.on_air()
+        line = timeline(h.heard(pressed - 1, pressed + 4))
+        changed = bool(before and after and before.id != after.id)
+        change_at = next((round(t - pressed, 2) for t, _n in line[1:]), None)
+        results[label] = (code, changed, change_at)
+        log(f"    skip {label}: answered {code} {body[:60]!r}, song changed {changed}, heard change {change_at}")
+        await asyncio.sleep(2)
+    c, ch, at0 = results["fade0"]
+    h.check(name, c == 200 and ch and at0 is not None and at0 <= 1.5, f"V1-12 /skip fade 0 cuts: {results['fade0']}")
+    c, ch, _ = results["empty_json"]
+    h.check(name, c == 200 and ch, f"V1-12 /skip {{}} uses the default fade and skips: {results['empty_json']}")
+    code, _ = _control_raw("/status", b"{}")
+    h.check(name, code == 200, f"V1-12 engine still answers /status after a malformed /skip -> {code}")
+    log(f"    (no body: {results['no_body']}; not JSON: {results['not_json']})")
+    gap, _ = longest_silence(h.heard(time.time() - 30, time.time() - 1))
+    h.check(name, gap <= 1.0, f"V1-12 no silence over the four skips ({gap:.1f} s)")
+
+    # The backend has nothing (204): emergency music, its alert, how often the engine asks
+    # 204 while a song plays: the pre-load is asked for again every 2 s
+    h.stack.next_empty = True
+    ta = time.time()
+    _control_raw("/flush", b"{}")
+    await asyncio.sleep(10)
+    quiet = [t for t in h.stack.next_asks if ta + 1 <= t < ta + 9]
+    h.check(name, len(quiet) <= 6, f"V1-3 a 204 is asked again every 2 s ({len(quiet)} asks in 8 s)")
+    # Next with nothing to hand out: Next waits for a file (12 s), the hold (6 s), then
+    # the emergency files; how often it asks meanwhile; the backend's alert
+    t0 = time.time()
+    _control_raw("/skip", b'{"fade":0}')
+    await asyncio.sleep(32)
+    asks = [t for t in h.stack.next_asks if t >= t0]
+    early = [t for t in asks if t < t0 + 3]
+    late = [t for t in asks if t0 + 20 <= t < t0 + 30]
+    log(f"    empty answers after Next: {len(early)} asks in the first 3 s, {len(late)} from 20 to 30 s")
+    h.print_timeline(h.heard(t0, time.time() - 1), t0)
+    blog = backend_log()
+    h.check(name, "Engine started -> entry=- lane=emergency" in blog
+            and f"Alert created: [critical] {EMERGENCY_ALERT_TITLE}" in blog,
+            "F-ENGINE2-10 the emergency files were reported (no entry, lane emergency) and raised the alert")
+    h.check(name, len(early) <= 6, f"V1-12h asks while Next waits stay slow ({len(early)} asks in 3 s)")
+    h.check(name, len(late) <= 7, f"V1-3 on emergency music a 204 is asked again every 2 s ({len(late)} asks in 10 s)")
+    gap, _ = longest_silence(h.heard(t0 + 20, time.time() - 1))
+    h.check(name, gap <= 1.0, f"F-ENGINE2-11 emergency music, no silence, once the hold is over ({gap:.1f} s)")
+
+    # The backend down (502): asked again every 2 s; back again: the queue returns by itself
+    h.stack.next_empty = False
+    h.stack.backend_down = True
+    t1 = time.time()
+    try:
+        _control_raw("/flush", b"{}")
+        await asyncio.sleep(12)
+    finally:
+        h.stack.backend_down = False
+    down = [t for t in h.stack.next_asks if t1 + 1 <= t < t1 + 11]
+    h.check(name, 3 <= len(down) <= 7, f"V1-3 backend down: asked {len(down)} times in 10 s (every 2 s)")
+    back = time.time()
+    await asyncio.sleep(15)
+    st = await h.on_air()
+    tl = [n for _, n in timeline(h.heard(time.time() - 5, time.time() - 1))]
+    title = (st.asset.title or "").split(" ")[0] if st and st.asset else None
+    h.check(name, st is not None and st.started_at is not None and st.started_at.timestamp() >= back - 1
+            and bool(tl) and tl[-1] == title,
+            f"V1-14 back on the queue after the outage, the site matches what is heard: {title} / {tl}")
+    gap, _ = longest_silence(h.heard(t1, time.time() - 1))
+    h.check(name, gap <= 1.0, f"no silence through the outage and return ({gap:.1f} s)")
+
+
 async def sc_local_box_commands(h: Harness) -> None:
     """The local FM box has no inbound line (needs --local-box; the backend's engine
     address leads nowhere): Next and Play Now from the site still act at once, carried
@@ -4425,6 +4561,7 @@ SCENARIOS = {
     "local_box_power_loss": sc_local_box_power_loss,
     "local_box_sound_card": sc_local_box_sound_card,
     "control_endpoints": sc_control_endpoints,
+    "engine_rows": sc_engine_rows,
     "slow_timed_file": sc_slow_timed_file,
     "queue_change_drops_preloaded": sc_queue_change_drops_preloaded,
     "resume_position": sc_resume_position,

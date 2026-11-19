@@ -578,6 +578,9 @@ cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs
 # Many stations x many listeners: does everyone switch songs together? (see wiki/multi-station-load.md)
 cd backend && KBR_ADMIN_EMAIL=... KBR_ADMIN_PASSWORD=... uv run python loadtests/multi_station.py --base http://localhost:8000 --listeners 150
 
+# Simulate whole broadcast days fast (virtual clock, fake engine, real scheduling code; see wiki/station-simulator.md)
+cd backend && uv run python -m tests.sim.run --export tests/sim/fixtures/stations-2026-11-19.json --start 2026-11-19T00:00 --hours 24 --stations main
+
 # Run the real playout engine locally against the backend, with timing scenarios (see wiki/engine-harness.md)
 cd backend && uv run python ../infra/streaming/harness/run_harness.py
 
