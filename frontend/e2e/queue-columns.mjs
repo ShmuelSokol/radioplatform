@@ -41,7 +41,10 @@ function station(sid) {
   s.assets.push({ id: 'chan', title: 'Mi Yimalel (Chanukah)', artist: 'Avraham Fried', album: null, duration: 200, asset_type: 'music', category: 'holiday' });
   s.assets.push({ id: 'sid1', title: "You're listening to Kol B'ramah", artist: null, album: null, duration: 8, asset_type: 'jingle', category: 'station_id' });
   s.assets.push({ id: 'spx', title: 'TEST SPONSOR 14', artist: null, album: null, duration: 30, asset_type: 'spot', category: 'test', sponsor_id: 'sp14' });
-  for (const a of s.assets.slice(-3)) s.byId[a.id] = a;
+  // As the server names its own clips (weather_spot_service): found live on Jerusalem 2026-11-19
+  s.assets.push({ id: 'ta', title: 'Time Announcement - 20:30 (Jerusalem)', artist: null, album: null, duration: 6, asset_type: 'jingle', category: 'time_announcement' });
+  s.assets.push({ id: 'ws', title: 'Weather Report - 2026-11-19', artist: null, album: null, duration: 40, asset_type: 'spot', category: 'weather_spot' });
+  for (const a of s.assets.slice(-5)) s.byId[a.id] = a;
   const pl = PLAYLIST[sid];
   let pos = 0;
   const add = (asset_id, extra = {}) => s.add({ asset_id, position: ++pos, source: 'auto', ...extra });
@@ -57,6 +60,9 @@ function station(sid) {
   add('m5', { source: 'request' });
   add('chan', { block_id: blk, holiday: 'Chanukah' });
   add('m6', { block_id: pl ? 'b-gone' : undefined });     // block deleted since
+  const at2 = new Date(Date.now() + 40 * 60_000).toISOString();
+  add('ta', { preempt_at: at2, hard_timed: true });       // the server's own time clip
+  add('ws', { preempt_at: at2, hard_timed: true });       // the server's own weather
   for (let i = 7; i <= 50; i++) add(`m${i}`, { block_id: blk });
   s.schedules = pl ? [{ id: 'sch1', station_id: sid, name: 'Weekday', is_active: true, priority: 1, blocks: [
     { id: 'b-day', schedule_id: 'sch1', name: 'Daytime music', start_time: '06:00:00', end_time: '22:00:00', recurrence_type: 'daily', priority: 1, playback_mode: 'shuffle', playlist_template_id: 'tpl-' + sid },
@@ -127,7 +133,7 @@ const geometry = (page, id, scope = 'queue') => page.evaluate(([id, scope]) => {
 const lined = (g) => !!g.head && g.cells.length > 0 && g.cells.every((c) => Math.abs(c.x - g.head.x) <= 1 && Math.abs(c.w - g.head.w) <= 1);
 const fromTexts = (page) => page.evaluate(() => [...document.querySelectorAll('[data-testid=queue-row]')].slice(0, 12).map((r) => ({
   title: r.querySelector('[data-testid=row-title]')?.textContent ?? '',
-  from: r.querySelector('[data-testid=row-from]')?.textContent ?? null,
+  from: r.querySelector('[data-testid=row-from]')?.textContent?.replace(/›$/, '') ?? null,
 })));
 
 async function borderDrag(page, id, dx, scope = 'queue') {
@@ -171,6 +177,8 @@ async function desktop(browser, size, sid) {
   check(`${tag}: the station ID says Station ID`, want('listening to') === 'Station ID', String(want('listening to')));
   check(`${tag}: the request says Song request`, want('Song number 5') === 'Song request', String(want('Song number 5')));
   check(`${tag}: the holiday song names its list`, (want('Mi Yimalel') ?? '').includes('Chanukah'), String(want('Mi Yimalel')));
+  check(`${tag}: the server's time clip says Time check`, want('Time Announcement') === 'Time check', String(want('Time Announcement')));
+  check(`${tag}: the server's weather says Weather`, want('Weather Report') === 'Weather', String(want('Weather Report')));
   check(`${tag}: a song of a deleted block says so`, want('Song number 6') === (pl ? 'Removed block' : 'Station rules'), String(want('Song number 6')));
   const typeCell = await page.locator('[data-testid=queue-row]').nth(1).getByTestId('row-type').textContent();
   check(`${tag}: Song type shows the category`, typeCell === 'top_hits', typeCell);
@@ -209,6 +217,16 @@ async function desktop(browser, size, sid) {
   await page.keyboard.press('Escape');
   await sleep(200);
   check(`${tag}: Esc closes Why`, (await page.getByTestId('why-panel').count()) === 0);
+
+  // The time clip's Why speaks of the break, not of playlists; reached from the row's Why button
+  const taRow = page.locator('[data-testid=queue-row]').filter({ hasText: 'Time Announcement' }).first();
+  await taRow.hover();
+  await taRow.getByTestId('row-why').click();
+  const taTitle = await page.getByTestId('why-panel').getByTestId('why-title').textContent().catch(() => '');
+  const taLines = (await page.getByTestId('why-panel').getByTestId('why-line').allTextContents().catch(() => [])).join(' ');
+  check(`${tag}: hovering a row shows a Why button that opens the panel`, !!taTitle);
+  check(`${tag}: a time check's Why names the time check and the break settings`, taTitle === 'The time check on the hour (or half hour)' && /break settings/.test(taLines) && !/playlist was on/.test(taLines), `${taTitle} | ${taLines}`);
+  await page.keyboard.press('Escape');
 
   // The sponsorship's Why offers the Sponsor panel
   await page.locator('[data-testid=queue-row]').filter({ hasText: 'TEST SPONSOR 14' }).getByTestId('row-from').click();

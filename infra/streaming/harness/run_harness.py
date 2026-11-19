@@ -2769,6 +2769,43 @@ async def sc_three_item_group(h: Harness) -> None:
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
 
 
+async def sc_no_false_emergency_report(h: Harness) -> None:
+    """Main 10:30:37Z 2026-11-19: right after the first song following a timed group
+    started, the engine also reported "emergency" (its emergency playlist reloading as a
+    song was copied into its folder). The song came back as "not a new start", so the
+    site showed nothing on air for the whole song and raised false alerts. Here: a timed
+    group, then song changes. The backend never hears "emergency" while music plays, and
+    the site shows a song on air all along."""
+    name = "no_false_emergency_report"
+    await wait_music(h)
+    cut = await h.on_air()
+    await h.clear_pending()
+    await h.queue([(n, {}) for n in ("song1", "song2", "song3", "song4", "song5", "song6")
+                   if not cut or h.assets[n] != cut.asset_id][:4])
+    log_path = h.stack.dir / "backend.log"
+    offset = log_path.stat().st_size
+    t1 = at(15)
+    await h.queue([(n, {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}) for n in ("time", "weather")])
+    await asyncio.sleep(max(0, t1.timestamp() - time.time()) + 6 + 8)
+    # From the end of the group on: the site shows something on air every second
+    empty = 0
+    for _ in range(40):
+        cur = await h.on_air()
+        if cur is None:
+            empty += 1
+        await asyncio.sleep(1)
+    with open(log_path, errors="replace") as f:
+        f.seek(offset)
+        blog = f.read()
+    false = [ln for ln in blog.splitlines() if "lane=emergency" in ln]
+    heard = h.heard(t1.timestamp() - 3, time.time() - 1)
+    h.print_timeline(heard, t1.timestamp())
+    names = [n for _, n in timeline(heard)]
+    h.check(name, "EMERGENCY" not in names, f"no emergency music on the stream: {names}")
+    h.check(name, not false, f"no emergency start report while music plays: {false[:3]}")
+    h.check(name, empty == 0, f"the site showed an item on air the whole time ({empty} s with none)")
+
+
 async def sc_two_groups(h: Harness, apart: float) -> None:
     """V1-10: two hard groups `apart` seconds apart (0.3 s: one take-over; 1 s: two in
     order). Either way both items air once, in order, the first on its second."""
@@ -4711,6 +4748,7 @@ SCENARIOS = {
     "slow_backend_no_gap": sc_slow_backend_no_gap,
     "next_while_held": sc_next_while_held,
     "three_item_timed_group": sc_three_item_group,
+    "no_false_emergency_report": sc_no_false_emergency_report,
     "two_groups_0.3s_apart": lambda h: sc_two_groups(h, 0.3),
     "two_groups_1s_apart": lambda h: sc_two_groups(h, 1.0),
     "two_groups_20s_apart": lambda h: sc_two_groups(h, 20.0),

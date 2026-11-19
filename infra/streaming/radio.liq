@@ -511,7 +511,10 @@ def schedule_timed(~uri, ~at) =
 end
 
 # ── Emergency lane: local files, then silence as the very last resort ────────
-emergency = playlist(id="emergency", mode="randomize", reload_mode="watch", emergency_dir)
+# Re-read every 10 minutes, not on every change to the folder: a song is copied into it
+# at each start (keep_for_emergency) and watching reloaded the playlist 4 times per song
+# on a 1 vCPU box, each reload showing as a new emergency track for an instant.
+emergency = playlist(id="emergency", mode="randomize", reload_mode="seconds", reload=600, emergency_dir)
 emergency = mksafe(emergency)
 
 # ── Hold lane: a moment of quiet just before a hard timed item ───────────────
@@ -933,6 +936,9 @@ def keep_for_emergency(played, asset) =
 end
 
 
+# An emergency-lane start waits this long before it is reported (see send_started)
+emergency_confirm = 1.5
+emergency_seq = ref(0)
 def send_started(m) =
   entry = m["kbr_entry"]
   # No entry: an emergency file, or the quiet held just before a hard timed item
@@ -1025,7 +1031,28 @@ def send_started(m) =
       live_release := 0.
       start_quiet_until := 0.
     end
-    report_to_backend(entry, lane, m["title"])
+    if lane == "emergency" then
+      # Reported only if the emergency music is still on air a moment later, with the
+      # music and timed lanes still empty. The emergency playlist reloading (a song
+      # copied into its folder at each start) showed as an emergency track for an
+      # instant right after a song started: the backend was told "emergency", the song
+      # came back as "not a new start", and the site showed nothing on air for the whole
+      # song with false alerts (Main 10:30:37Z and 16:30Z 2026-11-19).
+      seq = emergency_seq() + 1
+      emergency_seq := seq
+      title = m["title"]
+      def confirm() =
+        if emergency_seq() == seq and on_air_lane() == "emergency" and not main.is_ready() and not timed.is_ready() then
+          report_to_backend("", "emergency", title)
+        else
+          log.important("started: a moment of the emergency lane, the music is back; not reported")
+        end
+      end
+      thread.run(delay=emergency_confirm, confirm)
+    else
+      emergency_seq := emergency_seq() + 1
+      report_to_backend(entry, lane, m["title"])
+    end
     if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"], m["kbr_asset"]) end
   end
 end

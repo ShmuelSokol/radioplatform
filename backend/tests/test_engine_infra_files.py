@@ -114,9 +114,9 @@ def test_timed_dedupe_and_start_report_dedupe():
 
 
 def test_emergency_lane_and_debug_wav():
-    """V1-18/V1-19: emergency dir watched and randomized, mksafe; WAV only when KBR_DEBUG_WAV set."""
+    """V1-18/V1-19: emergency dir re-read every 10 min and randomized, mksafe; WAV only when KBR_DEBUG_WAV set."""
     liq = _liq()
-    assert 'playlist(id="emergency", mode="randomize", reload_mode="watch", emergency_dir)' in liq
+    assert 'playlist(id="emergency", mode="randomize", reload_mode="seconds", reload=600, emergency_dir)' in liq
     assert "mksafe(emergency)" in liq
     assert 'if debug_wav != "" then' in liq
 
