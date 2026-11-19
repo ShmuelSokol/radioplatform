@@ -183,7 +183,7 @@ async def test_no_id_after_a_sponsorship_that_waited_for_a_story(db_session: Asy
 
 
 @pytest.mark.asyncio
-async def test_queue_tidy_drops_ids_next_to_breaks_and_keeps_clear_ones(db_session: AsyncSession):
+async def test_queue_tidy_moves_ids_away_from_breaks_and_keeps_clear_ones(db_session: AsyncSession):
     """Main 2026-11-19: the queue showed an ID at 08:15:34 right after TEST SPONSOR 14
     and one at 07:57:45, 2.2 min before the 08:00 break. A waiting ID the queue's own
     timeline puts beside a break is taken out; one well clear stays."""
@@ -228,12 +228,22 @@ async def test_queue_tidy_drops_ids_next_to_breaks_and_keeps_clear_ones(db_sessi
     also_after = add(jingle)                              # after the song, so right after that break too
     await db_session.commit()
 
-    dropped = await station_id_guard.drop_misplaced(db_session, station.id, now)
+    song_ids = [e.id for e in songs]
+    ids = {k: e.id for k, e in (("clear", clear), ("after", after_break), ("near", near), ("also", also_after))}
+    station_id = station.id
+    dropped = await station_id_guard.drop_misplaced(db_session, station_id, now)
     await db_session.commit()
-    left = {e for (e,) in (await db_session.execute(
-        select(QueueEntry.id).where(QueueEntry.station_id == station.id))).all()}
-    assert clear.id in left
-    assert after_break.id not in left
-    assert near.id not in left
-    assert also_after.id not in left
+    db_session.expire_all()
+    rows = (await db_session.execute(
+        select(QueueEntry.id, QueueEntry.position).where(QueueEntry.station_id == station_id)
+        .order_by(QueueEntry.position))).all()
+    order = [r[0] for r in rows]
+    assert ids["clear"] in order
+    # moved one song later (2026-11-19: only removing them left a 55-minute gap on Main)
+    assert ids["after"] in order
+    assert order.index(ids["after"]) == order.index(song_ids[4]) + 1
+    assert order.index(ids["after"]) == order.index(song_ids[5]) - 1
+    # no room before the next ID's turn: removed
+    assert ids["near"] not in order
+    assert ids["also"] not in order
     assert dropped == 3
