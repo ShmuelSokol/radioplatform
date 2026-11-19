@@ -138,3 +138,17 @@ async def test_an_id_under_four_seconds_never_airs_or_gets_queued(db_session: As
     assert (await _pick_next_pending(db_session, station_id, datetime.now(UTC))).id == song_entry
     pool = await _Library(db_session, station_id, set()).pool("jingle", "station_id")
     assert pool and all(r.duration >= 4.0 for r in pool)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("break_started_minutes_ago,airs", [(2.0, False), (5.0, True)])
+async def test_a_short_song_after_a_break_is_not_enough(db_session: AsyncSession, break_started_minutes_ago, airs):
+    """Simulator: break at 17:01:16, a short song, then an ID at 17:04:03 (2.8 min)."""
+    station_id, id_entry, song_entry = await _setup(db_session, "song", None, song_left=10.0)
+    spot = (await db_session.execute(select(Asset).where(Asset.category == "sponsorship"))).scalars().first()
+    at = datetime.now(UTC) - timedelta(minutes=break_started_minutes_ago)
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=spot.id, position=0,
+                              status="played", source="block", timing_mode="soft", preempt_at=at, started_at=at))
+    await db_session.commit()
+    picked = await _pick_next_pending(db_session, station_id, datetime.now(UTC))
+    assert picked.id == (id_entry if airs else song_entry)

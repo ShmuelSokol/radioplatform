@@ -99,15 +99,32 @@ async def must_wait(db: AsyncSession, station_id, entry: QueueEntry, now: dateti
         return True
     length = float(getattr(entry.asset, "duration", None) or 10.0)
     margin = timedelta(minutes=settings.clear_minutes)
+    # Half a minute more than the setting ahead: the start is an estimate (the engine asks
+    # for the next item before the one now starting is reported), and the simulator
+    # found an ID 2 min 59.9 s before a :30 time check
+    ahead = margin + timedelta(seconds=30)
     due = (await db.execute(
         select(QueueEntry.id).where(
             QueueEntry.station_id == station_id,
             QueueEntry.status == "pending",
             QueueEntry.preempt_at.isnot(None),
-            QueueEntry.preempt_at < start + timedelta(seconds=length) + margin,
+            QueueEntry.preempt_at < start + timedelta(seconds=length) + ahead,
         ).limit(1)
     )).first()
-    return due is not None
+    if due is not None:
+        return True
+    # ... and behind: a break that went on air less than clear_minutes before (a short
+    # song between them is not enough; simulator: an ID 2.8 min after a soft break)
+    recent = (await db.execute(
+        select(QueueEntry.id).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status.in_(["playing", "played"]),
+            QueueEntry.preempt_at.isnot(None),
+            QueueEntry.started_at.isnot(None),
+            QueueEntry.started_at > start - margin,
+        ).limit(1)
+    )).first()
+    return recent is not None
 
 
 def pass_over(station_id, entry_id) -> None:
