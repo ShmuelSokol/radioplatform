@@ -453,6 +453,59 @@ async def reconcile_block_entries(
             TALKS_BEFORE_REBUILD.reset(talks_token)
 
 
+class _SponsorGuard:
+    """Last check before a sponsorship goes into the queue, whatever the plan says:
+    never inside a shiur, never the same spot within 20 minutes of itself (queued,
+    on air or just played). A plan made at one moment can disagree with one made a
+    minute later; on Main 2026-11-18 a new 8:45 occurrence took two sponsorships
+    that were still queued at 9:00, during a pause of the Daf Yomi."""
+
+    def __init__(self, talks, near):
+        self.talks = talks  # UTC windows
+        self.near = near  # asset id -> UTC times
+
+    @classmethod
+    async def load(cls, db: AsyncSession, station, now: datetime) -> "_SponsorGuard":
+        from app.models.play_log import PlayLog
+        from app.services.spot_schedule_service import NEIGHBOUR, TALKS_BEFORE_REBUILD, talk_windows
+
+        talks = TALKS_BEFORE_REBUILD.get()
+        if talks is None:
+            talks = await talk_windows(db, station, station_tz(station.timezone), now)
+        near: dict[str, list[datetime]] = {}
+        queued = await db.execute(
+            select(QueueEntry.asset_id, QueueEntry.preempt_at, QueueEntry.started_at, QueueEntry.status).where(
+                QueueEntry.station_id == station.id,
+                QueueEntry.status.in_(["pending", "playing"]),
+            )
+        )
+        for asset_id, at, started, status in queued.all():
+            when = started if status == "playing" else at
+            if when is not None:
+                near.setdefault(str(asset_id), []).append(as_utc(when))
+        played = await db.execute(
+            select(PlayLog.asset_id, PlayLog.start_utc).where(
+                PlayLog.station_id == station.id,
+                PlayLog.start_utc >= now - NEIGHBOUR,
+            )
+        )
+        for asset_id, start in played.all():
+            if start is not None:
+                near.setdefault(str(asset_id), []).append(as_utc(start))
+        return cls([(as_utc(a), as_utc(b)) for a, b in talks], near)
+
+    def allows(self, asset_id, at: datetime) -> bool:
+        from app.services.spot_schedule_service import NEIGHBOUR, TALK_TAIL
+
+        at = as_utc(at)
+        if any(start < at < end - TALK_TAIL for start, end in self.talks):
+            return False
+        return not any(abs(at - t) < NEIGHBOUR for t in self.near.get(str(asset_id), ()))
+
+    def took(self, asset_id, at: datetime) -> None:
+        self.near.setdefault(str(asset_id), []).append(as_utc(at))
+
+
 async def _reconcile_blocks(
     db: AsyncSession, station, station_id, blocks, pending, rebuild, now, earliest, removed, queued_at
 ) -> dict | None:
@@ -498,6 +551,7 @@ async def _reconcile_blocks(
 
     added = 0
     skipped: list[str] = []
+    guard = await _SponsorGuard.load(db, station, now)
     for occurrence in await plan_blocks(
         db, station, now=now, dry_run=False, blocks=blocks
     ):
@@ -507,6 +561,8 @@ async def _reconcile_blocks(
         skipped.extend(occurrence.problems)
         for item in occurrence.items:
             if item.asset_id is None:
+                continue
+            if item.kind == "sponsor" and not guard.allows(item.asset_id, at):
                 continue
             max_pos += 1
             db.add(
@@ -523,6 +579,8 @@ async def _reconcile_blocks(
                 )
             )
             added += 1
+            if item.kind == "sponsor":
+                guard.took(item.asset_id, at)
     await db.flush()
     if added or removed:
         logger.info("Program blocks for station %s: +%d -%d", station_id, added, removed)

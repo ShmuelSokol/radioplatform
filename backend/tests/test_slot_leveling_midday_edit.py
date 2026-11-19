@@ -57,10 +57,24 @@ def test_raised_plays_land_in_breaks_still_to_come():
     base = [_spot(f"s{i:02d}", "early_morning") for i in range(12)]
     before, _ = plan_spots(base, NY, DAY, 1, breaks=_breaks(6, 9))
     raised = [_spot(s.name, "early_morning", plays=3 if s.name == "s05" else 1) for s in base]
-    now = _now(7, 50)
+    now = _now(7, 20)
     after = _replan(before, raised, now)
     total = _aired_plus_planned(before, after, now)
     assert total["s05"] == 3, total
+    coming = sorted(p.local for p in after if p.local > now and p.schedule.name == "s05")
+    assert all((b - a).total_seconds() >= 20 * 60 for a, b in zip(coming, coming[1:])), coming
+
+
+def test_a_raise_too_late_to_fit_drops_plays_rather_than_air_them_back_to_back():
+    # at 7:50 only 8:00 to 8:45 are left: three plays 20 minutes apart do not fit
+    base = [_spot(f"s{i:02d}", "early_morning") for i in range(12)]
+    before, _ = plan_spots(base, NY, DAY, 1, breaks=_breaks(6, 9))
+    raised = [_spot(s.name, "early_morning", plays=3 if s.name == "s05" else 1) for s in base]
+    now = _now(7, 50)
+    after = _replan(before, raised, now)
+    coming = sorted(p.local for p in after if p.local > now and p.schedule.name == "s05")
+    assert len(coming) == 2
+    assert all((b - a).total_seconds() >= 20 * 60 for a, b in zip(coming, coming[1:])), coming
 
 
 def test_after_the_edit_the_coming_breaks_stay_level():
