@@ -13,7 +13,7 @@ import { useAlerts, useResolveAlert } from '../../../hooks/useAlerts';
 function PlayedAt({ iso, tz }: { iso: string; tz?: string }) {
   const { time, ampm } = clockTimeSec(iso, tz);
   return (
-    <span className="w-[80px] shrink-0 whitespace-nowrap tabular-nums text-xs text-gray-400" data-testid="played-at">
+    <span className="w-[80px] shrink-0 whitespace-nowrap tabular-nums text-xs text-[#c0c0c0]" data-testid="played-at">
       {time}<span className="ml-0.5 text-[10px]">{ampm}</span>
     </span>
   );
@@ -23,22 +23,22 @@ export const LogPanel = memo(function LogPanel({ stationId, stationTz }: { stati
   const { data } = usePlayLog(stationId, true);
   const logs: any[] = data?.logs ?? [];
   return (
-    <section className="h-full overflow-y-auto overscroll-contain bg-[#0a0a28]" aria-label="Recently played">
+    <section className="h-full overflow-y-auto overscroll-contain qn-log" aria-label="Recently played">
       {logs.map(log => (
-        <div key={log.id} className="flex items-center gap-2 px-3 min-h-[44px] border-b border-[#15153a]">
+        <div key={log.id} className="qn-row flex items-center gap-2 px-3 min-h-[44px] border-b border-[#222]">
           <PlayedAt iso={log.start_utc} tz={stationTz} />
           <span className="flex-1 min-w-0 leading-tight">
-            <span className="block truncate text-sm text-gray-100">{log.title ?? 'Unknown'}</span>
-            <span className="block truncate text-xs text-gray-400">
+            <span className="block truncate text-sm">{log.title ?? 'Unknown'}</span>
+            <span className="block truncate text-xs font-normal text-[#c0c0c0]">
               {log.artist ? `${log.artist} · ` : ''}
               <span className={typeStyle(log.asset_type).text}>{log.asset_type ?? ''}</span>
             </span>
           </span>
-          <span className="shrink-0 text-[11px] text-gray-500">{log.source}</span>
+          <span className="shrink-0 text-[11px] font-normal text-[#a0a0a0]">{log.source}</span>
         </div>
       ))}
       {logs.length === 0 && (
-        <div className="text-center text-gray-500 py-10 px-4 text-sm">Nothing has played yet.</div>
+        <div className="text-center text-[#c0c0c0] font-normal py-10 px-4 text-sm">Nothing has played yet.</div>
       )}
     </section>
   );
@@ -52,51 +52,51 @@ export const SchedulePanel = memo(function SchedulePanel({ stationId }: { statio
   const range = (b: { start_datetime: string; end_datetime: string }) =>
     `${new Date(b.start_datetime).toLocaleString()} to ${new Date(b.end_datetime).toLocaleString()}`;
   return (
-    <section className="h-full overflow-y-auto overscroll-contain bg-[#0a0a28] p-3 space-y-3" aria-label="Schedule status">
+    <section className="h-full overflow-y-auto overscroll-contain bg-[#c0c0c0] text-black p-3 space-y-3" aria-label="Schedule status">
       <div className="flex items-center gap-2">
         <input type="datetime-local" value={at} onChange={e => setAt(e.target.value)} aria-label="Check a time"
-          className="flex-1 min-w-0 h-10 bg-[#14143c] border border-[#3a3a7e] text-cyan-100 text-base lg:text-sm px-2 rounded-md focus:outline-none focus:border-cyan-400" />
+          className="qn-field flex-1 min-w-0 h-11 lg:h-8 text-base lg:text-sm px-2" />
         <button type="button" onClick={() => setAt('')}
-          className="h-10 px-3 rounded-md bg-white/10 hover:bg-white/20 text-sm font-semibold text-gray-100">Now</button>
+          className="qn-btn cr-tap h-11 lg:h-8 px-3 text-sm">Now</button>
       </div>
-      {isLoading && <div className="text-cyan-300 text-sm">Loading…</div>}
+      {isLoading && <div className="text-sm">Loading…</div>}
       {data && (
         <>
-          <div className={`rounded-lg border p-3 ${data.is_blacked_out ? 'bg-red-900/30 border-red-700' : 'bg-green-900/20 border-green-800'}`}>
-            <div className="text-[11px] uppercase tracking-wider text-gray-400">Blackout</div>
-            <div className={`text-base font-bold ${data.is_blacked_out ? 'text-red-300' : 'text-green-300'}`}>
+          <div className="bg-black qn-sunken px-2 py-1.5">
+            <div className="qn-lcd-label">Blackout</div>
+            <div className={`text-base font-bold ${data.is_blacked_out ? 'text-[#ff5050]' : 'text-[var(--qn-digit)]'}`}>
               {data.is_blacked_out ? 'Blacked out' : 'Clear to broadcast'}
             </div>
             {data.current_blackout && (
-              <div className="mt-1 text-sm text-red-200">{data.current_blackout.name}
-                <div className="text-xs text-red-300/70">{range(data.current_blackout)}</div>
+              <div className="mt-1 text-sm font-bold text-[var(--qn-yellow)]">{data.current_blackout.name}
+                <div className="text-xs font-normal text-white">{range(data.current_blackout)}</div>
               </div>
             )}
           </div>
-          <div className="rounded-lg border bg-[#14143c] border-[#3a3a7e] p-3">
-            <div className="text-[11px] uppercase tracking-wider text-gray-400">Schedule block</div>
+          <div className="bg-white qn-sunken p-2">
+            <div className="text-xs font-bold">Schedule block</div>
             {data.active_block ? (
               <>
-                <div className="text-base font-bold text-cyan-200">{data.active_block.name}</div>
-                <div className="text-sm text-gray-400">{data.active_block.schedule_name ?? ''}</div>
-                <div className="text-xs text-gray-500">
+                <div className="text-base font-bold text-[#000080]">{data.active_block.name}</div>
+                <div className="text-sm">{data.active_block.schedule_name ?? ''}</div>
+                <div className="text-xs">
                   {data.active_block.start_time} to {data.active_block.end_time} · {data.active_block.playback_mode}
                 </div>
               </>
-            ) : <div className="text-sm text-gray-500">No block is active</div>}
+            ) : <div className="text-sm">No block is active</div>}
           </div>
-          <div className="rounded-lg border bg-yellow-900/20 border-yellow-800/50 p-3">
-            <div className="text-[11px] uppercase tracking-wider text-gray-400">Next blackout</div>
+          <div className="bg-white qn-sunken p-2">
+            <div className="text-xs font-bold">Next blackout</div>
             {data.next_blackout ? (
               <>
-                <div className="text-base font-bold text-yellow-200">{data.next_blackout.name}</div>
-                <div className="text-xs text-yellow-300/70">{range(data.next_blackout)}</div>
+                <div className="text-base font-bold text-[#800000]">{data.next_blackout.name}</div>
+                <div className="text-xs">{range(data.next_blackout)}</div>
               </>
-            ) : <div className="text-sm text-gray-500">None scheduled</div>}
+            ) : <div className="text-sm">None scheduled</div>}
           </div>
         </>
       )}
-      <Link to="/admin/schedules" className="block text-sm text-cyan-300 hover:underline">Open schedules</Link>
+      <Link to="/admin/schedules" className="qn-btn cr-tap h-11 lg:h-8 px-3 text-sm flex items-center justify-center !no-underline !text-black">Open schedules</Link>
     </section>
   );
 });
@@ -147,73 +147,76 @@ export const LivePanel = memo(function LivePanel({ stationId, stationTz }: { sta
     : 'No time set';
 
   return (
-    <section className="h-full overflow-y-auto overscroll-contain bg-[#0a0a28] p-3 space-y-4" aria-label="Go live">
-      {error && <div className="rounded-md bg-red-900/50 border border-red-600 text-red-100 text-sm px-3 py-2">{error}</div>}
+    <section className="h-full overflow-y-auto overscroll-contain bg-[#c0c0c0] text-black p-3 space-y-3" aria-label="Go live">
+      {error && <div className="bg-white qn-sunken px-2 py-1.5 text-sm font-bold text-red-700" role="alert">{error}</div>}
 
       {live.map(show => (
-        <div key={show.id} className="rounded-lg border-2 border-red-500 bg-red-950/50 p-3 space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-400 animate-pulse" />
-            <span className="text-xs font-extrabold tracking-wider text-red-200">LIVE NOW</span>
+        <div key={show.id} className="space-y-2">
+          <div className="bg-black qn-sunken px-2 py-1.5">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+              <span className="text-xs font-extrabold tracking-wider text-[#ff5050]">LIVE NOW</span>
+            </div>
+            <div className="text-base font-bold leading-tight break-words text-[var(--qn-digit)]">{show.title}</div>
           </div>
-          <div className="text-base font-bold text-white">{show.title}</div>
           {mayGoLive && <div className="grid grid-cols-2 gap-2">
-            <Link to={`/admin/live/${show.id}/host`} className="h-11 flex items-center justify-center rounded-md bg-white text-black text-sm font-bold">Host console</Link>
-            <Link to={`/admin/live/${show.id}/screen`} className="h-11 flex items-center justify-center rounded-md bg-white/10 hover:bg-white/20 text-white text-sm font-bold">Call screener</Link>
+            <Link to={`/admin/live/${show.id}/host`} className="qn-btn h-11 lg:h-9 flex items-center justify-center text-sm font-bold !no-underline !text-black">Host console</Link>
+            <Link to={`/admin/live/${show.id}/screen`} className="qn-btn h-11 lg:h-9 flex items-center justify-center text-sm font-bold !no-underline !text-black">Call screener</Link>
           </div>}
           {!mayGoLive ? null : confirmEnd === show.id ? (
             <div className="grid grid-cols-2 gap-2">
               <button type="button" disabled={endMut.isPending}
                 onClick={() => endMut.mutate(show.id, { onSettled: () => setConfirmEnd(null), onError: fail })}
-                className="h-11 rounded-md bg-red-600 hover:bg-red-500 text-white text-sm font-bold disabled:opacity-50">
+                className="qn-btn h-11 lg:h-9 text-sm font-bold !text-red-700">
                 {endMut.isPending ? 'Ending…' : 'Yes, end the show'}
               </button>
               <button type="button" onClick={() => setConfirmEnd(null)}
-                className="h-11 rounded-md bg-white/10 hover:bg-white/20 text-white text-sm font-bold">Keep going</button>
+                className="qn-btn h-11 lg:h-9 text-sm font-bold">Keep going</button>
             </div>
           ) : (
             <button type="button" onClick={() => setConfirmEnd(show.id)}
-              className="w-full h-11 rounded-md bg-red-900/70 hover:bg-red-800 text-red-100 text-sm font-bold">
+              className="qn-btn w-full h-11 lg:h-9 text-sm font-bold !text-red-700">
               End show and return to automation
             </button>
           )}
         </div>
       ))}
 
-      {live.length === 0 && !mayGoLive && <p className="px-1 text-sm text-gray-400" data-testid="live-view-only">No live show is on. Your login can watch this screen but not go live.</p>}
+      {live.length === 0 && !mayGoLive && <p className="px-1 text-sm" data-testid="live-view-only">No live show is on. Your login can watch this screen but not go live.</p>}
       {live.length === 0 && mayGoLive && (
-        <div className="rounded-lg border border-[#3a3a7e] bg-[#14143c] p-3 space-y-2">
-          <div className="text-sm font-bold text-white">Go live now</div>
-          <p className="text-xs text-gray-400">Starts a live show on this station and opens the host console with your microphone and caller queue.</p>
+        <div className="space-y-2">
+          <div className="qn-title h-7 flex items-center px-2 text-sm">Go live now</div>
+          <p className="text-xs">Starts a live show on this station and opens the host console with your microphone and caller queue.</p>
           <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="Show name" maxLength={120}
+            aria-label="Show name"
             onKeyDown={(e) => { if (e.key === 'Enter') goLiveNow(); }}
-            className="w-full h-11 bg-[#0a0a28] border border-[#3a3a7e] text-white text-base lg:text-sm px-3 rounded-md placeholder-gray-500 focus:outline-none focus:border-red-400" />
+            className="qn-field w-full h-11 lg:h-9 text-base lg:text-sm px-2 placeholder-[#808080]" />
           <button type="button" onClick={goLiveNow} disabled={busy || !title.trim() || !stationId}
-            className="w-full h-12 rounded-md bg-red-600 hover:bg-red-500 text-white text-base font-extrabold disabled:opacity-40">
+            className="qn-btn w-full h-12 lg:h-10 text-base font-extrabold enabled:!text-red-700">
             {busy ? 'Starting…' : '● Go live'}
           </button>
         </div>
       )}
 
       <div>
-        <div className="px-1 pb-1 text-[11px] font-bold uppercase tracking-wider text-gray-500">Scheduled shows</div>
-        {upcoming.length === 0 && <div className="px-1 text-sm text-gray-500">No shows are scheduled.</div>}
-        <div className="space-y-2">
+        <div className="qn-title h-7 flex items-center px-2 text-sm mb-2">Scheduled shows</div>
+        {upcoming.length === 0 && <div className="px-1 text-sm">No shows are scheduled.</div>}
+        {upcoming.length > 0 && <div className="bg-white qn-sunken p-0.5">
           {upcoming.map(show => (
-            <div key={show.id} className="flex items-center gap-2 rounded-lg border border-[#2a2a5e] bg-[#101036] p-2.5">
+            <div key={show.id} className="flex items-center gap-2 px-2 py-1.5 border-b border-[#c0c0c0] last:border-b-0">
               <div className="flex-1 min-w-0 leading-tight">
-                <div className="truncate text-sm font-semibold text-white">{show.title}</div>
-                <div className="text-xs text-gray-400">{when(show.scheduled_start)}</div>
+                <div className="truncate text-sm font-bold">{show.title}</div>
+                <div className="text-xs">{when(show.scheduled_start)}</div>
               </div>
               {mayGoLive && <button type="button" onClick={() => startShow(show.id)} disabled={busy || live.length > 0}
                 title={live.length > 0 ? 'End the current live show first' : 'Start this show now'}
-                className="cr-tap h-10 px-3 shrink-0 rounded-md bg-red-600 hover:bg-red-500 text-white text-sm font-bold disabled:opacity-40">
+                className="qn-btn cr-tap h-11 lg:h-8 px-3 shrink-0 text-sm font-bold enabled:!text-red-700">
                 Start
               </button>}
             </div>
           ))}
-        </div>
-        <Link to="/admin/live" className="cr-tap flex items-center mt-3 px-1 text-sm text-cyan-300 hover:underline">Schedule or edit live shows</Link>
+        </div>}
+        <Link to="/admin/live" className="qn-btn cr-tap h-11 lg:h-8 mt-3 px-3 text-sm flex items-center justify-center !no-underline !text-black">Schedule or edit live shows</Link>
       </div>
     </section>
   );
@@ -248,25 +251,25 @@ export const ErrorsPanel = memo(function ErrorsPanel({ stationId, stationTz, can
   const { data, isLoading, isError } = useAlerts(canSee ? { is_resolved: false, limit: 100, station_id: stationId ?? undefined } : null, true);
   const resolve = useResolveAlert();
   const rows = (data?.alerts ?? []).filter(a => !a.station_id || a.station_id === stationId);
-  const sev = (s: string) => (s === 'critical' ? 'text-red-400' : s === 'warning' ? 'text-amber-300' : 'text-cyan-300');
+  const sev = (s: string) => (s === 'critical' ? 'text-red-500' : s === 'warning' ? 'text-[var(--qn-orange)]' : 'text-[var(--qn-yellow)]');
   return (
-    <section className="h-full overflow-y-auto overscroll-contain bg-[#0a0a28]" aria-label="Errors" data-testid="errors-panel">
-      {!canSee && <p className="p-4 text-sm text-gray-400">Errors are shown to managers.</p>}
-      {canSee && isLoading && <p className="p-4 text-sm text-gray-400">Loading…</p>}
-      {canSee && isError && <p className="p-4 text-sm text-red-300">Can't load the errors.</p>}
+    <section className="h-full overflow-y-auto overscroll-contain qn-log" aria-label="Errors" data-testid="errors-panel">
+      {!canSee && <p className="p-4 text-sm font-normal text-[#c0c0c0]">Errors are shown to managers.</p>}
+      {canSee && isLoading && <p className="p-4 text-sm font-normal text-[#c0c0c0]">Loading…</p>}
+      {canSee && isError && <p className="p-4 text-sm text-[#ff5050]">Can't load the errors.</p>}
       {canSee && !isLoading && !isError && rows.length === 0 && (
-        <p className="p-4 text-sm text-gray-400">No open errors for this station.</p>
+        <p className="p-4 text-sm font-normal text-[#c0c0c0]">No open errors for this station.</p>
       )}
       {rows.map(a => (
-        <div key={a.id} className="flex items-start gap-2 px-3 py-2 border-b border-[#15153a]">
-          <span className="w-[68px] shrink-0 tabular-nums text-xs text-gray-400 pt-0.5" data-testid="alert-when">
+        <div key={a.id} className="qn-row flex items-start gap-2 px-3 py-2 border-b border-[#222]">
+          <span className="w-[68px] shrink-0 tabular-nums text-xs text-[#c0c0c0] pt-0.5" data-testid="alert-when">
             {alertWhen(a.updated_at || a.created_at, stationTz)}
           </span>
           <span className="flex-1 min-w-0 leading-tight">
             <span className={`block text-sm font-bold ${sev(a.severity)}`}>{a.title}</span>
-            <span className="block text-xs text-gray-300 break-words">{lastMessage(a)}</span>
+            <span className="block text-xs font-normal text-white break-words">{lastMessage(a)}</span>
             {repeatsOf(a) > 1 && (
-              <span className="block text-xs text-amber-200" data-testid="alert-repeats">
+              <span className="block text-xs font-normal text-[var(--qn-orange)]" data-testid="alert-repeats">
                 {repeatsOf(a)} times, first {alertWhen(a.created_at, stationTz)}, last {alertWhen(a.updated_at || a.created_at, stationTz)}
               </span>
             )}
@@ -275,7 +278,7 @@ export const ErrorsPanel = memo(function ErrorsPanel({ stationId, stationTz, can
             className="qn-btn shrink-0 h-9 px-2 text-xs" aria-label={`Mark "${a.title}" as dealt with`}>Done</button>
         </div>
       ))}
-      {canSee && <Link to="/admin/alerts" className="block px-3 py-3 text-xs text-cyan-300 underline">All alerts</Link>}
+      {canSee && <Link to="/admin/alerts" className="block px-3 py-3 text-xs text-[#00ffff] underline">All alerts</Link>}
     </section>
   );
 });

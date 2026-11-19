@@ -24,3 +24,18 @@ export const updateCategory = async (id: string, name: string): Promise<Category
 export const deleteCategory = async (id: string): Promise<void> => {
   await apiClient.delete(`/categories/${id}`);
 };
+
+/** Where an item can play: main category, extra ones ("Also in"), holiday lists
+ *  (backend services/asset_categories.py). */
+export interface AssetCategories {
+  id: string;
+  category: string | null;
+  extra_categories: string[];
+  holiday_lists: { holiday: string; name: string; all_year: boolean; station_name: string | null }[];
+}
+
+export const getAssetCategories = async (assetId: string): Promise<AssetCategories> =>
+  (await apiClient.get<AssetCategories>(`/assets/${assetId}/categories`)).data;
+
+export const setAssetExtraCategories = async (assetId: string, extra: string[]): Promise<AssetCategories> =>
+  (await apiClient.put<AssetCategories>(`/assets/${assetId}/categories`, { extra_categories: extra })).data;

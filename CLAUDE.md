@@ -143,7 +143,7 @@ radioplatform/
 |--------|------|--------|
 | auth | auth.py | /auth |
 | stations | stations.py | /stations |
-| assets | assets.py | /assets (`DELETE /{id}` answers 503 with Retry-After when the queue holds the item's rows, see `wiki/library-delete.md`; `POST /{id}/remove-silence`: cut out every silent region the scan found (start and end completely; each middle gap shortened to `keep_gap` s, 0 = cut out; original kept for Restore Original); `POST /bulk-auto-trim` also shortens middle gaps longer than `middle_gap_over` to `keep_gap`; `GET /progress/{progress_id}`: how far a long edit sent with `?progress_id=` (auto-enhance, remove-silence) has got, for the progress bar; `POST /{id}/do-not-play`: the control room's quick "do not play" / "allow again" on every station; `POST` and `GET /{id}/station-block`: "not on this station", one station only; see `wiki/control-room.md`) |
+| assets | assets.py | /assets (`DELETE /{id}` answers 503 with Retry-After when the queue holds the item's rows, see `wiki/library-delete.md`; `POST /{id}/remove-silence`: cut out every silent region the scan found (start and end completely; each middle gap shortened to `keep_gap` s, 0 = cut out; original kept for Restore Original); `POST /bulk-auto-trim` also shortens middle gaps longer than `middle_gap_over` to `keep_gap`; `GET /progress/{progress_id}`: how far a long edit sent with `?progress_id=` (auto-enhance, remove-silence) has got, for the progress bar; `GET`/`PUT /{id}/categories`, `POST /bulk-extra-category`: a song in several categories ("Also in"; see `wiki/song-categories.md`); `POST /{id}/do-not-play`: the control room's quick "do not play" / "allow again" on every station; `POST` and `GET /{id}/station-block`: "not on this station", one station only; see `wiki/control-room.md`) |
 | streams | streams.py | /streams |
 | controls | controls.py | /controls |
 | users | users.py | /users |
@@ -246,6 +246,7 @@ radioplatform/
 | sponsor_accounts.py | Sponsors as clients: status from contract dates, spots by stage of the flow, plays per contract, the as-run log (see `wiki/sponsor-accounts.md`) |
 | sponsor_delivery.py | What a sponsor was promised against what aired: missed plays of the last 14 days and coming plays with no room or moved, for `GET /sponsor-portal/missed-plays` (see `wiki/spot-schedules.md`) |
 | shabbos_ending.py | Last song before Shabbos: the station's chosen song back-timed to end exactly at candle lighting (the blackout's start), the item after it (the shofar) first in the silence group, timed items cleared out of its way; `automation_config.shabbos_ending` (see `wiki/shabbos-ending.md`) |
+| asset_categories.py | A song in several categories: main + extra ("Also in", `asset_categories` table), read by `models.asset.in_category`; holiday lists shown beside them (see `wiki/song-categories.md`) |
 | omer_count.py | Sefiras HaOmer on the hour: the count each station says (the next day from shekia at its place, days only as the siddur), the 49 clips (category `omer_count`), wording; queued after each hh:00 time check by `QueueReplenishService._schedule_omer_counts`; `automation_config.omer_count` (see `wiki/omer-count.md`) |
 | holiday_music.py | Holiday lists mixed in before and during each holiday: Hebrew calendar per station (Israel or diaspora), rising 1-in-N share, `HolidayMix.pick` used by both fills, rest and carried count, queue tags (see `wiki/holiday-music.md`) |
 | station_blocks.py | "Not on this station": the per-station list of items a station does not play, the subquery every pick uses (`blocked_asset_ids`) and block/undo with removal of that station's waiting copies |
@@ -606,6 +607,9 @@ cd frontend && for s in bug-screenshot-faithful bug-over-dialogs bug-everywhere;
 
 # Leaving pages in real WebKit logs no version.json console error (reads WebKit's own console via MiniBrowser)
 cd frontend && xvfb-run -a python3 e2e/webkit/version-check-webkit.py
+
+# Every staff page, the control room's lower tabs and the main dialogs on desktop and iPhone, failing on leftover dark navy (real backend + e2e/walkthrough-seed.py)
+cd frontend && E2E_ADMIN_EMAIL=... E2E_ADMIN_PASS=... BASE_URL=http://localhost:4173 API_URL=http://localhost:8000/api/v1 SHOTS_DIR=/tmp/shots node e2e/qnet-look-shots.mjs
 
 # Check every admin page at desktop and iPhone size (needs the site and a backend running; see wiki/admin-page-layout.md)
 cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs
