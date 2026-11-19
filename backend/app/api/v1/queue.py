@@ -393,10 +393,13 @@ async def _resume_before_soft(db: AsyncSession, station_id, entry: QueueEntry) -
     five minutes left, or a sponsorship on a station where sponsorships wait). The
     simulator caught a 10:45 sponsorship airing in the 11:00 time check's pause of a
     story on All Day Stories (2026-11-19). Hard items still go first."""
+    from app.services import long_items
+
     if not is_soft_timed(entry):
         return entry
     res = await db.execute(
-        select(QueueEntry)
+        select(QueueEntry, Asset)
+        .join(Asset, QueueEntry.asset_id == Asset.id)
         .where(
             QueueEntry.station_id == station_id,
             QueueEntry.status == "pending",
@@ -406,7 +409,12 @@ async def _resume_before_soft(db: AsyncSession, station_id, entry: QueueEntry) -
         .order_by(QueueEntry.position)
         .limit(1)
     )
-    return res.scalar_one_or_none() or entry
+    row = res.first()
+    # Only a shiur or story: the rest of a song a live show paused still comes after
+    # the sponsorship that waited for the show (test_live_delay)
+    if row is None or not long_items.is_long_form(row[1]):
+        return entry
+    return row[0]
 
 
 async def _pick_next_pending(
