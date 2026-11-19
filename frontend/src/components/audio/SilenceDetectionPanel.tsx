@@ -1,4 +1,6 @@
 import { useState, useCallback } from 'react';
+import EditProgressBar from './EditProgressBar';
+import { newProgressId } from '../../api/assets';
 import { useDetectSilence, useTrimAsset, useRemoveSilence, useRestoreOriginal } from '../../hooks/useAssets';
 import Spinner from '../Spinner';
 import { useEscape } from '../../hooks/useEscape';
@@ -25,11 +27,14 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
   const [showConfirm, setShowConfirm] = useState<'auto' | 'region' | 'all' | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [trimPending, setTrimPending] = useState(false);
-  useEscape(showConfirm !== null && !trimPending, () => setShowConfirm(null));
 
   const detectMutation = useDetectSilence();
   const trimMutation = useTrimAsset();
   const removeMutation = useRemoveSilence();
+  const [progressId, setProgressId] = useState<string | null>(null);
+  const working = removeMutation.isPending || trimMutation.isPending;
+  // Esc closes the confirm, but not while the edit runs (it would go on anyway)
+  useEscape(showConfirm !== null && !trimPending && !working, () => setShowConfirm(null));
   const restoreMutation = useRestoreOriginal();
 
   const handleDetect = () => {
@@ -87,8 +92,10 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
   // Cut silent regions out and join the rest (the server keeps the original for Undo)
   const removeRegions = (toRemove: SilenceRegion[]) => {
     if (toRemove.length === 0) return;
+    const pid = newProgressId();
+    setProgressId(pid);
     removeMutation.mutate(
-      { id: assetId, regions: toRemove },
+      { id: assetId, regions: toRemove, progressId: pid },
       {
         onSuccess: () => {
           setRegions([]);
@@ -348,9 +355,11 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
                 : `This will trim out region #${(selectedIndex ?? 0) + 1} (${formatTime(selectedRegion?.start ?? 0)} - ${formatTime(selectedRegion?.end ?? 0)}). You can review the result and undo if needed.`
               }
             </p>
+            <EditProgressBar progressId={progressId} active={removeMutation.isPending} label="Removing the silence" />
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setShowConfirm(null)}
+                disabled={removeMutation.isPending || trimMutation.isPending}
                 className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded"
               >
                 Cancel

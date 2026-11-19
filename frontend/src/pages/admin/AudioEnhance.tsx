@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import EditProgressBar from '../../components/audio/EditProgressBar';
+import { newProgressId } from '../../api/assets';
 import { useParams, Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAssetDetail, useAssetAudioUrl, useEnhancePresets, useEnhanceAsset, useEnhancePreview, useRestoreOriginal, useAutoEnhance } from '../../hooks/useAssets';
@@ -71,6 +73,7 @@ export default function AudioEnhance() {
   const previewMutation = useEnhancePreview();
   const restoreMutation = useRestoreOriginal();
   const autoEnhanceMutation = useAutoEnhance();
+  const [progressId, setProgressId] = useState<string | null>(null);
   const waveformRef = useRef<WaveformPlayerHandle>(null);
 
   const [filters, setFilters] = useState<FilterState>({ ...defaultFilters });
@@ -179,7 +182,9 @@ export default function AudioEnhance() {
   const handleAutoEnhance = () => {
     setStatusMsg(null);
     setAiReasons(null);
-    autoEnhanceMutation.mutate(assetId!, {
+    const pid = newProgressId();
+    setProgressId(pid);
+    autoEnhanceMutation.mutate({ id: assetId!, progressId: pid }, {
       onSuccess: (result) => {
         setEnhancePending(true);
         setAiReasons(result.reasons);
@@ -254,6 +259,7 @@ export default function AudioEnhance() {
               >
                 {autoEnhanceMutation.isPending ? <><Spinner className="mr-1" />Analyzing...</> : 'AI Auto-Enhance'}
               </button>
+              <EditProgressBar progressId={progressId} active={autoEnhanceMutation.isPending} label="AI Auto-Enhance" />
               <div className="flex flex-col gap-2">
                 {presetNames.map((key) => (
                   <button

@@ -209,6 +209,28 @@ async function timedResponse(page, matcher, action) {
   const ms = Date.now() - t0;
   return { resp, ms, status: resp.status() };
 }
+// Hold a long edit's answer for a moment after the server finished, so a person (and this
+// check) sees the progress bar while it waits, and the bar reaching 100% and "Done"
+async function holdEditAnswer(page, pathEnd, ms = 2500) {
+  const glob = `${API}/assets/*/${pathEnd}*`;
+  await page.route(glob, async r => {
+    const resp = await r.fetch();
+    await new Promise(res => setTimeout(res, ms));
+    await r.fulfill({ response: resp });
+  });
+  return () => page.unroute(glob);
+}
+async function seeProgressBar(page, what) {
+  const bar = page.getByTestId('edit-progress');
+  await bar.waitFor({ timeout: 5000 });
+  if (process.env.SHOT_DIR) {                                                  // for a person to look at
+    await page.waitForTimeout(1200);
+    await page.screenshot({ path: `${process.env.SHOT_DIR}/progress-${what.replace(/\W+/g, '-')}.png` });
+  }
+  assert(await bar.getByRole('progressbar').count() === 1, `${what}: no progressbar inside the progress box`);
+  await until(async () => /^100%/.test((await page.getByTestId('edit-progress-pct').innerText().catch(() => '')).trim()), `${what}: the bar reaches 100%`, 8000);
+  assert(/Done/.test(await bar.innerText()), `${what}: the bar does not say Done at the end: ${await bar.innerText()}`);
+}
 async function timedSave(page, what, matcher, action, { expectStatus = s => s < 400 } = {}) {
   const r = await timedResponse(page, matcher, action);
   assert(expectStatus(r.status), `${what}: server answered ${r.status} ${(await r.resp.text().catch(() => '')).slice(0, 160)}`);
@@ -3011,9 +3033,23 @@ section('asset-detail', async () => {
         await page.keyboard.press('Escape');                                   // Esc closes it too
         await page.getByRole('dialog').waitFor({ state: 'detached' });
         await all.click();
-        const r = await timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/remove-silence'),
-          () => page.getByRole('dialog').getByRole('button', { name: 'Remove All', exact: true }).click());
+        const release = await holdEditAnswer(page, 'remove-silence');
+        let r;
+        try {
+          [r] = await Promise.all([
+            timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/remove-silence'),
+              () => page.getByRole('dialog').getByRole('button', { name: 'Remove All', exact: true }).click()),
+            (async () => {
+              await page.getByTestId('edit-progress').waitFor({ timeout: 5000 });
+              assert(await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).isDisabled(), 'Cancel is offered while the silence is being removed');
+              await page.keyboard.press('Escape');                              // Esc does not hide a running edit
+              assert(await page.getByRole('dialog').count() === 1, 'Esc closed the box while the silence was being removed');
+              await seeProgressBar(page, 'Remove All');
+            })(),
+          ]);
+        } finally { await release(); }
         assert(r.status < 300, `remove all ${r.status}`);
+        await page.getByTestId('edit-progress').waitFor({ state: 'detached' });
         await page.getByText('Trim applied — review the result').waitFor({ timeout: 15000 });
         const left = await lengthNow();
         assert(Math.abs(left - 8) < 0.5, `Remove All left ${left} s (expected the 8 s of tone)`);
@@ -3129,8 +3165,16 @@ section('enhance', async () => {
     assert(ap.status < 300, `apply ${ap.status}`);
     await page.getByRole('button', { name: 'Undo Enhancement' }).click();
     await page.getByRole('button', { name: 'Undo Enhancement' }).waitFor({ state: 'detached', timeout: 15000 });
-    const ai = await timedResponse(page, (m, p) => m === 'POST' && /auto-enhance/.test(p), () => page.getByRole('button', { name: /AI Auto-Enhance/ }).click());
+    const release = await holdEditAnswer(page, 'auto-enhance');
+    let ai;
+    try {
+      [ai] = await Promise.all([
+        timedResponse(page, (m, p) => m === 'POST' && /auto-enhance/.test(p), () => page.getByRole('button', { name: /AI Auto-Enhance/ }).click()),
+        seeProgressBar(page, 'AI Auto-Enhance'),
+      ]);
+    } finally { await release(); }
     assert(ai.status < 300, `auto-enhance ${ai.status} ${(await ai.resp.text()).slice(0, 120)}`);
+    await page.getByTestId('edit-progress').waitFor({ state: 'detached' });
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await page.getByText('Enhancement saved.').waitFor();
     await page.getByRole('link', { name: /Back to Asset/ }).click();

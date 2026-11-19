@@ -198,14 +198,19 @@ def merge_regions(regions: list[dict], length: float | None = None) -> list[tupl
     return merged
 
 
-def remove_regions(file_data: bytes, regions: list[dict]) -> tuple[bytes, float]:
+def remove_regions(file_data: bytes, regions: list[dict], progress=None) -> tuple[bytes, float]:
     """Cut every region out of the audio and join what is left, into an MP3.
 
     "Remove all found silence" in the Library (Shmuel 2026-11-18: "I like what it
     found. I want to delete it."). Gaps in the middle are removed too, not only at the
-    start and end. Read from a file, not a pipe (see audio_file).
+    start and end. Read from a file, not a pipe (see audio_file). `progress(fraction,
+    stage)` hears how far it is (job_progress.py).
     Returns (new_bytes, new_duration). Raises ValueError when nothing would be left."""
+    from app.services import job_progress
+
     with audio_file(file_data) as path:
+        if progress:
+            progress(0.0, "Measuring the recording")
         length = get_audio_duration(path)
         spans = merge_regions(regions, length or None)
         if not spans:
@@ -214,13 +219,22 @@ def remove_regions(file_data: bytes, regions: list[dict]) -> tuple[bytes, float]
         if length and length - removed < 0.5:
             raise ValueError("That would remove the whole recording")
         expr = "+".join(f"between(t\\,{a:.3f}\\,{b:.3f})" for a, b in spans)
-        cmd = [
-            settings.FFMPEG_PATH, "-v", "error", "-i", path, "-vn",
-            "-af", f"aselect='not({expr})',asetpts=N/SR/TB",
-            "-c:a", "libmp3lame", "-b:a", "256k", "-ar", "44100",
-            "-f", "mp3", "pipe:1",
-        ]
-        result = subprocess.run(cmd, capture_output=True, timeout=600)
-        if result.returncode != 0 or not result.stdout:
-            raise RuntimeError(f"FFmpeg could not remove the silence: {result.stderr[:500]!r}")
-    return result.stdout, get_audio_duration(result.stdout)
+        out = job_progress.temp_path(".mp3")
+        try:
+            code, stderr = job_progress.run_ffmpeg(
+                ["-v", "error", "-y", "-i", path, "-vn",
+                 "-af", f"aselect='not({expr})',asetpts=N/SR/TB",
+                 "-c:a", "libmp3lame", "-b:a", "256k", "-ar", "44100", "-f", "mp3", out],
+                max(length - removed, 0.0), job_progress.scaled(progress, 0.1, 1.0) if progress else None,
+                "Removing the silence",
+            )
+            with open(out, "rb") as f:
+                data = f.read()
+        finally:
+            try:
+                os.unlink(out)
+            except OSError:
+                pass
+        if code != 0 or not data:
+            raise RuntimeError(f"FFmpeg could not remove the silence: {stderr[:500]!r}")
+    return data, get_audio_duration(data)

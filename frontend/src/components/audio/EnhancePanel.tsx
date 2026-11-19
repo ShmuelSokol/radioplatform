@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
+import EditProgressBar from './EditProgressBar';
+import { newProgressId } from '../../api/assets';
 import { Link } from 'react-router-dom';
 import { useEnhancePresets, useEnhanceAsset, useEnhancePreview, useRestoreOriginal, useAutoEnhance } from '../../hooks/useAssets';
 import { useAuth } from '../../hooks/useAuth';
@@ -30,6 +32,7 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
   const previewMutation = useEnhancePreview();
   const restoreMutation = useRestoreOriginal();
   const autoEnhanceMutation = useAutoEnhance();
+  const [progressId, setProgressId] = useState<string | null>(null);
 
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [enhancePending, setEnhancePending] = useState(false);
@@ -109,7 +112,9 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
   const handleAutoEnhance = () => {
     setStatusMsg(null);
     setAiReasons(null);
-    autoEnhanceMutation.mutate(assetId, {
+    const pid = newProgressId();
+    setProgressId(pid);
+    autoEnhanceMutation.mutate({ id: assetId, progressId: pid }, {
       onSuccess: (result) => {
         setEnhancePending(true);
         setAiReasons(result.reasons);
@@ -178,6 +183,7 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
           {autoEnhanceMutation.isPending ? <><Spinner className="mr-1" />Analyzing &amp; Enhancing...</> : 'AI Auto-Enhance'}
         </button>
       )}
+      <EditProgressBar progressId={progressId} active={autoEnhanceMutation.isPending} label="AI Auto-Enhance" />
 
       {/* Preset buttons */}
       <div className="flex flex-wrap gap-2 mb-3">

@@ -102,8 +102,8 @@ export function useTrimAsset() {
 export function useRemoveSilence() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, regions }: { id: string; regions: Array<{ start: number; end: number }> }) =>
-      removeSilence(id, regions),
+    mutationFn: ({ id, regions, progressId }: { id: string; regions: Array<{ start: number; end: number }>; progressId?: string }) =>
+      removeSilence(id, regions, progressId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assets'] });
       queryClient.invalidateQueries({ queryKey: ['asset'] });
@@ -153,7 +153,9 @@ export function useEnhancePreview() {
 export function useAutoEnhance() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => autoEnhanceAsset(id),
+    // An item id, or the id with a progress id for the progress bar (components/audio/EditProgressBar)
+    mutationFn: (arg: string | { id: string; progressId?: string }) =>
+      typeof arg === 'string' ? autoEnhanceAsset(arg) : autoEnhanceAsset(arg.id, arg.progressId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assets'] });
       queryClient.invalidateQueries({ queryKey: ['asset'] });
