@@ -39,4 +39,24 @@ silence (candle lighting to shekia + 72).
 - **Library (2026-11-19)**: song `e1ed49c2-10ad-411e-b58e-95c51d048a8e` (Lev Tahor, 279.48 s file,
   music from 0.23 s, silence from 276.52 s). No shofar recording yet (asked Shmuel).
 
+## The queue around a blackout (`api/v1/queue.py`, every scheduler pass)
+
+- **Inside**: timed items due inside the window are marked skipped (`_drop_timed_inside`),
+  `shabbos_end` kept.
+- **Last 20 minutes before**: a spoken item (spot, jingle, ID, time, weather...) whose estimated
+  run on the queue's own timeline crosses the window's start is skipped (`_drop_spots_cut_by`):
+  the silence would cut it mid-sentence. Songs still just fade.
+- **Once it has begun**: every waiting row other than silence that sits before the window's
+  first waiting silence, and every waiting row timed before the window, is skipped
+  (`_drop_leftovers`), and so is the song the engine holds pre-loaded (it sits after the
+  silences, where rows drawn for after the window also sit), followed by a flush. While a
+  blackout lasts, `handle_next` hands the engine nothing but silence (None otherwise, as during
+  a live show): a song handed then waited loaded and aired first after Shabbos (simulator,
+  Jerusalem 2026-11-20). The blackout's end flushes and skips as before. The silences are hard
+  timed, so they jump ahead of whatever still waited; those rows used to air first after
+  Shabbos (2026-11-19 read: Main's Friday-afternoon block and a 21:15 sponsorship, Jerusalem's
+  Erev Shabbos daf). Rows after the silences and rows timed after the window stay; what is
+  drawn there (the Motzei Shabbos opening) is the playlist generator's job.
+- Tests: `tests/test_blackout_drops_timed.py`, `tests/test_blackout_leftovers.py`.
+
 Related: [station-simulator](station-simulator.md), [hourly-slots](hourly-slots.md), [streaming-architecture](streaming-architecture.md).

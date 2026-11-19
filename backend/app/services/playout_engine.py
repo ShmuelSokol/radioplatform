@@ -1027,6 +1027,12 @@ async def handle_next(
                 logger.warning("Replenish on empty queue failed: %s", e)
             if entry is None:
                 break
+        if entry.asset is not None and entry.asset.asset_type != "silence" and await _blacked_out(db, station_id):
+            # In a blackout only its silence goes to the engine (normally all of it is in
+            # the timed lane already). A song handed now waited loaded through Shabbos
+            # and aired first after it (simulator, Jerusalem 2026-11-20). The engine asks
+            # again by itself, as during a live show; the blackout's end flushes and skips.
+            return None
         await ensure_level(db, entry)
         if str(entry.id) in state.timed_sent:
             # A Next sent this very entry down the timed lane while we were choosing
@@ -1072,6 +1078,16 @@ async def handle_next(
             ),
         )
     return None
+
+
+async def _blacked_out(db: AsyncSession, station_id) -> bool:
+    from app.api.v1.queue import _is_blacked_out
+
+    try:
+        return await _is_blacked_out(db, station_id)
+    except Exception as e:
+        logger.warning("Blackout check on a next ask failed for station %s: %s", station_id, e)
+        return False
 
 
 async def _hold_before_hard_item(
