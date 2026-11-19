@@ -314,3 +314,110 @@ async def drop_misplaced(db: AsyncSession, station_id, now: datetime | None = No
     if changed:
         await db.flush()
     return changed
+
+
+# Only pull an ID to a place at least this far ahead: the engine already holds the
+# next item, and nearer than this the estimate decides nothing new
+_PULL_FROM = timedelta(minutes=2)
+
+
+async def pull_late_id(db: AsyncSession, station_id, now: datetime | None = None) -> int:
+    """Bring the next waiting automatic ID forward when the queue's timeline puts it more
+    than max_minutes after the last ID that aired.
+
+    The fill spaces IDs 12 to 16 minutes apart by predicted times, but every ID passed
+    over at air time (`postpone`) or moved by `drop_misplaced` goes one song later, and
+    nothing ever brought one back: the next ID then sat too close to the late one and
+    was passed over too, so the delay carried on down the line. Main aired IDs 28 and 31
+    minutes apart on 2026-11-19 (17:10-18:10Z) and the simulator 27 to 31. This moves the
+    next waiting ID to the first place min_minutes or more after the last one aired that
+    the air-time check would accept (after a song, clear of timed items, not before a
+    spoken item, in the station's hours). Does not commit. Returns 1 when it moved one."""
+    from zoneinfo import ZoneInfo
+
+    from app.models.asset import Asset
+    from app.models.queue_entry import is_soft_timed
+    from app.models.station import Station
+    from app.services.playlist_generator_service import (
+        NOT_BEFORE_AN_ID,
+        Clock,
+        TimedItem,
+        id_settings_for,
+        on_air_seconds,
+    )
+    from app.services.playout_engine import held_entry_ids
+
+    now = now or datetime.now(UTC)
+    station = await db.get(Station, station_id)
+    if station is None:
+        return 0
+    settings = id_settings_for(station.automation_config)
+    if not settings.enabled:
+        return 0
+    last_id = (await db.execute(
+        select(QueueEntry.started_at).join(Asset, QueueEntry.asset_id == Asset.id)
+        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["playing", "played"]),
+               QueueEntry.started_at.isnot(None), QueueEntry.started_at > now - timedelta(hours=3),
+               func.lower(Asset.category).like(f"{STATION_ID_CATEGORY_PREFIX}%"))
+        .order_by(QueueEntry.started_at.desc()).limit(1)
+    )).scalar()
+    if last_id is None:
+        return 0  # none aired lately (start of the day, after Shabbos): the fill's own spacing stands
+    last_id = _aware(last_id)
+    earliest = last_id + timedelta(minutes=settings.min_minutes)
+    latest = last_id + timedelta(minutes=settings.max_minutes)
+
+    rows = (await db.execute(
+        select(QueueEntry).options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
+        .order_by(QueueEntry.position)
+    )).unique().scalars().all()
+    start = now
+    timed: list[TimedItem] = []
+    waiting: list[tuple[QueueEntry, float]] = []
+    for entry in rows:
+        asset = entry.asset
+        meta = getattr(asset, "metadata_extra", None)
+        seconds = on_air_seconds(getattr(asset, "duration", None), meta if isinstance(meta, dict) else None)
+        if entry.status == "playing":
+            if entry.started_at is not None:
+                start = max(start, _aware(entry.started_at) + timedelta(seconds=seconds))
+        elif entry.preempt_at is not None:
+            timed.append(TimedItem(max(_aware(entry.preempt_at), now), seconds, not is_soft_timed(entry)))
+        else:
+            waiting.append((entry, seconds))
+
+    held = {str(x) for x in held_entry_ids(station_id)}
+    zone = ZoneInfo(station.timezone or "America/New_York")
+    margin = timedelta(minutes=settings.clear_minutes)
+    clock = Clock(start, timed)
+    previous_kind: str | None = None
+    spot: int | None = None  # index in `waiting` the ID would go before
+    for i, (entry, seconds) in enumerate(waiting):
+        at = clock.start()
+        kind = (getattr(entry.asset, "asset_type", None) or "").lower()
+        if is_auto_station_id(entry):
+            if at <= latest or spot is None or str(entry.id) in held:
+                return 0  # on time, or no better place before it
+            mover = entry
+            break
+        if (spot is None and i > 0 and str(entry.id) not in held and at - now >= _PULL_FROM
+                and at >= earliest and previous_kind is not None and previous_kind not in NOT_BEFORE_AN_ID
+                and kind not in NOT_BEFORE_AN_ID and settings.in_hours(at.astimezone(zone).hour)
+                and (clock.last_timed_end is None or at - clock.last_timed_end >= margin)
+                and clock.clear_of_timed(at, 10.0, margin)):
+            spot = i
+        clock.play(seconds)
+        previous_kind = kind or None
+    else:
+        return 0
+    moved = [e for e, _ in waiting[spot:] if e is not mover and e.position <= mover.position]
+    places = sorted([mover.position] + [e.position for e in moved])
+    for entry, place in zip([mover] + moved, places):
+        entry.position = place
+    if len(set(places)) < len(places):  # equal places: keep the order with fresh numbers
+        base = places[0]
+        for n, entry in enumerate([mover] + moved):
+            entry.position = base + n
+    await db.flush()
+    return 1

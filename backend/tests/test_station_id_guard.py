@@ -296,3 +296,84 @@ async def test_an_id_that_cannot_move_before_the_next_id_is_skipped(db_session: 
     await db_session.commit()
     assert picked is None or picked.id != id_entry
     assert await _status(db_session, id_entry) == "skipped"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("last_aired_minutes_ago,after_song", [(10.0, 0), (2.0, 1)])
+async def test_a_late_id_is_brought_forward_to_keep_them_12_to_20_minutes_apart(
+        db_session: AsyncSession, last_aired_minutes_ago, after_song):
+    """Main 2026-11-19 17:10-18:10Z: IDs 28 and 31 minutes apart. An ID passed over or moved
+    goes one song later and nothing brought it back. When the queue's timeline puts the next
+    ID more than max_minutes (20) after the last one aired, it moves to the first place at
+    least min_minutes (12) after it that the air-time check accepts."""
+    now = datetime.now(UTC)
+    station = Station(id=uuid.uuid4(), name=f"S {uuid.uuid4().hex[:6]}", timezone="America/New_York",
+                      automation_config={"station_ids": {"enabled": True, "clear_minutes": 1}})
+    db_session.add(station)
+    await db_session.flush()
+
+    def asset(kind, category, seconds):
+        a = Asset(id=uuid.uuid4(), title=f"{kind} {category}", file_path=f"{uuid.uuid4().hex}.mp3",
+                  asset_type=kind, category=category, duration=seconds)
+        db_session.add(a)
+        return a
+
+    song = asset("music", "lively", 243.0)  # 240 s on air
+    jingle = asset("jingle", "station_id", 8.0)
+    await db_session.flush()
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=jingle.id, position=0,
+                              status="played", source="auto",
+                              started_at=now - timedelta(minutes=last_aired_minutes_ago)))
+    pos = 0
+
+    def add(a, **kw):
+        nonlocal pos
+        pos += 1
+        e = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=a.id, position=pos,
+                       status=kw.pop("status", "pending"), source="auto", **kw)
+        db_session.add(e)
+        return e
+
+    add(song, status="playing", started_at=now)   # on air until +4
+    songs = [add(song) for _ in range(5)]          # +4, +8, +12, +16, +20
+    late = add(jingle)                             # +24: 34 or 26 min after the last
+    add(song)
+    await db_session.commit()
+    station_id, late_id, song_ids = station.id, late.id, [s.id for s in songs]
+
+    moved = await station_id_guard.pull_late_id(db_session, station_id, now)
+    await db_session.commit()
+    db_session.expire_all()
+    order = [r[0] for r in (await db_session.execute(
+        select(QueueEntry.id).where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+        .order_by(QueueEntry.position))).all()]
+    # the first song boundary 12+ min after the last ID that leaves the engine's next item
+    # alone: 10 min ago -> +8 (18 min, after song 0); 2 min ago -> +12 (14 min, after song 1)
+    assert moved == 1
+    assert order.index(late_id) == order.index(song_ids[after_song]) + 1
+
+
+@pytest.mark.asyncio
+async def test_an_id_on_time_is_left_where_the_fill_put_it(db_session: AsyncSession):
+    """An ID the timeline puts within max_minutes of the last one stays put."""
+    now = datetime.now(UTC)
+    station = Station(id=uuid.uuid4(), name=f"S {uuid.uuid4().hex[:6]}", timezone="America/New_York",
+                      automation_config={"station_ids": {"enabled": True, "clear_minutes": 1}})
+    db_session.add(station)
+    await db_session.flush()
+    song = Asset(id=uuid.uuid4(), title="s", file_path="s.mp3", asset_type="music", category="lively", duration=243.0)
+    jingle = Asset(id=uuid.uuid4(), title="j", file_path="j.mp3", asset_type="jingle", category="station_id",
+                   duration=8.0)
+    db_session.add_all([song, jingle])
+    await db_session.flush()
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=jingle.id, position=0,
+                              status="played", source="auto", started_at=now - timedelta(minutes=2)))
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=song.id, position=1,
+                              status="playing", source="auto", started_at=now))
+    for p in range(2, 5):
+        db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=song.id, position=p,
+                                  status="pending", source="auto"))
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=jingle.id, position=5,
+                              status="pending", source="auto"))   # +16: 18 min after the last
+    await db_session.commit()
+    assert await station_id_guard.pull_late_id(db_session, station.id, now) == 0
