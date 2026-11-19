@@ -40,7 +40,7 @@ from sqlalchemy.orm import joinedload
 
 from app.config import settings
 from app.models.asset import Asset
-from app.models.queue_entry import QueueEntry, hard_timed
+from app.models.queue_entry import QueueEntry, aired_from, hard_timed
 from app.models.station import Station
 
 logger = logging.getLogger(__name__)
@@ -169,10 +169,12 @@ class AirWatch:
                 due = _aware(e.preempt_at) + timedelta(seconds=ahead.get(e.id, 0.0))
                 title = _title(e)
                 if e.started_at is not None:
-                    late = (_aware(e.started_at) - due).total_seconds()
+                    # When it came on air: started_at lies its cue-in earlier (mark_started)
+                    aired = _aware(aired_from(e))
+                    late = (aired - due).total_seconds()
                     if late > LATE_SECONDS:
                         add("late_timed", f"{title} aired {late:.0f} s late",
-                            f"Due {_local(due, station)}, started {_local(_aware(e.started_at), station)}.",
+                            f"Due {_local(due, station)}, started {_local(aired, station)}.",
                             e.id)
                 elif e.status == "pending" and (now - due).total_seconds() > LATE_SECONDS:
                     behind = _title(current) if current else "nothing"

@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { useAudioEngine } from '../../src/hooks/useAudioEngine';
 import { nextCut } from '../../src/pages/admin/controlroom/timing';
 import { updatesHeld } from '../../src/lib/appUpdate';
+import { noteServerTime } from '../../src/lib/serverClock';
 
 const audios: HTMLAudioElement[] = [];
 const gains: GainNode[] = [];
@@ -43,6 +44,10 @@ w.__levels = () => analysers.slice(0, 2).map((n) => {
   return +Math.sqrt(d.reduce((sum, v) => sum + v * v, 0) / d.length).toFixed(4);
 });
 w.__held = () => updatesHeld();
+// The deck elements themselves (e2e/player-rows.mjs pauses one) and the server clock
+// (e2e/player-rows.mjs notes the server's time as the release policy would)
+w.__audios = audios;
+w.__noteServerTime = noteServerTime;
 w.__snap = () => audios.map((a, i) => ({
   src: (a.src.split('/').pop() || '').replace('.wav', ''),
   playing: !a.paused && !a.ended,
@@ -58,7 +63,7 @@ function Harness() {
   const cut = s?.cut !== undefined ? s.cut : s?.queue ? nextCut(s.queue) : null;
   const engine = useAudioEngine(
     s ? { id: s.id, title: s.id, artist: null, asset_type: 'music', category: null, duration: s.dur } : null,
-    0, !!s, cut?.preempt_at ?? null, cut?.asset_id ?? null, 2000, s?.cueIn ?? 0, 0, s?.cross ?? 0, s?.rg ?? 0,
+    s?.elapsed ?? 0, !!s, cut?.preempt_at ?? null, cut?.asset_id ?? null, 2000, s?.cueIn ?? 0, 0, s?.cross ?? 0, s?.rg ?? 0,
     s?.nextId ?? null, s?.nextCueIn ?? 0, s?.nextRg ?? 0, null, null, s?.startedAt ?? null,
     s?.fade ?? null,
     true, true, true,

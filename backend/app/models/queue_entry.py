@@ -112,23 +112,61 @@ def resume_offset(entry) -> float:
         return 0.0
 
 
+# A cue-in longer than this is not leading silence but a mistake in the analysis
+MAX_START_CUE_SECONDS = 30.0
+
+
+def _cue_in(entry) -> float:
+    """The item's start cue (leading silence the players skip), when its asset is loaded.
+    Never loads it: callers in async code may not touch an unloaded relationship."""
+    from sqlalchemy import inspect as sa_inspect
+
+    try:
+        if "asset" in sa_inspect(entry).unloaded:
+            return 0.0
+    except Exception:
+        pass
+    asset = getattr(entry, "asset", None)
+    if asset is None:
+        return 0.0
+    from app.models.asset import stored_analysis
+
+    try:
+        cue = float(stored_analysis(getattr(asset, "metadata_extra", None)).get("cue_in_seconds") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    duration = getattr(asset, "duration", None) or 0.0
+    if cue <= 0 or cue > MAX_START_CUE_SECONDS or (duration and cue >= duration - 1):
+        return 0.0
+    return cue
+
+
+def start_offset(entry) -> float:
+    """Where in the file this entry starts playing: a resumed shiur where it was paused,
+    any other item at its cue-in (both players skip the leading silence)."""
+    return max(resume_offset(entry), _cue_in(entry))
+
+
 def mark_started(entry, now) -> None:
-    """Put an entry on air. A resumed item counts as started `offset` seconds ago, so
-    everything timed from started_at (its end, a listener's position) continues where
-    it was paused."""
+    """Put an entry on air. started_at is when the top of the file would have played:
+    a resumed item counts as started `offset` seconds ago and a fresh one `cue_in`
+    seconds ago, so everything timed from started_at (its end, the hand-over, a
+    listener's position) is a position in the file. Counting a fresh item from the
+    top made the page and the server differ by the cue-in, and the hand-over came that
+    much late (F-HANDOVER-17)."""
     from datetime import timedelta
 
     entry.status = "playing"
-    entry.started_at = now - timedelta(seconds=resume_offset(entry))
+    entry.started_at = now - timedelta(seconds=start_offset(entry))
 
 
 def aired_from(entry):
-    """When this entry really came on air. started_at of a resumed item lies `offset`
-    seconds before that (see mark_started), which made its play log row begin inside
-    the row of the first part (Jerusalem, 2026-11-18)."""
+    """When this entry really came on air. started_at lies `start_offset` seconds before
+    that (see mark_started), which made a resumed item's play log row begin inside the
+    row of the first part (Jerusalem, 2026-11-18)."""
     from datetime import timedelta
 
     started = entry.started_at
     if started is None:
         return None
-    return started + timedelta(seconds=resume_offset(entry))
+    return started + timedelta(seconds=start_offset(entry))

@@ -167,11 +167,26 @@ def not_contract_audio():
     30 stand-in recordings, swapped out of their contracts for the real voice, were
     drawn as filler minutes later on all three stations and two aired.
     """
-    from sqlalchemy import and_, select
+    from sqlalchemy import and_, func, select
+    from sqlalchemy.orm import aliased
 
     from app.models.spot_schedule import SpotSchedule
 
-    return and_(Asset.id.notin_(select(SpotSchedule.asset_id)), Asset.sponsor_id.is_(None))
+    # A loose copy of a contract's audio (same title, not tied to the sponsor) is
+    # sponsorship audio too: Main's old "Sponsor Ad Every 30min" rule drew such copies
+    # (Chessed Home Health Aides 7:31 PM beside its block play at 7:48 PM, 2026-11-18,
+    # and spots contracted only for another station)
+    contract = aliased(Asset)
+    contract_titles = (
+        select(func.lower(contract.title))
+        .join(SpotSchedule, SpotSchedule.asset_id == contract.id)
+        .where(contract.title.isnot(None))
+    )
+    return and_(
+        Asset.id.notin_(select(SpotSchedule.asset_id)),
+        Asset.sponsor_id.is_(None),
+        func.lower(func.coalesce(Asset.title, "")).notin_(contract_titles),
+    )
 
 
 # Station ID jingles ("station_id", "station_id_jerusalem", ...) air only through the

@@ -946,6 +946,39 @@ async def _defer_hard_until_end(db: AsyncSession, station_id, current: QueueEntr
 SOFT_PAUSE_LOOKAHEAD_SECONDS = 90.0
 
 
+async def _sponsorship_only_groups(db: AsyncSession, station_id, current: QueueEntry, end: datetime) -> list:
+    """The preempt_at of each pending timed group, due before the long item on air
+    ends, whose entries are all sponsorships (clock-slot plays, or contract audio)."""
+    from app.models.spot_schedule import SpotSchedule
+
+    rows = (
+        await db.execute(
+            select(QueueEntry.preempt_at, QueueEntry.source, Asset.id, Asset.sponsor_id)
+            .join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at < end,
+            )
+        )
+    ).all()
+    if not rows:
+        return []
+    contract = set(
+        (await db.execute(
+            select(SpotSchedule.asset_id).where(SpotSchedule.asset_id.in_({r[2] for r in rows}))
+        )).scalars().all()
+    )
+    groups: dict = {}
+    for at, source, asset_id, sponsor_id in rows:
+        if current.preempt_at is not None and _aware(current.preempt_at) == _aware(at):
+            continue
+        sponsorship = source == "ad_slot" or asset_id in contract or sponsor_id is not None
+        groups[at] = groups.get(at, True) and sponsorship
+    return [at for at, only in groups.items() if only]
+
+
 async def _soft_items_pause_long(
     db: AsyncSession,
     station_id,
@@ -977,6 +1010,27 @@ async def _soft_items_pause_long(
     end = long_items.ends_at(current)
     if end is None:
         return 0
+    # On a station that says so (long_items.sponsorships_wait), a group of sponsorships
+    # alone never cuts into a shiur or story: it waits for its end and plays between
+    # stories (coordinator 2026-11-19 for All Day Stories: hard :15/:30/:45
+    # sponsorships cut into stories 25 times a day in the simulator).
+    # Sponsorships that ride with a time check or weather still play in that pause.
+    station = await db.get(Station, station_id)
+    sponsor_only = (
+        await _sponsorship_only_groups(db, station_id, current, end)
+        if long_items.sponsorships_wait(station) else []
+    )
+    if sponsor_only:
+        await db.execute(
+            update(QueueEntry)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.in_(sponsor_only),
+            )
+            .values(timing_mode="soft", hard_by=None)
+            .execution_options(synchronize_session=False)
+        )
     rows = (
         await db.execute(
             select(QueueEntry.preempt_at)
@@ -996,6 +1050,8 @@ async def _soft_items_pause_long(
         at_aware = _aware(at)
         if current.preempt_at is not None and _aware(current.preempt_at) == at_aware:
             continue  # the shiur is itself part of this group
+        if at in sponsor_only:
+            continue  # sponsorships alone wait for the end
         due = max(at_aware, now_utc)
         if (end - due).total_seconds() <= long_items.SOFT_PAUSE_MIN_LEFT_SECONDS:
             continue

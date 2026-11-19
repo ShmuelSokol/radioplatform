@@ -14,10 +14,15 @@ from tests.test_live_delay import Clock, _admin_headers, _nowhere, _station, run
 
 
 @pytest.fixture(autouse=True)
-def _clean():
+def _clean(monkeypatch):
+    from app.api.v1 import live_shows
     live_shows_ws.live_relay.airs.clear()
+    live_shows._next_last.clear()
+    # These tests press Next again at once on purpose; the double-press rule has its own test
+    monkeypatch.setattr(live_shows, "NEXT_REPEAT_SECONDS", 0.0)
     yield
     live_shows_ws.live_relay.airs.clear()
+    live_shows._next_last.clear()
 
 
 async def _show_with_callers(db, names, config=None):
@@ -211,3 +216,32 @@ async def test_dump_and_drop_takes_a_locked_caller_off_too(client, db_session):
     assert r.status_code == 200, r.text
     assert await _statuses(db_session, [guest]) == ["completed"]
     await air.stop()
+
+
+@pytest.mark.asyncio
+async def test_next_pressed_twice_takes_one_caller_and_loses_none(client, db_session, monkeypatch):
+    """LD-37: a double click on Next (or the host and the screener together). The
+    second press ended the caller the first had just put on air and took the one after."""
+    import asyncio
+
+    from app.api.v1 import live_shows
+    monkeypatch.setattr(live_shows, "NEXT_REPEAT_SECONDS", 1.0)
+    _s, show, (a, b, c) = await _show_with_callers(db_session, [
+        ("Avi", CallStatus.ON_AIR), ("Berel", CallStatus.APPROVED), ("Chaim", CallStatus.APPROVED)])
+    headers = await _admin_headers(db_session)
+    url = f"/api/v1/live-shows/{show.id}/calls/next"
+    # One after the other here (the tests share one database session); two at the same
+    # moment wait for each other on the show's lock and then read the same answer
+    first = await client.post(url, headers=headers)
+    second = await client.post(url, headers=headers)
+    assert isinstance(live_shows._next_locks[str(show.id)], asyncio.Lock)
+    answers = sorted([first.json(), second.json()], key=lambda r: bool(r.get("repeat")))
+    assert first.status_code == second.status_code == 200
+    assert answers[0] == {"ended": str(a.id), "on_air": str(b.id)}
+    assert answers[1] == {"ended": str(a.id), "on_air": str(b.id), "repeat": True}
+    assert await _statuses(db_session, [a, b, c]) == ["completed", "on_air", "approved"]
+    # A third press right after is the same double click; a press a second later is a new one
+    assert (await client.post(url, headers=headers)).json().get("repeat") is True
+    live_shows._next_last[str(show.id)] = (live_shows._next_last[str(show.id)][0] - 2.0, {})
+    r = await client.post(url, headers=headers)
+    assert r.json() == {"ended": str(b.id), "on_air": str(c.id)}
