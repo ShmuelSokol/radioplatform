@@ -731,6 +731,86 @@ async def skip_lapsed_sponsorships(db: AsyncSession, station_id, now: datetime |
     return result.rowcount or 0
 
 
+async def close_repeat_ids(db: AsyncSession, station_id, now: datetime | None = None) -> list:
+    """Due automatic sponsorship entries whose recording started on this station within
+    NEIGHBOUR. The planner spaces them, but two breaks that both waited behind a long
+    story (All Day Stories, sponsorships_wait_for_talks) end up back to back: Bagel Nosh
+    twice 21 s apart in the simulator (2026-11-19). Read-only (the engine's pick_next
+    passes them over; the browser player marks them skipped)."""
+    from app.api.v1.queue import OPERATOR_SOURCES
+    from app.models.asset import Asset
+    from app.models.play_log import PlayLog
+
+    now = now or datetime.now(UTC)
+    due = (
+        await db.execute(
+            select(QueueEntry.id, QueueEntry.asset_id, QueueEntry.source, Asset.sponsor_id)
+            .join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at <= now + SAFETY_MARGIN,
+                or_(QueueEntry.source.is_(None), QueueEntry.source.notin_(OPERATOR_SOURCES)),
+            )
+        )
+    ).all()
+    if not due:
+        return []
+    asset_ids = {r[1] for r in due}
+    contract = set(
+        (await db.execute(select(SpotSchedule.asset_id).where(SpotSchedule.asset_id.in_(asset_ids))))
+        .scalars().all()
+    )
+    sponsorships = {
+        r[0]: r[1] for r in due if r[2] == "ad_slot" or r[1] in contract or r[3] is not None
+    }
+    if not sponsorships:
+        return []
+    since = now - NEIGHBOUR
+    recent = set(
+        (await db.execute(
+            select(PlayLog.asset_id).where(
+                PlayLog.station_id == station_id,
+                PlayLog.start_utc >= since,
+                PlayLog.asset_id.in_(set(sponsorships.values())),
+            )
+        )).scalars().all()
+    ) | set(
+        (await db.execute(
+            select(QueueEntry.asset_id).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status.in_(("playing", "played")),
+                QueueEntry.started_at >= since,
+                QueueEntry.asset_id.in_(set(sponsorships.values())),
+            )
+        )).scalars().all()
+    )
+    return [eid for eid, aid in sponsorships.items() if aid in recent]
+
+
+async def skip_close_repeats(db: AsyncSession, station_id, now: datetime | None = None) -> int:
+    """Mark close_repeat_ids skipped. A skipped play is not in the play log, so the
+    make-up places it again later."""
+    from sqlalchemy import update
+
+    ids = await close_repeat_ids(db, station_id, now)
+    if not ids:
+        return 0
+    result = await db.execute(
+        update(QueueEntry)
+        .where(QueueEntry.id.in_(ids), QueueEntry.status == "pending")
+        .values(status="skipped")
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount:
+        logger.info(
+            "Station %s: %d sponsorship(s) skipped, the same recording aired in the last %d min",
+            station_id, result.rowcount, int(NEIGHBOUR.total_seconds() // 60),
+        )
+    return result.rowcount or 0
+
+
 async def load_blackouts(
     db: AsyncSession, station_id, start: datetime, end: datetime
 ) -> list[Blackout]:
@@ -1056,6 +1136,8 @@ async def reconcile_spot_slots(
     # Overdue or about-to-air slots are left alone below; one whose contract no
     # longer covers today must still never air.
     await skip_lapsed_sponsorships(db, station_id, now)
+    # and a due one whose recording aired in the last 20 min is skipped (made up later)
+    await skip_close_repeats(db, station_id, now)
 
     placements, unplaced = await plan_for_station(db, station, days=HORIZON_DAYS + 1, now=now)
     # Places inside program blocks are written by the block, in its order.

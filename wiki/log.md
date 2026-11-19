@@ -445,6 +445,7 @@ UPDATE 2026-11-19 bug-reports.md a lifted 🐞 appears above any dialog that cov
 UPDATE 2026-11-19 station-simulator.md scenarios with events and restarts; play-log row is written when the next item starts
 INGEST 2026-11-19 spot-schedules.md automation_config.sponsorships_wait_for_talks: sponsorship-only groups wait for a story's end (All Day Stories)
 UPDATE 2026-11-19 spot-schedules.md a soft item due while a paused story waits plays after the resume, not in the time check's pause (_resume_before_soft)
+UPDATE 2026-11-19 spot-schedules.md waiting breaks with the same recording: the second is passed over / skipped (close_repeat_ids, both players) and made up later
 UPDATE 2026-11-19 spot-schedules.md block_talk_windows: a block's own shiur counts before it is queued (Daf block queued in the same pass as the breaks); loose copies of contract audio (same title) never drawn at random (old "Sponsor Ad Every 30min" rules)
 INGEST 2026-11-19 spot-schedules.md contract totals (plays a day, days and plays over the dates, spot length) in Edit contract, client contract rows and Spot Schedule: components/sponsors/contractTotals.ts
 UPDATE 2026-11-19 admin-page-layout.md raffles use the station clock (Station choice, fromZonedInput/formatInZone; V2-36 test runs stationTime.ts in Node 22, CI backend job has Node 22); expired renewal sends ?expired=1|action and the login pages say why (V3-14)

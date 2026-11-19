@@ -453,3 +453,51 @@ async def test_engine_plays_the_rest_of_a_paused_story_before_a_waiting_sponsors
     # once the rest of the story is handed out, the sponsorship comes next
     if timing == "soft":
         assert (await playout_engine.pick_next(db_session, station.id, {str(rest.id)})).id == waiting.id
+
+
+@pytest.mark.asyncio
+async def test_two_waiting_breaks_with_the_same_sponsorship_never_play_back_to_back(db_session):
+    """All Day Stories: the 12:00 and 12:30 breaks both carried Bagel Nosh and both
+    waited behind a story; when it ended they played 21 s apart (simulator, CI on
+    PR 460). The second is skipped (the make-up places it again later)."""
+    station, talk, (spot,), song = await _setup(
+        db_session, left=19 * 60, kind="story", soft_source="ad_slot", due_ago=30 * 60,
+        extra_config={long_items.SPONSORSHIPS_WAIT: True},
+    )
+    later = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=spot.id, position=3,
+                       status="pending", source="ad_slot", preempt_at=datetime.now(UTC) - timedelta(seconds=5))
+    await db_session.execute(
+        update(QueueEntry).where(QueueEntry.station_id == station.id, QueueEntry.status == "pending",
+                                 QueueEntry.position >= 3)
+        .values(position=QueueEntry.position + 1))
+    db_session.add(later)
+    await db_session.commit()
+    assert (await queue_module._check_advance(db_session, station.id)).asset_id == talk.id
+    assert (await _finish_current(db_session, station.id)).asset_id == spot.id
+    assert (await _finish_current(db_session, station.id)).asset_id == song.id
+    await db_session.refresh(later)
+    assert later.status == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_engine_passes_over_a_sponsorship_that_just_aired(db_session):
+    """Same rule on the engine path (read-only there): the second Bagel Nosh is passed
+    over, the song plays."""
+    station = Station(id=uuid.uuid4(), name="Kol B'ramah - All Day Stories", timezone="America/New_York",
+                      automation_config={long_items.SPONSORSHIPS_WAIT: True})
+    db_session.add(station)
+    spot = _asset(db_session, "TEST SPONSOR 16 - Bagel Nosh", kind="spot")
+    song = _asset(db_session, "Song", kind="music", duration=200)
+    await db_session.flush()
+    now = datetime.now(UTC)
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=spot.id, position=1,
+                              status="playing", source="ad_slot", preempt_at=now - timedelta(minutes=40),
+                              started_at=now - timedelta(seconds=21)))
+    again = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=spot.id, position=2,
+                       status="pending", source="ad_slot", preempt_at=now - timedelta(minutes=10))
+    db_session.add(again)
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=song.id, position=3,
+                              status="pending", source="auto"))
+    await db_session.commit()
+    picked = await playout_engine.pick_next(db_session, station.id)
+    assert picked is not None and picked.asset_id == song.id

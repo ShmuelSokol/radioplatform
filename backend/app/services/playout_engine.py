@@ -692,6 +692,12 @@ async def pick_next(
             ),
         )
 
+    # Nor a sponsorship whose recording aired in the last 20 min (two breaks that both
+    # waited behind a story would otherwise play it back to back)
+    from app.services.spot_schedule_service import close_repeat_ids
+
+    exclude |= {str(x) for x in await close_repeat_ids(db, station_id, now)}
+
     def usable(entries):
         for e in entries:
             if str(e.id) not in exclude:
