@@ -17,7 +17,7 @@ silence (candle lighting to shekia + 72).
   audible end lands on candle lighting. Re-planned each pass (new analysis, regenerated window,
   changed setting) until 60 s before it starts (the engine is handed timed items 45 s ahead);
   after that it is left alone. Its other waiting copies in the queue go (it is a top hit), except
-  the next two items.
+  one the engine already holds (or, on the browser player, the very next item).
 - **Item after it (shofar)**: hard timed entry at the window's start, put *before* the blackout's
   silence entries in the same group (same `preempt_at`, lower position): the engine plays a group
   in position order. No item set = silence right after the song. Give it category

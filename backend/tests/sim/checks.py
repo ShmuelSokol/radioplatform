@@ -555,7 +555,9 @@ def shabbos_ending(res: Result, ctx: Context):
             if song.cut and song.end < ws - ON_TIME_SECONDS:
                 _add(res, check, song, song.local_end, "song was cut")
             for r in rows:
-                if r is not song and r.asset_id == str(cfg["song_asset_id"]) and r.start > start + 60 \
+                # (a copy already on its way to air when the run starts, i.e. when the
+                # ending is first planned, may still air; in production that is 6 h ahead)
+                if r is not song and r.asset_id == str(cfg["song_asset_id"]) and r.start > start + 600 \
                         and ws - 6 * 3600 < r.start < ws:
                     _add(res, check, r, r.local_start, "the song also aired earlier the same afternoon")
                 if r.category == "shabbos_ending" and not (cfg.get("after_asset_id") == r.asset_id

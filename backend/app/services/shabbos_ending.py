@@ -247,8 +247,13 @@ async def reconcile(db: AsyncSession, station, now: datetime | None = None) -> d
 
 async def _song_not_earlier(db: AsyncSession, station_id, song_id: str) -> int:
     """The song is a top hit and can come up in rotation: not in the hours before it
-    ends the week. Its waiting copies go, except the next two items (the engine may
-    hold them already)."""
+    ends the week. Its waiting copies go, except one the engine already holds (it is on
+    its way to air) and, on the browser player, the very next item."""
+    from app.config import settings
+    from app.services.playout_engine import held_entry_ids
+
+    engine = settings.engine_drives(station_id)
+    held = held_entry_ids(station_id) if engine else set()
     res = await db.execute(
         select(QueueEntry)
         .where(
@@ -260,9 +265,12 @@ async def _song_not_earlier(db: AsyncSession, station_id, song_id: str) -> int:
     )
     removed = 0
     for i, e in enumerate(res.scalars().all()):
-        if i >= 2 and str(e.asset_id) == song_id:
-            await db.delete(e)
-            removed += 1
+        if str(e.asset_id) != song_id or e.id in held or str(e.id) in {str(h) for h in held}:
+            continue
+        if not engine and i == 0:
+            continue
+        await db.delete(e)
+        removed += 1
     if removed:
         await db.flush()
     return removed

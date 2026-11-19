@@ -181,3 +181,24 @@ def test_shabbos_ending_items_never_drawn_at_random():
     from app.models.asset import NEVER_RANDOM_CATEGORIES
 
     assert "shabbos_ending" in NEVER_RANDOM_CATEGORIES
+
+
+@pytest.mark.asyncio
+async def test_other_copies_of_the_song_leave_the_queue(db_session):
+    """Browser-player station: the next item stays (it may be loading), later copies go."""
+    station, _, song, _, _ = await _setup(db_session)
+    other = Asset(id=uuid.uuid4(), title="Other", asset_type="music", duration=200.0, file_path="o.mp3")
+    db_session.add(other)
+    await db_session.flush()
+    rows = [(1, song.id), (2, other.id), (3, song.id), (4, other.id), (5, song.id)]
+    ids = {}
+    for pos, aid in rows:
+        e = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=aid, position=pos, status="pending",
+                       source="auto")
+        db_session.add(e)
+        ids[pos] = e.id
+    await db_session.commit()
+    await shabbos_ending.reconcile(db_session, station, NOW)
+    left = {e.id for e in await _pending(db_session, station.id)}
+    assert ids[1] in left and ids[2] in left and ids[4] in left
+    assert ids[3] not in left and ids[5] not in left
