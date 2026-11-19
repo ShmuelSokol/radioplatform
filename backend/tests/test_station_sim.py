@@ -58,6 +58,15 @@ async def test_no_sponsorship_inside_the_daf_yomi(tmp_path):
     assert any(r.kind == "daf_yomi" for r in result.rows)
     assert result.checks_run["no sponsorship inside a shiur or story"] >= 1
     assert not result.failed("no sponsorship inside a shiur or story")
+    # The 8:30 time check and weather pause the Daf, which then carries on where it
+    # stopped with no quiet in between (review 2026-11-19: a pause, then a resume, is
+    # where a gap of dead air would hide)
+    resumed = [r for r in result.rows if r.kind == "daf_yomi" and (r.source or "").startswith("resume@")]
+    assert resumed, "the Daf was not paused and resumed"
+    for check in ("paused shiur: one resume per pause, no audio lost or repeated",
+                  "no dead air or emergency music", "time check at :00 and :30 within 1 s"):
+        assert result.checks_run[check] >= 1, check
+        assert not result.failed(check), _failing(result, check)
 
 
 @pytest.mark.asyncio
