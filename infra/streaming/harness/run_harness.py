@@ -854,7 +854,10 @@ class Harness:
         while time.time() < end:
             e = await self.on_air()
             if e and e.asset_id == aid and e.started_at:
-                return e.started_at.timestamp()
+                # when it came on air: started_at lies its cue-in earlier (mark_started)
+                from app.models.queue_entry import aired_from
+
+                return aired_from(e).timestamp()
             await asyncio.sleep(0.25)
         return None
 
@@ -2470,7 +2473,9 @@ async def sc_rapid_next(h: Harness) -> None:
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
     st = await h.on_air()
     tl = timeline(h.heard(time.time() - 4, time.time() - 1))
-    h.check(name, bool(st) and tl and tone_name(TONES[[k for k, v in h.assets.items() if v == st.asset_id][0]][0])
+    # an extra asset that reuses a song's file (song3quiet) sounds as that song
+    key = [k for k, v in h.assets.items() if v == st.asset_id][0].removesuffix("quiet") if st else None
+    h.check(name, bool(st) and tl and key in TONES and tone_name(TONES[key][0])
             == tl[-1][1], f"what the site says is on air ({st.asset.title if st else None}) is what is heard ({tl[-1][1] if tl else None})")
 
 
@@ -2716,19 +2721,28 @@ async def sc_two_groups(h: Harness, apart: float) -> None:
         h.check(name, "EMERGENCY" not in names, f"no emergency music: {names}")
 
 
-async def sc_play_now_before_hard_item(h: Harness) -> None:
+async def sc_play_now_before_hard_item(h: Harness, next_during: bool = False) -> None:
     """V3-52l: a hard time check is loaded in the engine (it is handed over 45 s ahead)
     when the operator presses Play now on a short item. The engine's timed lane played
     its items back to back, so the time check followed the Play now item at once,
-    seconds early. It stays in the waiting room until its own time."""
-    name = "play_now_before_hard_item"
+    seconds early. It stays in the waiting room until its own time.
+
+    `next_during`: the operator then presses Next while the Play now item is on air. The
+    time check must still wait for its own second, with music in between."""
+    name = "play_now_next_before_hard_item" if next_during else "play_now_before_hard_item"
     await wait_music(h)
+    await asyncio.sleep(4)
     t1 = at(34)
     await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
     await asyncio.sleep(max(0, t1.timestamp() - 22 - time.time()))
     t_fire = time.time()
     code, _ = h.api("POST", f"/stations/{STATION_ID}/queue/fire-now", {"asset_id": str(h.assets["announce"])})
     h.check(name, code in (200, 201), f"Play now 22 s before the time check ({code})")
+    if next_during:
+        await h.wait_on_air("announce", 5)
+        await asyncio.sleep(1.5)
+        skip_code, _ = h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        h.check(name, skip_code == 200, f"Next while the Play now item is on air ({skip_code})")
     await asyncio.sleep(max(0, t1.timestamp() - time.time()) + 6 + 10)
     a = await h.started_times("announce", t_fire - 2)
     b = await h.started_times("time", t_fire - 2)
@@ -4555,6 +4569,7 @@ SCENARIOS = {
     "two_groups_1s_apart": lambda h: sc_two_groups(h, 1.0),
     "two_groups_20s_apart": lambda h: sc_two_groups(h, 20.0),
     "play_now_before_hard_item": sc_play_now_before_hard_item,
+    "play_now_next_before_hard_item": lambda h: sc_play_now_before_hard_item(h, next_during=True),
     "backend_unreachable": sc_backend_unreachable,
     "local_box_commands": sc_local_box_commands,
     "local_box_offline": sc_local_box_offline,

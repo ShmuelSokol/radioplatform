@@ -576,3 +576,32 @@ async def test_a_changed_head_flushes_the_engines_pre_loaded_song(db_session: As
         assert flushed == [station_id]
     finally:
         playout_engine.reset_state(station_id)
+
+
+@pytest.mark.parametrize("engine", [True, False])
+def test_the_song_on_air_ends_at_the_same_moment_whatever_its_cue_in(engine, monkeypatch):
+    """F-HANDOVER-17: started_at now lies the cue-in before the moment a song came on air
+    (mark_started). The fit must still see it end when it really does: the engine plays
+    cue-in to cue-out less the overlap from the moment it came on air; the browser player
+    hands over at started_at + duration - handover."""
+    from datetime import UTC, datetime
+
+    from app.models.queue_entry import mark_started
+
+    asset = _asset("Song", 210.0)
+    _analysed(asset, cue_in=4.0, cue_out=204.0)
+    entry = QueueEntry(id=uuid.uuid4(), station_id=uuid.uuid4(), asset_id=asset.id, position=1,
+                       status="pending", source="auto")
+    entry.asset = asset
+    on_air = datetime(2026, 11, 19, 3, 0, tzinfo=UTC)
+    mark_started(entry, on_air)
+    until = hour_fit.on_air_until(entry, engine)
+    if engine:
+        # from the moment it came on air: analysed start to analysed end, less the overlap
+        assert (until - on_air).total_seconds() == pytest.approx(hour_fit._seconds(entry, True))
+        assert hour_fit._seconds(entry, True) < 200.0
+    else:
+        from app.api.v1.queue import handover_seconds
+
+        # the file from its top, so 4 s less from the moment it came on air
+        assert (until - on_air).total_seconds() == pytest.approx(210.0 - handover_seconds(entry) - 4.0)
