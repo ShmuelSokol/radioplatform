@@ -331,6 +331,7 @@ radioplatform/
 | useLiveVideo.ts | Watch a station's live show on the Listen page: decodes the frames and draws them |
 | useEscape.ts | Esc closes an open dialog (New Archive, Live show, bug report) |
 | useMayChange.ts | May the signed-in person change things on this screen? The one rule for hiding or disabling change controls (see `wiki/view-only-screens.md`) |
+| useNavState.ts | useState kept with the page's place in this tab's history: Back (the Back line, browser back, iPhone swipe) finds filters, search and open panels as they were (see `wiki/back-navigation.md`) |
 
 ### API Clients (`frontend/src/api/`) — 14 modules
 auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, playlists.ts, sponsorPortal.ts, campaigns.ts, billing.ts, alerts.ts, liveShows.ts, songRequests.ts, archives.ts, client.ts (Axios + JWT interceptor)
@@ -400,6 +401,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - **Station permissions**: staff can be limited to named stations (`User.station_ids`), and a protected station (`Station.protected`, the FM feed) needs an explicit assignment. Rule: `may_operate_station`; guard: `require_station_operator`. See `wiki/station-permissions.md`.
 - **Caller address**: rate limits, listener IPs and the activity log take the caller's address from `app/core/client_ip.py` (rightmost non-internal X-Forwarded-For hop); never read the header by hand. See `wiki/client-ip.md`.
 - **Look ("qnet")**: every admin and sponsor page wears the KBR Studio look through one shared skin (`.qn-site`, `frontend/src/styles/qnet-site.css` + generated `qnet-site-colors.css`); write pages with ordinary Tailwind classes and the skin restyles them. Rules and escape hatches in `wiki/qnet-site-theme.md`.
+- **Back navigation**: every staff page but the control room has a "‹ Back to …" line (`components/layout/BackNav.tsx`, in `Layout`); coming back restores scroll, page state kept with `hooks/useNavState.ts` and lights the row last tapped (`data-nav-id` on list rows helps find it). Keep filters in the address or in `useNavState`, not plain `useState`, on list pages people open things from. See `wiki/back-navigation.md`.
 - **Page layout**: admin and sponsor pages fill the window; no `max-w-* mx-auto` page wrappers. Rules in `wiki/admin-page-layout.md`.
 - **Frontend**: All API calls through `src/api/client.ts` (default export, auto JWT refresh). Zustand for global state, React Query for server state. `StationListResponse` wraps stations in `.stations` array — always use `data?.stations?.map()`.
 - **Models**: Use `UUIDPrimaryKeyMixin` + `TimestampMixin` from `app/db/base.py`.

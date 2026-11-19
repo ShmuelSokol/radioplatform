@@ -28,7 +28,7 @@ export const SponsorsToday = memo(function SponsorsToday({ stationId, onOpen }: 
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
         {plays.map(p => (
-          <button key={p.entry_id} type="button" onClick={() => onOpen(p)} data-testid="sponsors-today-row"
+          <button key={p.entry_id} type="button" onClick={() => onOpen(p)} data-testid="sponsors-today-row" data-nav-id={`sponsor-play-${p.entry_id}`}
             className="w-full text-left flex items-center gap-2 px-3 min-h-[44px] border-b border-[#15153a] hover:bg-[#15153a] focus:bg-[#15153a]">
             <span className="w-[68px] shrink-0 tabular-nums text-xs text-gray-400">{p.local_time}</span>
             <span className="flex-1 min-w-0 leading-tight">

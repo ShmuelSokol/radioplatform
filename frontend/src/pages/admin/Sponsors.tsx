@@ -192,7 +192,7 @@ function ClientLine({ c }: { c: ClientSummary }) {
     .filter(Boolean)
     .join(' · ');
   return (
-    <tr className="hover:bg-blue-50 cursor-pointer" onClick={open} data-testid="client-row">
+    <tr className="hover:bg-blue-50 cursor-pointer" onClick={open} data-testid="client-row" data-nav-id={`client-${c.id}`}>
       <td className="px-3 py-2">
         <Link to={`/admin/sponsors/${c.id}`} className="font-semibold text-blue-700 hover:underline" onClick={(e) => e.stopPropagation()}>
           {c.name}
