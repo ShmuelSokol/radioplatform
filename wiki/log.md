@@ -455,3 +455,4 @@ INGEST 2026-11-19 station-simulator.md every Yom Tov of 5787/5788 as broadcast d
 UPDATE 2026-11-19 hourly-slots.md the hour already begun still gets its :30 time check and weather (missing after a two-day Yom Tov or an empty-queue start)
 UPDATE 2026-11-19 station-simulator.md one-station runs: loose copies of contract audio (same title, other id) get the sponsor tie in seed() too; they were still drawn as filler on Jerusalem alone
 INGEST 2026-11-19 sponsor-accounts.md Book a sponsorship window (4 steps) and GET /spot-schedules/room: room per three-hour slot per day from block places (minus off air and shiurim) or clock minutes, booked from the planner's placements
+UPDATE 2026-11-19 sponsor-accounts.md Sponsors menu renamed (Clients, All contracts, Sponsor requests, Wording rules), Sponsorship board page, client page opens on Contracts with a Requests tab

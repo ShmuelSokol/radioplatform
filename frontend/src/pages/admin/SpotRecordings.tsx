@@ -319,7 +319,7 @@ export default function SpotRecordings() {
         <p className="text-gray-600 text-sm">
           Write a sponsorship, check the wording, make the audio, listen, and
           approve it. An approved spot goes into the library under its sponsor,
-          ready for the Spot Schedule.
+          ready to book with Book a sponsorship.
         </p>
       </div>
 

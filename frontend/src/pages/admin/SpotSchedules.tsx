@@ -7,9 +7,6 @@ import { listSponsors } from '../../api/sponsors';
 import { getAssetAudioUrl, listAssets } from '../../api/assets';
 import {
   createSpotSchedule,
-  getTimingDefaults,
-  setTimingDefaults,
-  TimingDefaults,
   TimingMode,
   deleteSpotSchedule,
   listSpotSchedules,
@@ -26,6 +23,8 @@ import {
 import { useStations } from '../../hooks/useStations';
 import Spinner from '../../components/Spinner';
 import ContractEditor from '../../components/sponsors/ContractEditor';
+import BreakSettings from '../../components/sponsors/BreakSettings';
+import BookSponsorship from '../../components/sponsors/BookSponsorship';
 import type { Asset } from '../../types';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -119,7 +118,9 @@ export default function SpotSchedules() {
     setFormState(next);
     setError('');
   };
-  const [showForm, setShowForm] = useState(!!forSponsor);
+  const [showForm, setShowForm] = useState(false);
+  // Opened for one client (older links): the booking window, for that client
+  const [booking, setBooking] = useState(!!forSponsor);
   const [spotSearch, setSpotSearch] = useState('');
   const [spot, setSpot] = useState<Asset | null>(null);
   // Opened from the control room's Sponsor panel: ?station= shows that station's
@@ -146,19 +147,6 @@ export default function SpotSchedules() {
     queryKey: ['spot-plan', stationId],
     queryFn: () => previewSpotPlan(stationId, 7),
     enabled: !!stationId,
-  });
-
-  const { data: timingDefaults } = useQuery({
-    queryKey: ['spot-timing-defaults', stationId],
-    queryFn: () => getTimingDefaults(stationId),
-    enabled: !!stationId,
-  });
-  const timingMut = useMutation({
-    mutationFn: (d: TimingDefaults) => setTimingDefaults(stationId, d),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['spot-timing-defaults'] });
-      queryClient.invalidateQueries({ queryKey: ['spot-plan'] });
-    },
   });
 
   // What the last save could not fit, said at once
@@ -250,19 +238,23 @@ export default function SpotSchedules() {
     <div className="w-full space-y-8">
       <div className="flex flex-wrap justify-between items-start gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Spot Schedule</h1>
+          <h1 className="text-3xl font-bold">All contracts</h1>
           <p className="text-gray-600 mt-1">
-            Choose when each sponsor's spot airs: spread evenly through each part of the day, or
-            at exact clock times.
+            Every client's contracts in one list: which spot, when it airs and until when. The
+            next 7 days on one station are below.
           </p>
         </div>
-        <button
-          onClick={() => setShowForm((v) => !v)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap"
-        >
-          {showForm ? 'Cancel' : 'Schedule a spot'}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setBooking(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg whitespace-nowrap" data-testid="book-open">
+            Book a sponsorship
+          </button>
+          <button onClick={() => setShowForm((v) => !v)} className="px-3 py-2 border rounded-lg text-sm whitespace-nowrap">
+            {showForm ? 'Cancel' : 'Book at exact clock times'}
+          </button>
+          <Link to="/admin/sponsorship-board" className="px-3 py-2 border rounded-lg text-sm whitespace-nowrap">Sponsorship board</Link>
+        </div>
       </div>
+      {booking && <BookSponsorship start={{ sponsorId: params.get('sponsor') || undefined }} onClose={() => setBooking(false)} />}
 
       {showForm && (
         <form onSubmit={submit} className="bg-white rounded-xl shadow p-6 space-y-5">
@@ -516,7 +508,7 @@ export default function SpotSchedules() {
 
       <div className="bg-white rounded-xl shadow">
         <div className="px-6 py-4 border-b">
-          <h2 className="text-lg font-semibold">Scheduled spots</h2>
+          <h2 className="text-lg font-semibold">Contracts</h2>
         </div>
         {!schedules?.length ? (
           <p className="p-6 text-gray-500">
@@ -598,41 +590,7 @@ export default function SpotSchedules() {
           </div>
         ) : (
           <div className="p-6 space-y-5">
-            {timingDefaults && (
-              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm border rounded-lg p-3">
-                <span className="font-medium">Unless a schedule says otherwise:</span>
-                {([
-                  ['on_the_hour', 'On the hour, time, weather and spots play'],
-                  ['half_hour', 'On the half hour they play'],
-                  ['other', 'At :15 and :45 spots play'],
-                ] as const).map(([key, label]) => (
-                  <label key={key} className="flex items-center gap-2">
-                    {label}
-                    <select
-                      value={timingDefaults[key]}
-                      disabled={timingMut.isPending}
-                      onChange={(e) =>
-                        timingMut.mutate({ ...timingDefaults, [key]: e.target.value as TimingMode })
-                      }
-                      className="px-2 py-1 border rounded-lg"
-                    >
-                      <option value="hard">on the second (song fades out)</option>
-                      <option value="soft">after the song finishes</option>
-                    </select>
-                  </label>
-                ))}
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={timingDefaults.half_hour_time_check}
-                    disabled={timingMut.isPending}
-                    onChange={(e) => timingMut.mutate({ ...timingDefaults, half_hour_time_check: e.target.checked })}
-                    data-testid="half-hour-time-check"
-                  />
-                  Time check on the half hour ("The time is 10:30") before the weather
-                </label>
-              </div>
-            )}
+            <BreakSettings stationId={stationId} />
             {plan?.spots_off && (
               <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4 text-sm" data-testid="spots-off-note">
                 <p className="font-semibold">Spots mode is off on this station</p>

@@ -2,6 +2,8 @@ import { totalsLine } from '../../components/sponsors/contractTotals';
 import { useEffect, useMemo, useState } from 'react';
 import ContractEditor from '../../components/sponsors/ContractEditor';
 import BookSponsorship from '../../components/sponsors/BookSponsorship';
+import { useCampaigns } from '../../hooks/useCampaigns';
+import { CampaignFacts, StatusBadge } from '../../components/campaigns/CampaignParts';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -38,22 +40,23 @@ import {
  * (affidavit), the plays they missed, and their details.
  */
 
-type Tab = 'spots' | 'contracts' | 'plays' | 'missed' | 'details';
+type Tab = 'contracts' | 'spots' | 'plays' | 'missed' | 'requests' | 'details';
 const TABS: { key: Tab; label: string }[] = [
-  { key: 'spots', label: 'Spots' },
   { key: 'contracts', label: 'Contracts' },
-  { key: 'plays', label: 'Play history' },
+  { key: 'spots', label: 'Spots' },
+  { key: 'plays', label: 'What aired' },
   { key: 'missed', label: 'Missed plays' },
+  { key: 'requests', label: 'Requests' },
   { key: 'details', label: 'Details' },
 ];
 
 export default function SponsorDetail() {
   const { sponsorId = '' } = useParams();
   const [params, setParams] = useSearchParams();
-  const tab = (TABS.find((t) => t.key === params.get('tab'))?.key ?? 'spots') as Tab;
+  const tab = (TABS.find((t) => t.key === params.get('tab'))?.key ?? 'contracts') as Tab;
   const setTab = (t: Tab) => {
     const next = new URLSearchParams(params);
-    if (t === 'spots') next.delete('tab'); else next.set('tab', t);
+    if (t === 'contracts') next.delete('tab'); else next.set('tab', t);
     setParams(next, { replace: true });
   };
   const mayBook = useMayChange('/admin/spot-schedule');
@@ -101,7 +104,6 @@ export default function SponsorDetail() {
             </button>
           )}
           <Link to={`/admin/spot-recordings?sponsor=${c.id}`} className="px-3 py-2 border rounded-lg text-sm">Record a spot</Link>
-          <Link to={`/admin/campaigns?sponsor=${c.id}`} className="px-3 py-2 border rounded-lg text-sm">Campaigns</Link>
         </div>
       </div>
 
@@ -133,6 +135,7 @@ export default function SponsorDetail() {
       {tab === 'contracts' && <ContractsTab account={data} />}
       {tab === 'plays' && <PlaysTab account={data} />}
       {tab === 'missed' && <MissedTab loading={missed.isLoading} data={missed.data} />}
+      {tab === 'requests' && <RequestsTab clientId={c.id} />}
       {tab === 'details' && <DetailsTab account={data} />}
     </div>
   );
@@ -400,6 +403,41 @@ function ContractLine({ c, listen, account }: { c: ClientContract; listen: Retur
         </div>
       </td>
     </tr>
+  );
+}
+
+// ── requests: what the sponsor asked for in their portal (campaigns) ──
+
+function RequestsTab({ clientId }: { clientId: string }) {
+  const { data, isLoading, isError } = useCampaigns({ sponsorId: clientId });
+  if (isLoading) return <Spinner />;
+  if (isError) return <p className="p-4 text-red-700">Could not load the requests. Try again in a moment.</p>;
+  return (
+    <section className="bg-white rounded-lg shadow" data-testid="requests-tab">
+      <div className="px-4 py-2 border-b flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-semibold">Requests from the sponsor</h2>
+        <Link to={`/admin/campaigns?sponsor=${clientId}`} className="text-sm text-blue-700 underline">New request or all requests</Link>
+      </div>
+      <p className="px-4 pt-2 text-xs text-gray-600">What the sponsor asked for in their portal: wording drafts and messages. Booking airtime is Book a sponsorship.</p>
+      {!data?.length ? (
+        <p className="p-4 text-gray-500 text-sm">No requests from this sponsor.</p>
+      ) : (
+        <ul className="divide-y">
+          {data.map((r) => (
+            <li key={r.id}>
+              <Link to={`/admin/campaigns/${r.id}`} className="flex items-start justify-between gap-3 px-4 py-3 hover:bg-gray-50 min-h-[44px]" data-testid="request-row">
+                <span className="min-w-0">
+                  <span className="block font-medium break-words">{r.name}</span>
+                  {r.description && <span className="block text-sm text-gray-600 line-clamp-1">{r.description}</span>}
+                  <CampaignFacts c={r} className="mt-1 text-xs text-gray-500" />
+                </span>
+                <StatusBadge status={r.status} />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

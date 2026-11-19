@@ -66,12 +66,12 @@ async function context(browser, role, api = () => undefined, opts = {}) {
 }
 
 // ---- V3-83: the Sponsors menu per role ------------------------------------------------
-const ALL_SPONSOR_LINKS = ['All Clients', 'Book a sponsorship', 'Spot Schedule', 'Record Spots', 'Campaigns', 'Sponsorship Rules'];
+const ALL_SPONSOR_LINKS = ['Clients', 'Book a sponsorship', 'Sponsorship board', 'All contracts', 'Record Spots', 'Sponsor requests', 'Wording rules'];
 const EXPECT_MENU = {
   admin: ALL_SPONSOR_LINKS,
   manager: ALL_SPONSOR_LINKS,
-  dj: ['Campaigns'],      // access.ts: /admin/campaigns is open to all staff (read only below manager)
-  viewer: ['Campaigns'],
+  dj: ['Sponsor requests'],      // access.ts: /admin/campaigns is open to all staff (read only below manager)
+  viewer: ['Sponsor requests'],
 };
 
 async function sponsorsMenu(browser) {
@@ -87,8 +87,8 @@ async function sponsorsMenu(browser) {
     await button.click().catch(() => {});
     const links = (await nav.locator('div.hidden.md\\:flex div.absolute a').allInnerTexts()).map((s) => s.trim());
     check(`V3-83 ${role}: Sponsors menu shows exactly ${want.join(', ')}`, JSON.stringify(links) === JSON.stringify(want), links.join(' | '));
-    if (want.includes('Campaigns')) {
-      await nav.getByRole('link', { name: 'Campaigns' }).click();
+    if (want.includes('Sponsor requests')) {
+      await nav.getByRole('link', { name: 'Sponsor requests' }).click();
       await page.waitForURL(/\/admin\/campaigns$/, { timeout: 4000 }).catch(() => {});
       check(`V3-83 ${role}: Campaigns opens the campaigns page`, new URL(page.url()).pathname === '/admin/campaigns', page.url());
     }
@@ -103,7 +103,7 @@ async function sponsorsMenu(browser) {
   await page.goto(`${BASE}/admin/sponsors`);
   await sleep(1200);
   check('V3-83 sponsor: /admin/sponsors does not open the client list', new URL(page.url()).pathname !== '/admin/sponsors'
-    || !(await page.getByText('All Clients').first().isVisible().catch(() => false)), page.url());
+    || !(await page.getByText('Every client once').first().isVisible().catch(() => false)), page.url());
   await ctx.close();
 }
 
