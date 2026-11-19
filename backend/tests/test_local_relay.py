@@ -3,6 +3,7 @@ fed when the backend cannot be reached (infra/local/kbr_relay.py, wiki/local-fm-
 
 import importlib.util
 import json
+import time
 import threading
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -540,6 +541,38 @@ def test_start_reports_are_kept_and_sent_in_order_when_the_line_returns(rig):
     assert relay.status()["reports_kept"] == 0
     # and they are played from nowhere again
     assert set(relay.done) >= {"a", "b", "c"}
+
+
+def test_line_back_the_kept_reports_go_up_before_the_site_is_asked_again(rig):
+    """Simulator 2026-11-19: the box came back online and asked the site for its next
+    item before its kept start reports were sent, so the site still held what aired
+    offline as waiting: the 6 PM time check aired again at 6:24 PM (and 17 songs after a
+    16-hour outage). Until the reports are up, the box keeps to its local plan."""
+    fake, relay, _ = rig
+    fake.plan = {"blackouts": [], "entries": [fake.entry("a", 1), fake.entry("b", 2), fake.entry("c", 3)]}
+    assert relay.sync_plan()
+    relay.fetch_plan_audio()
+    fake.up = False
+    status, item = _next(relay)
+    assert status == 200 and item["entry_id"] == "a"
+    relay.started(json.dumps({"entry_id": "a", "lane": "main"}).encode())
+    assert relay.status()["reports_kept"] == 1
+
+    fake.up = True
+    # The site, not yet told, would hand "a" again
+    fake.next_answer = {"uri": fake.plan["entries"][0]["uri_main"], "entry_id": "a"}
+    status, item = _next(relay)
+    assert status == 200 and item["entry_id"] == "b"  # from the plan, not the site
+    relay.catch_up_soon()
+    for _ in range(50):
+        if relay.status()["reports_kept"] == 0 and not relay._catching.locked():
+            break
+        time.sleep(0.05)
+    assert relay.status()["reports_kept"] == 0
+    assert [json.loads(c[2])["entry_id"] for c in fake.calls if c[1] == "/started"] == ["a"]
+    # Reports up: the site is asked again
+    fake.next_answer = {"uri": fake.plan["entries"][2]["uri_main"], "entry_id": "c"}
+    assert _next(relay)[1]["entry_id"] == "c"
 
 
 def test_http_front_door_needs_the_token(rig):
