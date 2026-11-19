@@ -1362,3 +1362,43 @@ async def test_a_browser_may_send_cache_headers(client):
         "Origin": "http://localhost:3000", "Access-Control-Request-Method": "GET",
         "Access-Control-Request-Headers": "authorization,cache-control,pragma"})
     assert r.status_code == 200, r.text
+
+
+async def test_a_show_ended_as_its_host_went_on_air_does_not_leave_the_station_quiet(db_session, _quiet, monkeypatch):
+    """End Show 3 s after GO LIVE (KBR Jerusalem, 2026-11-18): End ran before the
+    take-over was written, so it gave nothing back; the take-over and the host's audio
+    landed after it. The station kept the ended show and the stream stayed quiet."""
+    from app.config import settings
+    from app.services import playout_engine
+    from app.services.scheduler_engine import SchedulerEngine
+
+    station, show, song, *_ = await _station(db_session, {"live_delay_seconds": 0})
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_ENABLED", True)
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_STATION_ID", str(station.id))
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_URL", "http://engine.invalid")
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_TOKEN", "t")
+    said = []
+
+    async def live(station_id, on):
+        said.append(on)
+        return True
+
+    monkeypatch.setattr(playout_engine, "engine_live", live)
+    relay = live_shows_ws.live_relay
+    sid = str(station.id)
+    await live_show_service.start_show(db_session, show.id)          # live, station not taken yet
+    await live_show_service.end_show(db_session, show.id)            # End: nothing to give back
+    await db_session.commit()
+    assert said == []
+    # ... and the audio socket's take-over and delay land after it
+    await db_session.refresh(station)
+    await live_show_service.take_over_station(db_session, station, show, datetime.now(UTC))
+    await db_session.commit()
+    await relay.set_on_air(sid, str(show.id), delay=0.0, heard_now=True)
+    assert said == [True] and not relay.airs[sid].closed
+    await db_session.refresh(station)
+    await SchedulerEngine()._check_live_show_hard_stop(db_session, station, str(show.id), datetime.now(UTC))
+    await db_session.refresh(station)
+    assert "live_show_id" not in (station.automation_config or {})
+    assert said == [True, False]                                      # the stream gets its music back
+    assert sid not in relay.airs or relay.airs[sid].closed

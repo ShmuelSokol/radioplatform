@@ -1168,9 +1168,12 @@ function hostMic(showId, token) {
       };
       const call = async (name, caller) => { const r = await fetch(`${API}/call-in/${STATION}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, caller }) }); return { status: r.status, json: await r.json().catch(() => null) }; };
       const calls = async () => (await api('GET', `/live-shows/${show.id}/calls`)).json.calls;
+      const OURS = ['Moshe', 'Dovid from Monsey'];
+      const unmarkOurs = async () => { for (const m of (await api('GET', '/caller-profiles')).json.callers) if (m.kind === 'web' && OURS.includes(m.name)) await api('PUT', `/caller-profiles/${m.id}`, { standing: 'normal' }); };
       try {
         // Leftovers of an earlier run: nobody is marked
-        for (const m of (await api('GET', '/caller-profiles')).json.callers) await api('PUT', `/caller-profiles/${m.id}`, { standing: 'normal' });
+        // Only this test's own callers: it used to reset every marked caller, on any backend it ran against
+        await unmarkOurs();
         const screener = await open(`/admin/live/${show.id}/screen`, { viewport: { width: 1440, height: 900 } });
         await T(screener, 'marked-callers').waitFor({ timeout: 15000 });
         const card = (page, name) => page.locator('div.rounded-lg').filter({ hasText: name }).filter({ has: page.getByTestId('caller-history') }).last();
@@ -1248,7 +1251,7 @@ function hostMic(showId, token) {
         check('M9 on a phone nothing scrolls sideways and the buttons can be tapped', m.scroll <= 0 && m.low.length === 0, JSON.stringify(m));
         await shot(small, 'screener-history-phone');
         check('M10 no errors or unexpected dialogs on any page', problems.length === 0, problems.slice(0, 4).join(' | '));
-        for (const mk of (await api('GET', '/caller-profiles')).json.callers) await api('PUT', `/caller-profiles/${mk.id}`, { standing: 'normal' });
+        await unmarkOurs();
         await api('POST', `/live-shows/${show.id}/end`);
       } finally {
         await browser.close();
