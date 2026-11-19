@@ -46,6 +46,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "httpx>=0.28.0",
     "ruff>=0.8.0",
+    "time-machine>=2.14",  # the station simulator's virtual clock (tests/sim)
     "mypy>=1.13.0",
 ]
 
