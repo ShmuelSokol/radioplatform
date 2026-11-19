@@ -52,8 +52,15 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
-async def must_wait(db: AsyncSession, station_id, entry: QueueEntry, now: datetime) -> bool:
-    """True when this automatically queued station ID must not air now (see above)."""
+async def must_wait(
+    db: AsyncSession, station_id, entry: QueueEntry, now: datetime, handed: QueueEntry | None = None
+) -> bool:
+    """True when this automatically queued station ID must not air now (see above).
+
+    handed: the item the engine already holds and plays before this one, whose start report
+    has not come yet (radio.liq asks for the next item while a short one is still loading).
+    Main 2026-11-19 13:05Z: two IDs back to back after an engine restart, because the check
+    looked at the song before the first ID instead of the first ID."""
     if not is_auto_station_id(entry):
         return False
     from app.models.station import Station
@@ -83,6 +90,13 @@ async def must_wait(db: AsyncSession, station_id, entry: QueueEntry, now: dateti
                 seconds=on_air_seconds(before.duration, before.metadata_extra)
             )
             start = max(start, ends)
+    if handed is not None and handed.started_at is None and handed.id != entry.id:
+        nxt = handed.asset
+        kind = (getattr(nxt, "asset_type", None) or "").lower()
+        if handed.preempt_at is not None or kind in NOT_BEFORE_AN_ID or is_auto_station_id(handed):
+            return True
+        if nxt is not None:
+            start += timedelta(seconds=on_air_seconds(nxt.duration, nxt.metadata_extra))
     # Not sooner than the station's shortest gap after the last ID that aired: the fill
     # spaced them by predicted times, and a cut song or a moved break brings them closer
     # (simulator: 10.2 minutes apart).

@@ -422,3 +422,34 @@ async def test_a_waiting_sponsorship_does_not_play_in_a_time_checks_pause_of_the
     for _ in range(3):
         order.append((await _finish_current(db_session, station.id)).asset_id)
     assert order == [check.id, talk.id, softs[0].id, song.id], order
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timing", ["soft", "hard"])
+async def test_engine_plays_the_rest_of_a_paused_story_before_a_waiting_sponsorship(db_session, timing):
+    """Same rule on the playout engine's pick (pick_next): after the 11:00 time check
+    paused a story, a soft 10:45 sponsorship that waited for the story plays after the
+    rest of it. The simulator drives All Day Stories through the engine and caught the
+    sponsorship in the pause (CI on PR 428, 2026-11-19). A hard item still goes first."""
+    now = datetime.now(UTC)
+    station = Station(id=uuid.uuid4(), name=f"S {uuid.uuid4().hex[:6]}", timezone="America/New_York",
+                      automation_config={long_items.SPONSORSHIPS_WAIT: True})
+    db_session.add(station)
+    story = Asset(id=uuid.uuid4(), title="story", file_path="s.mp3", asset_type="story", duration=1800.0)
+    spot = Asset(id=uuid.uuid4(), title="TEST SPONSOR", file_path="p.mp3", asset_type="spot", duration=30.0)
+    song = Asset(id=uuid.uuid4(), title="song", file_path="m.mp3", asset_type="music", duration=200.0)
+    db_session.add_all([story, spot, song])
+    await db_session.flush()
+    rest = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=story.id, position=1,
+                      status="pending", source="resume@600")
+    waiting = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=spot.id, position=2,
+                         status="pending", source="ad_slot", timing_mode=timing,
+                         preempt_at=now - timedelta(minutes=15))
+    db_session.add_all([rest, waiting, QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=song.id,
+                                                  position=3, status="pending", source="auto")])
+    await db_session.commit()
+    picked = await playout_engine.pick_next(db_session, station.id)
+    assert picked.id == (rest.id if timing == "soft" else waiting.id)
+    # once the rest of the story is handed out, the sponsorship comes next
+    if timing == "soft":
+        assert (await playout_engine.pick_next(db_session, station.id, {str(rest.id)})).id == waiting.id

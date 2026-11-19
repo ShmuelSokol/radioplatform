@@ -120,6 +120,29 @@ async def test_engine_pick_between_songs_gives_the_id(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("handed_kind,airs", [("id", False), ("music", True)])
+async def test_engine_never_gives_an_id_right_after_one_it_already_holds(db_session: AsyncSession, handed_kind, airs):
+    """Main 2026-11-19 13:05Z, after an engine restart: two IDs back to back. radio.liq asks
+    for the next item while a short one is still loading, before its start report, so the
+    check must look at the item handed out, not at the song before it."""
+    station_id, id_entry, song_entry = await _setup(db_session, "song", None)
+    held = Asset(id=uuid.uuid4(), title="held", file_path=f"{uuid.uuid4().hex}.mp3", asset_type=
+                 "jingle" if handed_kind == "id" else "music",
+                 category="station_id" if handed_kind == "id" else "lively",
+                 duration=9.0 if handed_kind == "id" else 200.0)
+    db_session.add(held)
+    await db_session.flush()
+    handed = QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=held.id, position=2,
+                        status="pending", source="auto")
+    db_session.add(handed)
+    await db_session.commit()
+    handed_id = str(handed.id)
+    picked = await playout_engine.pick_next(db_session, station_id, {handed_id}, handed_id)
+    assert picked.id == (id_entry if airs else song_entry)
+    station_id_guard._passed.pop(str(station_id), None)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("minutes_ago,airs", [(10, False), (13, True)])
 async def test_not_sooner_than_the_shortest_gap_after_the_last_id(db_session: AsyncSession, minutes_ago, airs):
     """Simulator: IDs 10.2 min apart after a hard :30 cut the song between them."""
