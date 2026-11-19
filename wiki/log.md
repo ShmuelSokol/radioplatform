@@ -463,3 +463,5 @@ UPDATE 2026-11-19 sponsor-accounts.md Sponsors menu renamed (Clients, All contra
 UPDATE 2026-11-19 sponsor-accounts.md Review pass: a click beside the booking window no longer closes a half-made booking, Book into this slot keeps the usual week, board boxes say how many plays are over, Record Spots 'Book this spot' opens the window with that spot (?sponsor=&asset=)
 UPDATE 2026-11-19 holiday-music.md a holiday list or settings change in season redraws the waiting automatic songs (queue is 48 h ahead; otherwise the change aired 2 days late)
 UPDATE 2026-11-19 holiday-music.md rest per holiday item now 3 h song / 24 h story or shiur (was 2 h / 6 h; two-story list aired each 4x a day)
+INGEST 2026-11-19 song-categories.md songs in several categories (asset_categories via in_category), mix-only shabbos/motzei_shabbos, holiday lists vs categories, NY sun blocks use Lakewood when the station has no coordinates
+UPDATE 2026-11-19 playlist-generation.md song-categories.md each run of a block starts its playlist at step 1 (cursor carried over from the last run, Motzei Shabbos opened on a hot song in the simulator)

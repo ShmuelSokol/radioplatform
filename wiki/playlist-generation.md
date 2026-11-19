@@ -7,7 +7,7 @@ Mapping, no new tables:
 - playlist sequence = `PlaylistTemplate` + ordered `TemplateSlot`s
 - start rule = the `ScheduleBlock` that names the template
 
-`backend/app/services/playlist_generator_service.py::generate` walks forward from the end of the queue. For each moment it asks `SchedulingService.rank_matching_blocks` which block is on, takes the next slot in that block's template (cursor per block, saved in `station.automation_config.playlist_generation.cursor`) and draws a song:
+`backend/app/services/playlist_generator_service.py::generate` walks forward from the end of the queue. For each moment it asks `SchedulingService.rank_matching_blocks` which block is on, takes the next slot in that block's template (cursor per block, saved in `station.automation_config.playlist_generation.cursor`; each run of a block starts at the first step, `<block>@run` holds the run's start, see wiki/song-categories.md) and draws a song:
 
 1. Artist rule first: no artist within `artist_distance` songs. If nothing is clear, the rule gives way and the pick is flagged `artist_rule_relaxed`.
 2. Longest-rested first (last `PlayLog.start_utc` on this station; never aired = most rested). Songs already waiting in the queue sort last.

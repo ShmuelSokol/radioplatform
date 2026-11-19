@@ -6,6 +6,7 @@ import { useAssetDetail } from '../../../hooks/useAssets';
 import { useCategories } from '../../../hooks/useCategories';
 import { useAssetTypes } from '../../../hooks/useAssetTypes';
 import { assetLabel, isSponsorSpot } from './shared';
+import AlsoInCategories from '../../../components/AlsoInCategories';
 import type { CtlAsset } from './shared';
 
 /** The song a quick-actions panel is open for, and where it was opened from. */
@@ -189,6 +190,9 @@ export default function SongPanel({ target, stationId, stationName, canEdit, onC
             </select>
             <span className="block text-[11px] mt-0.5">Saved as soon as you pick. Copies already in the queue stay where they are.</span>
           </label>
+
+          <AlsoInCategories assetId={id} mainCategory={category} canEdit={canEdit} compact
+            onSaved={(text) => onToast(text, 'ok')} />
 
           <div className="border-t border-[#808080] pt-2 space-y-2" data-testid="song-stop">
             <div className="text-xs font-bold">Stop this song from playing</div>

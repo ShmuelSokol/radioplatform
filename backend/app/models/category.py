@@ -20,5 +20,5 @@ class Category(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     ruleset = relationship("RuleSet", back_populates="categories")
     assets = relationship(
-        "Asset", secondary="asset_categories", back_populates="categories", lazy="selectin"
+        "Asset", secondary="asset_categories", back_populates="categories", lazy="noload"
     )
