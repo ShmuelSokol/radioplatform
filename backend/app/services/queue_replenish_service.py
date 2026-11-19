@@ -221,6 +221,12 @@ class QueueReplenishService:
         if blocks_result is None and (wants_hourly or wants_id) and not keep_hourly:
             await self._schedule_top_of_hour(wants_hourly, wants_id)
 
+        # Sefiras HaOmer: the day's count in each hh:00 group, after the time check
+        try:
+            await self._schedule_omer_counts()
+        except Exception:
+            logger.exception("Omer count could not be queued for station %s", self.station_id)
+
         await self._schedule_ad_slots()
         if self.automation_config.get("hard_start", True) is False:
             # HS off: the time checks, block items and ad slots just written (or put
@@ -1344,7 +1350,8 @@ class QueueReplenishService:
                 dt = dt.replace(tzinfo=timezone.utc)
             return dt.replace(second=0, microsecond=0)
 
-        existing_rows = [(_norm(at), category) for at, category in result.all() if at]
+        # The hour's Omer count (queued by its own pass) does not stand for its time check
+        existing_rows = [(_norm(at), category) for at, category in result.all() if at and category != "omer_count"]
         existing_preempts = {at for at, _ in existing_rows}
         # A half hour that already has its weather can still lack its time check
         # (switched on later, or the clip recorded later)
@@ -1438,6 +1445,104 @@ class QueueReplenishService:
 
         logger.info("Scheduled hourly announcements for %d hours", hours_scheduled)
 
+    async def _schedule_omer_counts(self) -> None:
+        """During Sefiras HaOmer, queue the count (services/omer_count.py) at each of the
+        station's own hh:00 for the next 48 hours, right after that hour's time check
+        and before its weather, timed like the time check. The next day's count from
+        shekia (plus the station's switch minutes); days only, as the siddur. Nothing
+        inside Shabbos / Yom Tov, nothing without the recorded clip, nothing with the
+        station's setting off. Queued counts that no longer fit (setting changed, a
+        clip recorded, a blackout added) are taken out or replaced."""
+        from app.services import omer_count as omer
+        from app.services.spot_schedule_service import default_timing, load_blackouts
+        from app.services.weather_spot_service import announcement_zone
+
+        now = datetime.now(timezone.utc)
+        station = await self._station()
+        zone = announcement_zone(station.timezone)
+        today = now.astimezone(zone).date()
+        in_season = any(omer.omer_day_on(today + timedelta(days=d)) for d in range(-1, 4))
+        if not in_season:
+            return
+
+        setting = omer.omer_setting(self.automation_config)
+        place = omer.station_place(station.latitude, station.longitude, zone.key)
+        if place is None:
+            logger.warning("Station %s has no place to count the Omer from", station.name)
+        clips = await omer.load_clips(self.db) if setting.enabled and place is not None else {}
+        clip_ids = {a.id for a in clips.values()}
+        blackouts = await load_blackouts(self.db, self.station_id, now, now + timedelta(hours=49))
+        station_timing = self.automation_config.get("spot_timing")
+
+        wanted: dict[datetime, Asset] = {}
+        if clips:
+            for mark in local_hour_marks(now, zone, 48):
+                if any(b.covers(mark) for b in blackouts):
+                    continue
+                said = omer.omer_at(mark, zone, place, setting.switch_minutes)
+                if said is None:
+                    continue
+                clip = clips.get(said)
+                if clip is not None:
+                    wanted[mark] = clip
+
+        queued = (await self.db.execute(
+            select(QueueEntry)
+            .join(Asset, Asset.id == QueueEntry.asset_id)
+            .where(
+                QueueEntry.station_id == self.station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                Asset.category == omer.CATEGORY,
+            )
+        )).scalars().all()
+        have: set[datetime] = set()
+        for entry in queued:
+            at = omer.as_utc(entry.preempt_at).replace(second=0, microsecond=0)
+            if at <= now:
+                continue  # due now or on air: left alone
+            if wanted.get(at) is not None and wanted[at].id == entry.asset_id and at not in have:
+                have.add(at)
+            else:
+                await self.db.delete(entry)
+        await self.db.flush()
+
+        for mark, clip in sorted(wanted.items()):
+            if mark in have:
+                continue
+            entry = self._timed_entry(clip, mark, default_timing(mark.astimezone(zone).minute, station_timing))
+            await self._after_time_check(mark, entry)
+        if clip_ids and wanted:
+            logger.info("Omer count queued for %d hours on station %s", len(wanted) - len(have), station.name)
+
+    async def _after_time_check(self, at: datetime, entry: QueueEntry) -> None:
+        """Put `entry` right after the time check of the group due at `at` (first in the
+        group when it has none). The group's positions are handed out again; positions
+        outside the group are not touched."""
+        await self.db.flush()
+        group = (
+            await self.db.execute(
+                select(QueueEntry, Asset.category)
+                .join(Asset, Asset.id == QueueEntry.asset_id)
+                .where(
+                    QueueEntry.station_id == self.station_id,
+                    QueueEntry.status == "pending",
+                    QueueEntry.preempt_at == at,
+                )
+                .order_by(QueueEntry.position)
+            )
+        ).all()
+        others = [(e, c) for e, c in group if e.id != entry.id]
+        if not others:
+            return
+        times = [e for e, c in others if c == "time_announcement"]
+        rest = [e for e, c in others if c != "time_announcement"]
+        order = times + [entry] + rest
+        slots = sorted(e.position for e, _ in group)
+        for e, position in zip(order, slots):
+            e.position = position
+        await self.db.flush()
+
     def _timed_entry(self, asset: Asset, at: datetime, timing_mode: str) -> QueueEntry:
         """A new automatic time or weather entry due at `at`, at the end of the queue."""
         self.max_pos += 1
@@ -1490,8 +1595,20 @@ class QueueReplenishService:
         others = [e for e in group if e.id not in ids]
         if not others:
             return
+        # The hour's Omer count stays right behind its time check (before the weather)
+        omer_ids = set()
+        if any(e.preempt_at is not None for e in others):
+            from app.services.omer_count import CATEGORY as OMER
+
+            omer_ids = set((await self.db.execute(
+                select(QueueEntry.id).join(Asset, Asset.id == QueueEntry.asset_id).where(
+                    QueueEntry.id.in_([e.id for e in others]), Asset.category == OMER
+                )
+            )).scalars().all())
+        counts = [e for e in others if e.id in omer_ids]
+        order = added[:1] + counts + added[1:] + [e for e in others if e.id not in omer_ids]
         slots = sorted(e.position for e in group)
-        for entry, position in zip(added + others, slots):
+        for entry, position in zip(order, slots):
             entry.position = position
         await self.db.flush()
 

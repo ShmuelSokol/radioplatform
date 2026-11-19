@@ -215,6 +215,7 @@ export default function Stations() {
                       saving={updateMutation.isPending}
                     />
                     <AutomationConfig
+                      stationId={station.id}
                       config={config}
                       onSave={(newConfig) => {
                         updateMutation.mutate({ id: station.id, data: { automation_config: newConfig } });
@@ -440,13 +441,130 @@ function LibraryPick({ value, onChange, testId, label, placeholder, searchLabel,
   );
 }
 
+interface OmerOverview { first_day: string; last_day: string; recorded: number; total: number }
+interface OmerHour { at: string; local: string; omer_day: number | null; text: string | null; recorded: boolean; off_air: string | null }
+interface StationOmer { enabled: boolean; switch_minutes: number; place_known: boolean; date: string; sunrise: string | null; shekia: string | null; switch_at: string | null; hours: OmerHour[] }
+
+function longDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function OmerCount({ stationId, on, setOn, switchMinutes, setSwitchMinutes, savedSwitch }: {
+  stationId: string;
+  on: boolean;
+  setOn: (v: boolean) => void;
+  switchMinutes: string;
+  setSwitchMinutes: (v: string) => void;
+  savedSwitch: number;
+}) {
+  const [overview, setOverview] = useState<OmerOverview | null>(null);
+  const [day, setDay] = useState<string>('');
+  const [hours, setHours] = useState<StationOmer | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    apiClient.get<OmerOverview>('/omer-count').then(r => {
+      if (!live) return;
+      setOverview(r.data);
+      const today = new Date();
+      const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      setDay(iso >= r.data.first_day && iso <= r.data.last_day ? iso : r.data.first_day);
+    }).catch(() => live && setFailed(true));
+    return () => { live = false; };
+  }, []);
+  useEffect(() => {
+    if (!day) return;
+    let live = true;
+    setHours(null);
+    apiClient.get<StationOmer>(`/omer-count/station/${stationId}`, { params: { on: day } })
+      .then(r => live && setHours(r.data)).catch(() => live && setFailed(true));
+    return () => { live = false; };
+  }, [day, stationId, savedSwitch]);
+  const spoken = hours?.hours.filter(h => h.text) ?? [];
+  // Hours in a row that say the same thing (and are all silent or all on the air) as one line
+  const runs: { first: OmerHour; last: OmerHour; count: number }[] = [];
+  for (const h of spoken) {
+    const prev = runs[runs.length - 1];
+    if (prev && prev.last.text === h.text && !!prev.last.off_air === !!h.off_air && prev.last.recorded === h.recorded) {
+      prev.last = h; prev.count += 1;
+    } else runs.push({ first: h, last: h, count: 1 });
+  }
+  return (
+    <div className="mt-4 max-w-lg text-sm" data-testid="omer-count">
+      <label className="flex items-start gap-2">
+        <input type="checkbox" checked={on} onChange={e => setOn(e.target.checked)} className="mt-1" data-testid="omer-count-on" />
+        <span>
+          <span className="block font-medium text-gray-700">Omer count on the hour</span>
+          <span className="block mt-1 text-xs text-gray-500">
+            During Sefiras HaOmer, right after each hour&apos;s time check: &ldquo;Today is the eighth day, which is one week
+            and one day of the Omer.&rdquo; At shekia at the station&apos;s own place it moves on to the next day. Never on
+            Shabbos or Yom Tov, and only days whose recording is uploaded.
+          </span>
+        </span>
+      </label>
+      <div className="mt-2 ml-6 flex flex-wrap items-center gap-2">
+        <span>Switch to the next day</span>
+        <input type="number" value={switchMinutes} min={0} max={90} step={1} disabled={!on}
+          onChange={e => setSwitchMinutes(e.target.value)} aria-label="Minutes after shekia the Omer count moves to the next day"
+          className="w-16 px-2 py-1 border rounded" data-testid="omer-count-switch" />
+        <span>minutes after shekia (0 = at shekia)</span>
+      </div>
+      <div className="mt-2 ml-6 text-xs text-gray-600" data-testid="omer-count-status">
+        {failed && <span className="text-red-600">The Omer count could not be loaded. Try again.</span>}
+        {overview && (
+          <span>
+            Recordings uploaded: {overview.recorded} of {overview.total}. The count runs from the night before{' '}
+            {longDate(overview.first_day)} to {longDate(overview.last_day)} (Erev Shavuos).
+          </span>
+        )}
+      </div>
+      {overview && (
+        <div className="mt-2 ml-6">
+          <label className="flex flex-wrap items-center gap-2">
+            <span>What it says on</span>
+            <input type="date" value={day} onChange={e => setDay(e.target.value)} className="px-2 py-1 border rounded"
+              aria-label="Day to show the Omer count for" data-testid="omer-count-day" />
+          </label>
+          {hours && !hours.place_known && (
+            <div className="mt-1 text-xs text-red-600">This station has no location, so it cannot tell when shekia is. Set its location above.</div>
+          )}
+          {hours && hours.shekia && (
+            <div className="mt-1 text-xs text-gray-500">
+              Shekia {hours.shekia}{hours.switch_minutes ? `, switch to the next day at ${hours.switch_at}` : ''} (saved setting).
+            </div>
+          )}
+          {hours && spoken.length === 0 && <div className="mt-1 text-xs text-gray-500">No Omer count on this day.</div>}
+          {spoken.length > 0 && (
+            <ul className="mt-1 border rounded divide-y text-xs" data-testid="omer-count-hours">
+              {runs.map(({ first, last, count }) => (
+                <li key={first.at} className="px-2 py-1">
+                  <span className="block font-medium">
+                    {count > 1 ? `${first.local} to ${last.local}` : first.local}
+                    {count > 1 && <span className="font-normal text-gray-500"> (every hour)</span>}
+                  </span>
+                  <span className={`block ${first.off_air ? 'text-gray-400 line-through' : ''}`}>{first.text}</span>
+                  {first.off_air && <span className="block text-gray-500">Silent: {first.off_air}</span>}
+                  {!first.off_air && !first.recorded && <span className="block text-amber-700">Not recorded yet, so nothing airs</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+          <span className="block mt-1 text-xs text-gray-500">Remember to press Save.</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const HOURS = Array.from({ length: 25 }, (_, h) => h);
 function hourLabel(h: number): string {
   const x = h % 24;
   return `${x % 12 === 0 ? 12 : x % 12} ${x < 12 ? 'AM' : 'PM'}`;
 }
 
-function AutomationConfig({ config, onSave, saving }: {
+function AutomationConfig({ stationId, config, onSave, saving }: {
+  stationId: string;
   config: Record<string, any>;
   onSave: (cfg: Record<string, any>) => void;
   saving: boolean;
@@ -480,6 +598,9 @@ function AutomationConfig({ config, onSave, saving }: {
     ending.after_asset_id ? { id: String(ending.after_asset_id), title: String(ending.after_title || 'Chosen item') } : null);
   const [endingShabbos, setEndingShabbos] = useState<boolean>(ending.shabbos !== false);
   const [endingYomTov, setEndingYomTov] = useState<boolean>(ending.yom_tov === true);
+  const omerCfg = (config.omer_count ?? {}) as Record<string, any>;
+  const [omerOn, setOmerOn] = useState<boolean>(omerCfg.enabled !== false);
+  const [omerSwitch, setOmerSwitch] = useState<string>(String(omerCfg.switch_minutes ?? 0));
 
   const handleSave = () => {
     const minutes = (v: string, d: number) => Math.min(240, Math.max(3, Number.isFinite(parseFloat(v)) ? parseFloat(v) : d));
@@ -512,6 +633,11 @@ function AutomationConfig({ config, onSave, saving }: {
         after_title: endingAfter?.title ?? null,
         shabbos: endingShabbos,
         yom_tov: endingYomTov,
+      },
+      omer_count: {
+        ...omerCfg,
+        enabled: omerOn,
+        switch_minutes: Math.min(90, Math.max(0, Math.round(Number.isFinite(parseFloat(omerSwitch)) ? parseFloat(omerSwitch) : 0))),
       },
       hourly_station_id: hourlyId,
       hourly_time_announcement: hourlyTime,
@@ -641,6 +767,8 @@ function AutomationConfig({ config, onSave, saving }: {
           <span className="block mt-1 text-xs text-gray-500">Remember to press Save.</span>
         </div>
       </div>
+      <OmerCount stationId={stationId} on={omerOn} setOn={setOmerOn} switchMinutes={omerSwitch}
+        setSwitchMinutes={setOmerSwitch} savedSwitch={Number(omerCfg.switch_minutes ?? 0)} />
       <h4 className="text-sm font-bold text-gray-700 uppercase mt-6 mb-2">Live shows</h4>
       <label className="block max-w-lg text-sm">
         <span className="block font-medium text-gray-700">Broadcast delay (seconds)</span>
