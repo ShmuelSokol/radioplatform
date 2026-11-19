@@ -361,8 +361,8 @@ function QueuePanel(p: Props) {
                       <button type="button" data-testid="row-from"
                         onClick={(e) => { e.stopPropagation(); p.onWhy?.(entry); }}
                         title={`${origin.title}. Click to see why it is in the queue.`}
-                        className="block max-w-full !min-h-0 truncate text-left text-[13px] font-bold text-[#7fe0ff] hover:underline">
-                        {origin.short}
+                        className="flex items-center gap-0.5 max-w-full !min-h-0 text-left text-[13px] font-bold text-[#7fe0ff] underline decoration-dotted underline-offset-2 hover:decoration-solid">
+                        <span className="truncate">{origin.short}</span><span aria-hidden="true" className="shrink-0">›</span>
                       </button>
                     ) : <span className="block truncate text-[13px]" data-testid="row-from">{origin.short}</span>}
                   </span>
@@ -374,6 +374,10 @@ function QueuePanel(p: Props) {
 
                 {/* Desktop quick actions */}
                 <span className={`hidden lg:flex absolute right-2 top-1/2 -translate-y-1/2 gap-0.5 px-0.5 bg-[#c0c0c0] text-black shadow-lg ${isSel || isCur ? '' : 'opacity-0 pointer-events-none [@media(hover:hover)]:pointer-events-auto'} group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto`} data-testid="row-quick" onClick={(e) => e.stopPropagation()}>
+                  {origin && p.onWhy && (
+                    <button type="button" onClick={() => p.onWhy?.(entry)} title="Why it is in the queue: its playlist, block and step"
+                      aria-label={`Why ${title} is in the queue`} data-testid="row-why" className="qn-btn px-1 h-5 text-[10px]">Why</button>
+                  )}
                   {a && !isSilence && p.onSong && (
                     <button type="button" onClick={() => p.onSong?.(entry)} title={isSponsor ? 'Sponsorship: sponsor, contract, plays' : 'Song: category, do not play, details'}
                       aria-label={`${isSponsor ? 'Sponsorship' : 'Song actions'} for ${title}`} data-testid="row-song" className="qn-btn px-1 h-5 text-[10px]">{isSponsor ? 'Spot' : 'Song'}</button>

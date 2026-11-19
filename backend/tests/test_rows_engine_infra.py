@@ -112,11 +112,11 @@ def test_control_port_token_post_only_and_local():
     assert sorted(ufw) == ["22/tcp", "443/tcp", "80/tcp"]
 
 
-def test_emergency_lane_is_watched_randomized_and_never_fails():
+def test_emergency_lane_is_reread_randomized_and_never_fails():
     """V1-18: files added while running are picked up, played in random order, and an
     empty folder plays silence (mksafe) rather than stopping the engine."""
     liq = _liq()
-    assert 'emergency = playlist(id="emergency", mode="randomize", reload_mode="watch", emergency_dir)' in liq
+    assert 'emergency = playlist(id="emergency", mode="randomize", reload_mode="seconds", reload=600, emergency_dir)' in liq
     assert "emergency = mksafe(emergency)" in liq
     assert re.search(r"radio = fallback\(id=\"radio\", track_sensitive=false, \[[^\]]*emergency\]\)", liq)
 
