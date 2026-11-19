@@ -463,3 +463,4 @@ UPDATE 2026-11-19 sponsor-accounts.md Sponsors menu renamed (Clients, All contra
 UPDATE 2026-11-19 sponsor-accounts.md Review pass: a click beside the booking window no longer closes a half-made booking, Book into this slot keeps the usual week, board boxes say how many plays are over, Record Spots 'Book this spot' opens the window with that spot (?sponsor=&asset=)
 UPDATE 2026-11-19 holiday-music.md a holiday list or settings change in season redraws the waiting automatic songs (queue is 48 h ahead; otherwise the change aired 2 days late)
 UPDATE 2026-11-19 holiday-music.md rest per holiday item now 3 h song / 24 h story or shiur (was 2 h / 6 h; two-story list aired each 4x a day)
+UPDATE 2026-11-19 rds-feed.md, sponsor-accounts.md Sponsor radio text on the sponsor screens (client page tab, RDS set / not set badge on the list and in the booking window); a contract's recording counts as the sponsor's spot for the RDS takeover whatever its library type

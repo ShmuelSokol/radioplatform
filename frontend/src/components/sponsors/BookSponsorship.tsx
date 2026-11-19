@@ -10,6 +10,7 @@ import { useEscape } from '../../hooks/useEscape';
 import { stationToShow } from '../../lib/lastStation';
 import Spinner from '../Spinner';
 import { contractTotals, dayList, length, runText } from './contractTotals';
+import { RdsBadge, useSponsorRds } from './SponsorRds';
 
 /**
  * Book a sponsorship: one window, four steps (spot, stations and days, time slots,
@@ -66,6 +67,7 @@ export default function BookSponsorship({ start, onClose }: { start?: BookingSta
   const stations = useMemo(() => stationData?.stations ?? [], [stationData]);
   const { data: sponsors } = useQuery({ queryKey: ['sponsors'], queryFn: listSponsors, enabled: !start?.sponsorId });
 
+  const rds = useSponsorRds();
   const [step, setStep] = useState(0);
   const [sponsorId, setSponsorId] = useState(start?.sponsorId ?? '');
   const [assetId, setAssetId] = useState('');
@@ -202,6 +204,9 @@ export default function BookSponsorship({ start, onClose }: { start?: BookingSta
             )}
             <div className="flex flex-wrap gap-2">
               <Link to={`/admin/sponsors/${sponsorId}?tab=contracts`} onClick={onClose} className="min-h-[44px] px-4 py-2 bg-blue-600 text-white rounded-lg">Open {clientName || 'the client'}</Link>
+              {!rds.isLoading && !rds.isError && !rds.isSet(sponsorId) && (
+                <Link to={`/admin/sponsors/${sponsorId}?tab=rds`} onClick={onClose} className="min-h-[44px] px-4 py-2 border rounded-lg">Add radio text (RDS)</Link>
+              )}
               <button type="button" onClick={onClose} className="min-h-[44px] px-4 border rounded-lg">Done</button>
             </div>
           </div>
@@ -351,6 +356,14 @@ export default function BookSponsorship({ start, onClose }: { start?: BookingSta
                     {perSlot === 1 ? 'once' : `${perSlot} times`} in each of these slots: {slotText}. {runText(shape, totals)}.
                   </p>
                   <p>Spot: {assetTitle}{seconds ? ` (${length(seconds)})` : ''}.</p>
+                  {!rds.isLoading && !rds.isError && (
+                    <p className="mt-1" data-testid="booking-rds">
+                      <RdsBadge set={rds.isSet(sponsorId)} />{' '}
+                      {rds.isSet(sponsorId)
+                        ? `Radios show: ${rds.lines(sponsorId).find((m) => m.is_active)?.text ?? ''}`
+                        : 'Radios will show the spot\'s title while it airs. Add a radio text on the client page after saving.'}
+                    </p>
+                  )}
                 </div>
                 {TIME_SLOTS.filter((s) => slots.includes(s.key)).some((s) => {
                   const c = fullestDay(room, s.key, days);

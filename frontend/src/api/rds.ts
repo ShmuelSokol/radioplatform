@@ -81,6 +81,10 @@ export const saveRdsSettings = async (stationId: string, body: Partial<RdsSettin
 export const listRdsMessages = async (stationId: string) =>
   (await apiClient.get<{ messages: RdsMessage[] }>('/rds/messages', { params: { station_id: stationId } })).data.messages;
 
+/** Every station's lines (the sponsor screens look up a sponsor's lines in it) */
+export const listAllRdsMessages = async () =>
+  (await apiClient.get<{ messages: RdsMessage[] }>('/rds/messages')).data.messages;
+
 export const createRdsMessage = async (body: RdsMessageInput) =>
   (await apiClient.post<RdsMessage>('/rds/messages', body)).data;
 

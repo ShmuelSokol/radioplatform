@@ -28,6 +28,13 @@ so the next line is not doubled. Empty round: `fallback_text`, else the station 
 While a spot (`asset_type` spot) is on air and `sponsor_while_spot_airs` is on, the sponsor's
 own RDS line (an active message with that `sponsor_id`, its time window ignored) or else the
 spot's title takes the line for the whole spot.
+An item counts as a sponsor's spot when its type is spot, or when a switched-on contract (SpotSchedule) airs it on
+this station (`contract_sponsor_of`): a booked library recording filed under another type still shows the
+contract's sponsor line.
+
+Sponsor side: a sponsor's lines are the same `RdsMessage` rows (kind sponsor, `sponsor_id`). The client page's
+Radio text (RDS) tab adds, changes, switches off and removes them; "RDS set" = the sponsor has a switched-on line
+(`components/sponsors/SponsorRds.tsx`, also the client list column and the booking window's last step).
 
 Placeholders: `{time}` "3:05 PM", `{date}`, `{day}`, `{temp}` "48F", `{weather}`, `{station}`.
 

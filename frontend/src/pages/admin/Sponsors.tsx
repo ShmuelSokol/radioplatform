@@ -5,6 +5,7 @@ import { createSponsor, listClients, type ClientStatus, type ClientSummary } fro
 import Spinner from '../../components/Spinner';
 import { useMayChange } from '../../hooks/useMayChange';
 import { CLIENT_STATUS_LABEL, StatusPill, span, when } from '../../components/sponsors/ClientParts';
+import { RdsBadge, useSponsorRds } from '../../components/sponsors/SponsorRds';
 import BookSponsorship from '../../components/sponsors/BookSponsorship';
 
 /**
@@ -41,6 +42,7 @@ export default function Sponsors() {
   };
 
   const { data: clients, isLoading, isError } = useQuery({ queryKey: ['sponsor-clients'], queryFn: listClients });
+  const rds = useSponsorRds();
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState('');
@@ -179,12 +181,13 @@ export default function Sponsors() {
                 <th className="px-3 py-2 hidden md:table-cell">Active</th>
                 <th className="px-3 py-2 hidden lg:table-cell">Contracts</th>
                 <th className="px-3 py-2 hidden lg:table-cell">Spots</th>
+                <th className="px-3 py-2 hidden lg:table-cell">Radio text</th>
                 <th className="px-3 py-2 hidden md:table-cell">Plays (7 days)</th>
                 <th className="px-3 py-2 hidden xl:table-cell">Last played</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {shown.map((c) => <ClientLine key={c.id} c={c} />)}
+              {shown.map((c) => <ClientLine key={c.id} c={c} rdsSet={rds.isLoading || rds.isError ? null : rds.isSet(c.id)} />)}
             </tbody>
           </table>
         </div>
@@ -193,7 +196,7 @@ export default function Sponsors() {
   );
 }
 
-function ClientLine({ c }: { c: ClientSummary }) {
+function ClientLine({ c, rdsSet }: { c: ClientSummary; rdsSet: boolean | null }) {
   const navigate = useNavigate();
   const open = () => navigate(`/admin/sponsors/${c.id}`);
   const who = [c.company_name && c.company_name !== c.name ? c.company_name : null, c.contact_name, c.contact_phone]
@@ -218,6 +221,9 @@ function ClientLine({ c }: { c: ClientSummary }) {
       </td>
       <td className="px-3 py-2 hidden lg:table-cell" data-label="Spots">
         {c.spots_on_air} on air{c.spots_in_progress ? `, ${c.spots_in_progress} in the works` : ''}
+      </td>
+      <td className="px-3 py-2 hidden lg:table-cell" data-label="Radio text">
+        {rdsSet == null ? '' : <RdsBadge set={rdsSet} />}
       </td>
       <td className="px-3 py-2 hidden md:table-cell" data-label="Plays (7 days)">
         {c.plays_7_days} <span className="text-gray-400">({c.plays_total} in all)</span>

@@ -2,6 +2,7 @@ import { totalsLine } from '../../components/sponsors/contractTotals';
 import { useEffect, useMemo, useState } from 'react';
 import ContractEditor from '../../components/sponsors/ContractEditor';
 import BookSponsorship from '../../components/sponsors/BookSponsorship';
+import SponsorRds, { RdsBadge, useSponsorRds } from '../../components/sponsors/SponsorRds';
 import { useCampaigns } from '../../hooks/useCampaigns';
 import { CampaignFacts, StatusBadge } from '../../components/campaigns/CampaignParts';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -40,12 +41,13 @@ import {
  * (affidavit), the plays they missed, and their details.
  */
 
-type Tab = 'contracts' | 'spots' | 'plays' | 'missed' | 'requests' | 'details';
+type Tab = 'contracts' | 'spots' | 'plays' | 'missed' | 'rds' | 'requests' | 'details';
 const TABS: { key: Tab; label: string }[] = [
   { key: 'contracts', label: 'Contracts' },
   { key: 'spots', label: 'Spots' },
   { key: 'plays', label: 'What aired' },
   { key: 'missed', label: 'Missed plays' },
+  { key: 'rds', label: 'Radio text (RDS)' },
   { key: 'requests', label: 'Requests' },
   { key: 'details', label: 'Details' },
 ];
@@ -60,6 +62,7 @@ export default function SponsorDetail() {
     setParams(next, { replace: true });
   };
   const mayBook = useMayChange('/admin/spot-schedule');
+  const rds = useSponsorRds();
   const [booking, setBooking] = useState(false);
 
   const { data, isLoading, isError } = useQuery({
@@ -95,6 +98,11 @@ export default function SponsorDetail() {
             <StatusPill status={c.status} label={CLIENT_STATUS_LABEL[c.status]} />
             <span>{span(c.active_from, c.active_until, c.open_ended) || 'No contract yet'}</span>
             {(c.contact_name || c.contact_phone) && <span>· {[c.contact_name, c.contact_phone].filter(Boolean).join(', ')}</span>}
+            {!rds.isLoading && !rds.isError && (
+              <button type="button" className="qn-plain" onClick={() => setTab('rds')} aria-label={`Radio text: ${rds.isSet(c.id) ? 'set' : 'not set'}. Open it`}>
+                <RdsBadge set={rds.isSet(c.id)} />
+              </button>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -135,6 +143,7 @@ export default function SponsorDetail() {
       {tab === 'contracts' && <ContractsTab account={data} />}
       {tab === 'plays' && <PlaysTab account={data} />}
       {tab === 'missed' && <MissedTab loading={missed.isLoading} data={missed.data} />}
+      {tab === 'rds' && <SponsorRds sponsorId={c.id} sponsorName={c.name} />}
       {tab === 'requests' && <RequestsTab clientId={c.id} />}
       {tab === 'details' && <DetailsTab account={data} />}
     </div>

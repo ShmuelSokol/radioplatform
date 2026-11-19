@@ -251,6 +251,9 @@ class Context:
     sponsors: dict[uuid.UUID, str]
     on_air: Asset | None
     weather: dict[str, str]
+    # The sponsor whose running contract airs the item on air: a booked recording
+    # counts as their spot even when the library files it under another type
+    contract_sponsor: uuid.UUID | None = None
 
 
 async def settings_for(db: AsyncSession, station_id: uuid.UUID) -> dict:
@@ -285,6 +288,24 @@ async def on_air_asset(db: AsyncSession, station_id: uuid.UUID) -> Asset | None:
     ).scalar_one_or_none()
 
 
+async def contract_sponsor_of(db: AsyncSession, station_id: uuid.UUID, asset: Asset) -> uuid.UUID | None:
+    """The sponsor of a switched-on contract that airs this item on this station, if any."""
+    from app.models.spot_schedule import SpotSchedule
+
+    sid = (
+        await db.execute(
+            select(SpotSchedule.sponsor_id)
+            .where(
+                SpotSchedule.asset_id == asset.id,
+                SpotSchedule.is_active.is_(True),
+                or_(SpotSchedule.station_id == station_id, SpotSchedule.station_id.is_(None)),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return uuid.UUID(str(sid)) if sid else None
+
+
 _weather_cache: dict[uuid.UUID, tuple[float, dict[str, str]]] = {}
 WEATHER_CACHE_SECONDS = 600
 
@@ -316,13 +337,16 @@ async def load_context(db: AsyncSession, station: Station) -> Context:
     on_air = await on_air_asset(db, station.id)
     if on_air is not None and on_air.sponsor_id:
         sponsor_ids.add(on_air.sponsor_id)
+    contract_sponsor = await contract_sponsor_of(db, station.id, on_air) if on_air is not None else None
+    if contract_sponsor:
+        sponsor_ids.add(contract_sponsor)
     sponsors: dict[uuid.UUID, str] = {}
     if sponsor_ids:
         for sid, name in (await db.execute(select(Sponsor.id, Sponsor.name).where(Sponsor.id.in_(sponsor_ids)))).all():
             sponsors[uuid.UUID(str(sid))] = name
     needs_weather = any({"temp", "weather"} & set(placeholders_in(m.text)) for m in messages if m.is_active)
     weather = await weather_values(station) if needs_weather else {}
-    return Context(station, settings, messages, sponsors, on_air, weather)
+    return Context(station, settings, messages, sponsors, on_air, weather, contract_sponsor)
 
 
 def _sid(value) -> uuid.UUID | None:
@@ -350,8 +374,10 @@ def compute(ctx: Context, now: datetime, *, include_on_air: bool = True, song_st
     on_air = ctx.on_air if include_on_air else None
 
     # A sponsor's spot on air takes the line for as long as it plays
-    if on_air is not None and (on_air.asset_type or "").lower() == "spot" and s["sponsor_while_spot_airs"]:
-        sponsor_id = _sid(on_air.sponsor_id)
+    booked_by = _sid(ctx.contract_sponsor)
+    is_spot = on_air is not None and ((on_air.asset_type or "").lower() == "spot" or booked_by is not None)
+    if is_spot and s["sponsor_while_spot_airs"]:
+        sponsor_id = booked_by or _sid(on_air.sponsor_id)
         for m in ctx.messages:
             if m.is_active and m.sponsor_id and _sid(m.sponsor_id) == sponsor_id:
                 text = render(m.text, values)

@@ -186,6 +186,19 @@ def test_sponsor_line_takes_over_while_their_spot_airs():
     assert rds.compute(off, datetime(2026, 11, 18, 15, tzinfo=UTC)).kind != "sponsor_on_air"
 
 
+def test_a_booked_recording_filed_under_another_type_still_shows_its_sponsor_line():
+    """A contract's recording is the sponsor's spot whatever the library calls it."""
+    sponsor_id = uuid.uuid4()
+    recording = _asset(title="Pita Hut winter", asset_type="music")  # no sponsor on the item itself
+    line = _msg("Kol B'ramah sponsor Pita Hut", kind="sponsor", sponsor_id=sponsor_id)
+    ctx = _ctx(messages=[line, _msg("Slogan")], on_air=recording, sponsors={sponsor_id: "Pita Hut"})
+    assert rds.compute(ctx, datetime(2026, 11, 18, 15, tzinfo=UTC)).kind != "sponsor_on_air"
+    ctx.contract_sponsor = sponsor_id
+    for i in range(4):
+        st = rds.compute(ctx, datetime(2026, 11, 18, 15, tzinfo=UTC) + timedelta(seconds=15 * i))
+        assert st.kind == "sponsor_on_air" and st.rt == line.text and st.sponsor_id == sponsor_id
+
+
 def test_spot_without_rds_line_shows_its_title():
     spot = _asset(title="Kol B'ramah sponsor Judaica Plaza", asset_type="spot")
     st = rds.compute(_ctx(on_air=spot), datetime.now(UTC))

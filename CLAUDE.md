@@ -267,7 +267,7 @@ radioplatform/
 - Login.tsx — Authentication
 - Holidays.tsx — Sabbath/holiday blackout management
 - Sponsors.tsx — Sponsors as a client list: on the air / starting soon / paused / ended / no contract, active dates, contracts, plays; filters and search (see `wiki/sponsor-accounts.md`)
-- SponsorDetail.tsx — One client (tabs Contracts, Spots, What aired, Missed plays, Requests, Details): Book a sponsorship (`components/sponsors/BookSponsorship.tsx`, four steps with how full each slot is; also on the Sponsors list and Sponsors > Book a sponsorship, `/admin/sponsors?book=1`); spots by stage of the flow, contracts with their settings (Edit dialog `components/sponsors/ContractEditor.tsx`, also on Spot Schedule; pause, end date), play history with CSV, missed plays, details
+- SponsorDetail.tsx — One client (tabs Contracts, Spots, What aired, Missed plays, Radio text (RDS), Requests, Details; the Radio text tab and the "RDS set / not set" badge are `components/sponsors/SponsorRds.tsx`, also on the client list and in the booking window): Book a sponsorship (`components/sponsors/BookSponsorship.tsx`, four steps with how full each slot is; also on the Sponsors list and Sponsors > Book a sponsorship, `/admin/sponsors?book=1`); spots by stage of the flow, contracts with their settings (Edit dialog `components/sponsors/ContractEditor.tsx`, also on Spot Schedule; pause, end date), play history with CSV, missed plays, details
 - Campaigns.tsx — "Sponsor requests" (campaigns from the portal) across sponsors: sponsor and status filters, New Campaign for a chosen sponsor (managers/admins; DJs and viewers view only)
 - CampaignDetail.tsx — One campaign for staff: drafts, comments, Save Status. Drafts and comments panels are shared with the sponsor portal (`components/campaigns/CampaignParts.tsx`)
 - ScheduleCheck.tsx — Look-ahead of schedule conflicts: what was settled automatically, what needs a choice
@@ -358,7 +358,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/admin/schedules/:scheduleId/blocks` → ScheduleBlocks (protected)
 - `/admin/holidays` → Holidays (protected)
 - `/admin/sponsors` → Sponsors (protected)
-- `/admin/sponsors/:sponsorId` → SponsorDetail (protected; `?tab=spots|plays|missed|requests|details`, Contracts by default)
+- `/admin/sponsors/:sponsorId` → SponsorDetail (protected; `?tab=spots|plays|missed|rds|requests|details`, Contracts by default)
 - `/admin/campaigns` → AdminCampaigns (staff; managers/admins change, DJs/viewers view only)
 - `/admin/campaigns/:id` → AdminCampaignDetail (same roles)
 - `/admin/schedule-check` → ScheduleCheck (protected)
@@ -537,6 +537,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-compact.mjs
 
 # The Sponsors client list and client page at desktop and phone sizes (real backend with clients that have a running contract and plays)
 cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMIN_PASSWORD=... node e2e/sponsor-clients.mjs
+
+# A sponsor's radio text (RDS) from the client page, client list and booking window (real backend with a client that has a spot)
+cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMIN_PASSWORD=... node e2e/sponsor-rds.mjs
 
 # The Sponsorship board: week grid, one day on a phone, who is booked, Book into this slot (real backend)
 cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMIN_PASSWORD=... node e2e/sponsorship-board.mjs
