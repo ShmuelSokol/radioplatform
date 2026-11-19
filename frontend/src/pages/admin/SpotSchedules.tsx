@@ -1,3 +1,4 @@
+import { totalsLine } from '../../components/sponsors/contractTotals';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { rememberStation, stationToShow } from '../../lib/lastStation';
@@ -543,6 +544,7 @@ export default function SpotSchedules() {
                     {s.start_date ? `, from ${s.start_date}` : ''}
                     {s.end_date ? `, until ${s.end_date}` : ''}
                   </p>
+                  <p className="text-sm font-medium" data-testid="schedule-totals">{totalsLine(s)}</p>
                 </div>
                 <button onClick={() => listen(s.asset_id)} className="text-blue-600 text-sm">
                   {playing?.id === s.asset_id ? 'Stop' : 'Listen'}

@@ -420,3 +420,4 @@ UPDATE 2026-11-19 spot-schedules.md sponsorships avoid hard breaks inside a shiu
 UPDATE 2026-11-19 playlist-generation.md station IDs: generic "any jingle" picks (seeded Jingle Every 30 Min rule, jingle steps/items with no category) drew them; not_station_id() in fit_for_random_pick; no short step after a short item
 UPDATE 2026-11-19 spot-schedules.md rebuild-steering test checks only dayparts not yet begun (late in a daypart a shiur break is the right overflow; the test failed on main at 7:47 PM ET)
 UPDATE 2026-11-19 spot-schedules.md never a sponsorship inside a shiur or one sponsor within 20 min (rules, not preferences); paused shiur (resume@ entry) is a talk window; _SponsorGuard last check before queueing block sponsorships
+INGEST 2026-11-19 spot-schedules.md contract totals (plays a day, days and plays over the dates, spot length) in Edit contract, client contract rows and Spot Schedule: components/sponsors/contractTotals.ts

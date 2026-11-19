@@ -100,3 +100,6 @@ Tests and the clock: a slot due within the 2-minute safety margin is left alone 
 ## Plays skipped by staff (2026-11-18)
 
 The control room's Sponsor panel can skip one coming `ad_slot` play: the queue row becomes status `cancelled` and `reconcile_spot_slots` treats a cancelled row at that minute for that recording as kept, so the play is not planned again. Put back sets it to `pending`. See [control-room](control-room.md#sponsor-panel-tapping-a-sponsorship-spot-2026-11-18).
+
+
+**Contract totals (2026-11-19).** Shmuel asked to see clearly how many times a day a spot plays and for how long. `frontend/src/components/sponsors/contractTotals.ts` works out plays a day (slots × plays in each, or the set times), the days it plays between its dates, total plays and plays left from today, and the spot's length. It shows at the top of the Edit contract dialog (sticky, live as fields change, with × n on each ticked slot and a "Plays a day" picker that sets an equal share per slot), on the client page's contract rows and on Spot Schedule. These are the contract's promise; plays the planner leaves out (no room) show as warnings and in missed plays.
