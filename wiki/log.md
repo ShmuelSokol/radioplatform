@@ -213,6 +213,7 @@ INGEST 2026-11-19 station-simulator.md virtual-clock station simulator (tests/si
 INGEST 2026-11-16 release-pickup.md A screen whose code file vanished still showed "The site was updated" right after leaving Listen: the stale-code reload honoured the 2-min audio grace, but leaving Listen had stopped the sound. Now only sound playing at that moment (checked 300 ms later, after the old screen unmounts) blocks the reload. Browser check: e2e/site-release step 5.
 INGEST 2026-11-16 control-room.md meters are RMS dBFS (-40..0, red above -8) with ballistics; mute and Listen never change them
 
+UPDATE 2026-11-19 station-simulator.md year-plan test (no simulation), real play-log checker (tests/sim/playlog.py), local FM box offline runs with the real relay (tests/sim/offline.py), quiet-pass speed-up
 INGEST 2026-11-16 operator-actions.md placeholders (NEVER_AUTO_TITLES) are skipped at pick time from every automatic source (_skip_placeholders); short or timed items hand over 0.3 s before their end, not at half their length
 INGEST 2026-11-16 control-room.md Listen is remembered across reloads (localStorage kbr-cr-listen); first click turns sound back on
 INGEST 2026-11-18 control-room.md iPhone: sound may start only in click/keydown (not touchstart/pointerdown); with Listen remembered no tap ever gave sound; header shows a labelled Listen button until sound is live; stream starts in the tap via lib/liveStream; e2e/control-room-iphone-sound.mjs with IOS_SOUND_POLICY

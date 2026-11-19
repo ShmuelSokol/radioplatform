@@ -1,0 +1,140 @@
+"""The same rule checks on a REAL play log: no simulation at all.
+
+    cd backend && uv run python -m tests.sim.playlog /path/to/export.json
+
+The export is what the PC thread writes from production (read only): `stations`, `assets`
+(id, title, asset_type, category, duration), `spot_schedules`, `holiday_windows` and
+`play_logs` rows of {station_id, asset_id, start_utc, end_utc} (the older key
+`play_logs_main_0030_0215Z` is read as Main's). Checks that need the queue's timing
+fields (hard/soft per item) are left out; the time check at :00 and :30 covers on-time.
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+from collections import defaultdict
+from datetime import UTC, datetime
+from pathlib import Path
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
+
+from tests.sim import checks
+from tests.sim.stations import BLANKED, MAIN
+
+_CLOCK = re.compile(r"(\d{1,2}):(\d{2})\s*$")
+REAL_CHECKS = [checks.shabbos_silence, checks.time_checks_on_the_hour, checks.no_dead_air,
+               checks.nothing_inside_a_shiur, checks.sponsor_spacing, checks.station_ids,
+               checks.station_isolation, checks.time_check_says_the_hour]
+
+
+def _dt(text: str) -> datetime:
+    d = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    return d if d.tzinfo else d.replace(tzinfo=UTC)
+
+
+def _asset(a: dict):
+    meta = {}
+    if a.get("category") == "time_announcement":
+        m = _CLOCK.search(a.get("title") or "")
+        if m:  # "Time Announcement - 20:30"
+            meta = {"time_of_day": f"{int(m.group(1)):02d}"}
+            if m.group(2) == "30":
+                meta["time_minute"] = "30"
+    return SimpleNamespace(id=a["id"], title=a.get("title") or "", asset_type=a.get("asset_type") or "",
+                           category=a.get("category"), duration=a.get("duration"), metadata_extra=meta)
+
+
+HOLE_SECONDS = 1800.0  # nothing logged for this long: the log was off, not dead air
+
+
+def check_export(export: dict, since: datetime | None = None, station: str | None = None) -> checks.Result:
+    assets = {a["id"]: _asset(a) for a in export["assets"]}
+    stations = {}
+    for s in export["stations"]:
+        config = {k: (BLANKED.get(k, True) if v == "<removed>" else v)
+                  for k, v in (s.get("automation_config") or {}).items()}
+        stations[s["id"]] = SimpleNamespace(id=s["id"], name=s["name"], timezone=s["timezone"],
+                                            automation_config=config)
+    spot_sponsor, spot_station = {}, defaultdict(set)
+    for s in export.get("spot_schedules", []):
+        spot_sponsor[s["asset_id"]] = s["sponsor_id"]
+        spot_station[s["asset_id"]].add(s.get("station_id"))
+    logs = list(export.get("play_logs") or [])
+    for p in export.get("play_logs_main_0030_0215Z") or []:
+        logs.append({**p, "station_id": MAIN})
+    rows = []
+    for p in logs:
+        sid = p["station_id"]
+        if sid not in stations or not p.get("end_utc") or (station and sid != station):
+            continue
+        if since is not None and _dt(p["start_utc"]) < since:
+            continue
+        a = assets.get(p.get("asset_id") or "")
+        begun, ended = _dt(p["start_utc"]).timestamp(), _dt(p["end_utc"]).timestamp()
+        if a is not None and a.duration:
+            # a row closed late (after a restart) did not air past the item's own length
+            ended = min(ended, begun + float(a.duration) + 5.0)
+        rows.append(checks.Row(
+            sid, None, "main", begun, ended, False, 0.0,
+            a.title if a else "(unknown item)", kind=a.asset_type if a else "", category=a.category if a else None,
+            asset_id=a.id if a else None, sponsor=checks._sponsor_key(a, spot_sponsor),
+            tz=ZoneInfo(stations[sid].timezone or "America/New_York"),
+        ))
+    rows.sort(key=lambda r: (r.station, r.start))
+    # A paused shiur shows as two rows of one asset: mark the first as cut, and give the
+    # second its place in the recording so the "resumed where it stopped" check can run
+    played: dict = {}
+    for r in rows:
+        if r.is_long and r.asset_id:
+            key = (r.station, r.asset_id)
+            prev = played.get(key)
+            if prev is not None and r.start - prev.end < 3 * 3600:
+                prev.cut = True
+                r.cue_in = prev.cue_in + prev.seconds
+            played[key] = r
+    blackouts = []
+    for h in export.get("holiday_windows", []):
+        if h.get("is_blackout", True):
+            blackouts.append({"start": _dt(h["start_datetime"]), "end": _dt(h["end_datetime"]),
+                              "stations": set((h.get("affected_stations") or {}).get("station_ids") or []),
+                              "reason": h.get("reason") or h.get("name")})
+    start = min((r.start for r in rows), default=0.0)
+    end = max((r.end for r in rows), default=0.0)
+    holes = defaultdict(list)
+    last: dict = {}
+    for r in rows:
+        prev = last.get(r.station)
+        if prev is not None and r.start - prev.end > HOLE_SECONDS:
+            holes[r.station].append((prev.end, r.start))
+        last[r.station] = r
+    sim = SimpleNamespace(start_dt=datetime.fromtimestamp(start, UTC), t=end, blackouts=blackouts,
+                          real_log=True, holes=holes)
+    res = checks.Result(rows, names={k: v.name for k, v in stations.items()})
+    res.sim_hours = (end - start) / 3600
+    ctx = checks.Context(sim, stations, {}, assets, spot_station)
+    for check in REAL_CHECKS:
+        check(res, ctx)
+    name = "stretches with nothing logged (over 30 min)"
+    res.checks_run[name] = sum(len(v) for v in holes.values())
+    for sid, spans in holes.items():
+        tz = ZoneInfo(stations[sid].timezone)
+        for a, b in spans:
+            covered = any(w["start"].timestamp() - 600 <= a and b <= w["end"].timestamp() + 600
+                          and (not w["stations"] or sid in w["stations"]) for w in blackouts)
+            if not covered:
+                res.findings.append(checks.Finding(
+                    name, sid, datetime.fromtimestamp(a, UTC).astimezone(tz).strftime("%a %b %d %H:%M"),
+                    f"nothing logged for {(b - a) / 3600:.1f} h, until "
+                    f"{datetime.fromtimestamp(b, UTC).astimezone(tz):%a %b %d %H:%M}"))
+    return res
+
+
+def main():
+    since = _dt(sys.argv[2]) if len(sys.argv) > 2 else None
+    res = check_export(json.loads(Path(sys.argv[1]).read_text()), since, sys.argv[3] if len(sys.argv) > 3 else None)
+    print(res.report().replace("Simulated", "Real play log:", 1))
+
+
+if __name__ == "__main__":
+    main()

@@ -238,6 +238,27 @@ class Simulator:
                 except Exception:
                     pass
 
+    def _pass_gap(self) -> float:
+        """Every 3 s, as the real loop, near anything that matters: an item ending within
+        20 s, a quarter-hour mark (time checks, breaks) within 60 s, a timed item handed
+        over or an operator action. In between, every `quiet_pass` seconds: the engine's
+        hand-over looks 45 s ahead, so nothing is handed over late."""
+        if self.quiet_pass <= PASS_SECONDS:
+            return PASS_SECONDS
+        t = self.t
+        to_mark = 900 - (t % 900)
+        if to_mark < 60 or (t % 900) < 15:
+            return PASS_SECONDS
+        for e in self.engines.values():
+            nt = e.next_event_time()
+            if nt is not None and nt - t < 20:
+                return PASS_SECONDS
+            if e.timed or e.group or (e.on_air is not None and e.on_air.lane != "main"):
+                return PASS_SECONDS
+        if t - getattr(self, "last_action", -1e9) < 60:
+            return PASS_SECONDS
+        return max(PASS_SECONDS, min(self.quiet_pass, to_mark - 60))
+
     async def run_until(self, end: datetime, on_step=None):
         end_t = end.astimezone(UTC).timestamp()
         next_pass = self.t
@@ -257,7 +278,7 @@ class Simulator:
             if self.t + 1e-6 >= next_pass:
                 await self.scheduler_pass()
                 await self._settle()
-                next_pass = self.t + PASS_SECONDS
+                next_pass = self.t + self._pass_gap()
             if on_step is not None:
                 await on_step(self)
         for seg in self.log:

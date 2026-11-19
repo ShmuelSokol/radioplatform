@@ -50,11 +50,17 @@ async def test_main_top_of_the_hour_into_the_daf_yomi(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.xfail(strict=True, reason=(
-    "Reproduction (2026-11-19 simulator): sponsorship breaks at :15/:30/:45/:00 are queued "
-    "inside the 8 PM Daf Yomi when the shiur's block is queued in the same pass as the breaks "
-    "(talk_windows only sees shiurim already in the queue). Reported to the sponsorship thread."))
+    "Reproduction (2026-11-19 simulator): sponsorship breaks at :15/:30/:45 are queued inside "
+    "the 8 PM Daf Yomi when the shiur's block is queued in the same pass as the breaks "
+    "(talk_windows only saw shiurim already in the queue). Fix: PR 406; drop this mark with it."))
 async def test_no_sponsorship_inside_the_daf_yomi(tmp_path):
-    result = await _run(tmp_path, datetime(2026, 11, 18, 19, 58, tzinfo=NY), 0.35, ["main"])
+    """Main, 7:40 to 8:46 PM ET on 2026-11-18: the Daf Yomi starts after the 8 PM break and
+    is on air across :15, :30 and :45."""
+    _, result = await simulate(EXPORT, datetime(2026, 11, 18, 19, 40, tzinfo=NY), 1.1, ["main"], tmp_path,
+                               quiet_pass=12.0)
+    print(result.report())
+    assert any(r.kind == "daf_yomi" for r in result.rows)
+    # the time check still pauses it at 8:30 and it carries on
     assert result.checks_run["no sponsorship inside a shiur or story"] >= 1
     assert not result.failed("no sponsorship inside a shiur or story")
 
@@ -77,3 +83,23 @@ async def test_shabbos_starts_with_silence_at_candle_lighting(tmp_path):
 async def test_a_whole_day(tmp_path, station):
     result = await _run(tmp_path, datetime(2026, 11, 19, 0, 0, tzinfo=NY), 24, [station])
     assert not result.failed(), result.report()
+
+
+@pytest.mark.asyncio
+async def test_fm_box_with_its_line_cut_for_half_an_hour(tmp_path):
+    """The local FM box (real relay, infra/local/kbr_relay.py) loses its internet line
+    across the 6 PM time check while staff change the queue on the site: the box keeps to
+    the plan on its disk, the time check is on its second, nothing is silent, and when
+    the line is back every play is in the site's log at the time it really aired."""
+    from tests.sim.offline import run
+
+    at = lambda h, m: datetime(2026, 11, 19, h, m, tzinfo=NY)  # noqa: E731
+    result, notes, text = await run(EXPORT, at(17, 40), at(17, 50), at(18, 20), at(18, 30))
+    print(text)
+    for check in ("hard items start on their second", "time check at :00 and :30 within 1 s",
+                  "no dead air or emergency music", "no queue entry airs twice"):
+        assert not result.failed(check), _failing(result, check)
+    joined = "\n".join(notes)
+    assert "off their second: 0" in joined
+    assert "0 at a wrong time, 0 not logged" in joined
+    assert "(0 emergency-music stretches" in joined

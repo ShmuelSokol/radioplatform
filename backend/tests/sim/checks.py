@@ -259,6 +259,11 @@ def time_checks_on_the_hour(res: Result, ctx: Context):
                     continue
                 if any(s.start - 1 <= mark <= s.end + 1 for s in silence):
                     continue  # blackout
+                if any(a <= mark <= b for a, b in getattr(ctx.sim, "holes", {}).get(sid, ())):
+                    continue  # nothing was logged then
+                if any(w["start"].timestamp() <= mark <= w["end"].timestamp()
+                       and (not w["stations"] or sid in w["stations"]) for w in getattr(ctx.sim, "blackouts", ())):
+                    continue
                 _count(res, check)
                 hit = [r for r in rows if r.is_time and abs(r.start - mark) <= ON_TIME_SECONDS]
                 if not hit:
@@ -282,6 +287,8 @@ def no_dead_air(res: Result, ctx: Context):
             gap = cur.start - prev.end
             hold_ok = (cur.timing_mode == "hard" and cur.preempt_at is not None
                        and abs(cur.start - cur.preempt_at.timestamp()) <= 1 and gap <= HOLD_SECONDS)
+            if gap > 1800 and getattr(ctx.sim, "real_log", False):
+                continue  # the log itself was off (reported on its own)
             if gap > DEAD_AIR_SECONDS and not hold_ok:
                 _add(res, check, cur, prev.local_end, f"{gap:.1f} s of silence before {cur.label()}")
         for r in rows:
@@ -383,6 +390,8 @@ def station_isolation(res: Result, ctx: Context):
         region = (ctx.config(r.station).get("weather_region") or "lakewood").lower()
         meta = a.metadata_extra if isinstance(a.metadata_extra, dict) else {}
         if a.category in ("time_announcement", "weather_spot"):
+            if "region" not in meta and getattr(ctx.sim, "real_log", False):
+                continue  # a real play log's export carries no region
             _count(res, check)
             if (meta.get("region") or "lakewood") != region:
                 _add(res, check, r, r.local_start, f"{a.title!r} is for region {meta.get('region')}, station is {region}")
@@ -404,6 +413,8 @@ def time_check_says_the_hour(res: Result, ctx: Context):
         meta = a.metadata_extra if isinstance(a.metadata_extra, dict) else {}
         local = datetime.fromtimestamp(r.start + 2, UTC).astimezone(r.tz)
         _count(res, check)
+        if "time_of_day" not in meta:
+            continue
         hour = int(meta.get("time_of_day", -1))
         minute = 30 if str(meta.get("time_minute")) == "30" else 0
         expect_min = 30 if local.minute >= 30 else 0

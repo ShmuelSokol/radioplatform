@@ -27,11 +27,12 @@ PICK = {"main": MAIN, "jerusalem": JERUSALEM, "stories": STORIES}
 
 
 async def simulate(export_path, start: datetime, hours: float, stations: list[str], out_dir: Path,
-                   overrides: dict | None = None, quiet: bool = True, daf_every_day: bool = True):
+                   overrides: dict | None = None, quiet: bool = True, daf_every_day: bool = True,
+                   quiet_pass: float = 3.0):
     export = load_export(export_path)
     keep = {PICK[s] for s in stations}
     out_dir.mkdir(parents=True, exist_ok=True)
-    sim = Simulator(out_dir / f"sim-{uuid.uuid4().hex[:6]}.db", start)
+    sim = Simulator(out_dir / f"sim-{uuid.uuid4().hex[:6]}.db", start, quiet_pass=quiet_pass)
 
     async def do_seed(db):
         blocks = {}
@@ -77,13 +78,16 @@ def main():
     p.add_argument("--stations", default="main")
     p.add_argument("--out", default="/tmp/station-sim")
     p.add_argument("--verbose", action="store_true")
+    p.add_argument("--quiet-pass", type=float, default=12.0,
+                   help="seconds between scheduler passes when nothing is near (3 = always as live)")
     a = p.parse_args()
     logging.basicConfig(level=logging.INFO if a.verbose else logging.ERROR)
     start = datetime.fromisoformat(a.start)
     if start.tzinfo is None:
         start = start.replace(tzinfo=NY)
     out = Path(a.out)
-    sim, result = asyncio.run(simulate(a.export, start, a.hours, a.stations.split(","), out))
+    sim, result = asyncio.run(simulate(a.export, start, a.hours, a.stations.split(","), out,
+                                       quiet_pass=a.quiet_pass))
     log_path = out / f"playlog-{start:%Y%m%dT%H%M}-{a.stations.replace(',', '-')}.csv"
     write_log(result, log_path)
     print(result.report())
