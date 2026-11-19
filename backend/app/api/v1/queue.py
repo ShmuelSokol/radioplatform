@@ -155,6 +155,38 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
     return total
 
 
+async def _drop_timed_inside(db: AsyncSession, station_id, silence_id, start, end) -> int:
+    """Timed items (time check, weather, sponsorships, IDs) due inside a blackout leave
+    the queue: nothing but silence goes on air on Shabbos / Yom Tov. They are queued
+    before the window is known or before it moved: KBR Jerusalem's 16:00 time check
+    (2026-11-20 14:00Z) was queued while candle lighting was still 14:19Z, and the
+    window then moved to 13:57Z (40 minutes in Israel). The engine is handed timed
+    items ahead of their time, so the blackout must not be left to the moment they air.
+    The item at candle lighting (the shofar, shabbos_ending) stays."""
+    from app.services.shabbos_ending import SOURCE as SHABBOS_END
+
+    res = await db.execute(
+        select(QueueEntry.id).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.preempt_at.isnot(None),
+            QueueEntry.preempt_at >= start,
+            QueueEntry.preempt_at < end,
+            QueueEntry.asset_id != silence_id,
+            or_(QueueEntry.source.is_(None), QueueEntry.source != SHABBOS_END),
+        )
+    )
+    ids = list(res.scalars().all())
+    if ids:
+        await db.execute(
+            update(QueueEntry).where(QueueEntry.id.in_(ids)).values(status="skipped")
+        )
+        await db.commit()
+        logger.info("Station %s: %d timed item(s) inside the blackout from %s left the queue",
+                    station_id, len(ids), start)
+    return len(ids)
+
+
 async def _fill_single_blackout(db: AsyncSession, station_id, window: "HolidayWindow"):
     """Fill queue with silence for a single blackout window."""
     import math
@@ -187,6 +219,8 @@ async def _fill_single_blackout(db: AsyncSession, station_id, window: "HolidayWi
         return 0
 
     num_silence = math.ceil(total_seconds / silence_duration)
+
+    await _drop_timed_inside(db, station_id, silence.id, blackout_start, blackout_end)
 
     # Count existing silence entries for THIS specific blackout
     if is_active_now:
