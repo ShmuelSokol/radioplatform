@@ -261,6 +261,11 @@ class SchedulingService:
     # Stations in Israel without saved coordinates use Jerusalem's sun times.
     ISRAEL_ZONES = ("Asia/Jerusalem", "Asia/Tel_Aviv")
     JERUSALEM = (31.7683, 35.2137)
+    # A station with no coordinates keeps its zmanim where its Shabbos silence is worked out
+    # (Lakewood for New York time, tests/sim/checks.PLACES): a "sunset + 72 min" Motzei
+    # Shabbos block used the block's clock time instead (2026-11-19; the live stations have
+    # no coordinates stored).
+    ZONE_PLACES = {"America/New_York": (40.0821, -74.2097)}
 
     def _sun_moment(
         self, sun_event: SunEvent, offset_minutes: int, station, day, fallback: time | None = None
@@ -280,6 +285,8 @@ class SchedulingService:
         lon = station.longitude if station else None
         tz = (station.timezone if station else None) or "UTC"
 
+        if (lat is None or lon is None) and tz in self.ZONE_PLACES:
+            lat, lon = self.ZONE_PLACES[tz]
         if lat is None or lon is None:
             if tz in self.ISRAEL_ZONES or fallback is None:
                 lat, lon = self.JERUSALEM
