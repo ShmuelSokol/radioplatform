@@ -46,6 +46,8 @@ function recordAxios(config: unknown, status?: number, error?: string) {
  * instead of each sending its own.
  */
 let renewing: Promise<string> | null = null;
+/** A change (not a read) was refused when the renewal failed: the login page says it was not done. */
+let lostChange = false;
 function renewSession(refreshToken: string): Promise<string> {
   if (!renewing) {
     renewing = axios
@@ -88,9 +90,14 @@ apiClient.interceptors.response.use(
         } catch {
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
-          // Redirect to appropriate login based on current path
+          // Redirect to appropriate login based on current path, saying why: the
+          // renewal has expired too (open overnight). A change (not a read) was not
+          // done and is never sent later, so the login page says that as well.
           const isSponsor = window.location.pathname.startsWith('/sponsor');
-          window.location.href = isSponsor ? '/sponsor/login' : '/admin/login';
+          // Reads polling in the background fail at the same moment; whichever sends the
+          // page last, a refused change still shows.
+          if ((originalRequest.method ?? 'get').toLowerCase() !== 'get') lostChange = true;
+          window.location.href = `${isSponsor ? '/sponsor/login' : '/admin/login'}?expired=${lostChange ? 'action' : '1'}`;
         }
       }
     }

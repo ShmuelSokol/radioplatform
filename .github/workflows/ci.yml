@@ -76,6 +76,10 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/pyproject.toml
+      # Some tests run small frontend helpers (lib/stationTime.ts) in Node 22, which reads TypeScript.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Install dependencies
         working-directory: backend
         run: pip install -e ".[dev]"
