@@ -52,6 +52,8 @@ NEEDS_MORE = {
     "/api/v1/assets/{asset_id}/station-block": "needs a song; answers only for the station asked (tests/test_station_block.py)",
     "/api/v1/sponsors/{sponsor_id}/plays": "needs a client; the station is only a filter of its plays (tests/test_sponsor_accounts.py)",
     "/api/v1/spot-schedules/for-asset/{asset_id}": "needs a spot; other stations' contracts only for staff on every station (tests/test_sponsor_panel.py)",
+    "/api/v1/holiday-music/{holiday}/days": "needs a holiday; dates on the station's own calendar (tests/test_holiday_music.py)",
+    "/api/v1/holiday-music/{holiday}/items": "needs a holiday; every-station items plus the station's own only (tests/test_holiday_music.py)",
 }
 
 

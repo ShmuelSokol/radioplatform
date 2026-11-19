@@ -480,10 +480,10 @@ async def _pick_next_pending(
         return await _resume_before_soft(db, station_id, entry)
     from sqlalchemy.orm import joinedload
 
-    from app.services.station_id_guard import must_wait
+    from app.services.station_id_guard import must_wait, postpone
 
     # A station ID that would follow a break or another spoken item, or land next to a
-    # break, is skipped (services/station_id_guard.py); at most a few in a row
+    # break, moves one song later (or is skipped) (services/station_id_guard.py); at most a few in a row
     for _ in range(4):
         result = await db.execute(
             select(QueueEntry)
@@ -499,8 +499,9 @@ async def _pick_next_pending(
         entry = result.unique().scalar_one_or_none()
         if entry is None or not await must_wait(db, station_id, entry, now_utc):
             return entry
-        entry.status = "skipped"
-        await db.flush()
+        if not await postpone(db, station_id, entry):  # one song later, or skipped
+            entry.status = "skipped"
+            await db.flush()
     return None
 
 
@@ -1701,6 +1702,19 @@ async def _get_queue_impl(station_id, limit, db):
                 blackout_ends[bo_start] = bo_end
                 blackout_names[bo_start] = w.name
 
+    # Holiday items in season (services/holiday_music.py): the queue row says which
+    # holiday, so the operator sees exactly where they air
+    holiday_of: dict[str, str] = {}
+    try:
+        from app.models.station import Station
+        from app.services.holiday_music import holidays_for_assets
+
+        station_row = await db.get(Station, station_id)
+        if station_row is not None:
+            holiday_of = await holidays_for_assets(db, station_row, {e.asset_id for e in entries})
+    except Exception:
+        logger.exception("Holiday tags failed for station %s", station_id)
+
     entries_data = []
     queue_duration = 0.0
     in_silence_block = False
@@ -1782,6 +1796,8 @@ async def _get_queue_impl(station_id, limit, db):
         }
         if is_silence and current_blackout_name:
             d["blackout_name"] = current_blackout_name
+        if str(e.asset_id) in holiday_of:
+            d["holiday"] = holiday_of[str(e.asset_id)]
         entries_data.append(d)
 
     return {

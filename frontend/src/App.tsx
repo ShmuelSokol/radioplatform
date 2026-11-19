@@ -35,6 +35,7 @@ const AdminCampaignDetail = lazy(() => import('./pages/admin/CampaignDetail'));
 const SpotSchedules = lazy(() => import('./pages/admin/SpotSchedules'));
 const SpotRecordings = lazy(() => import('./pages/admin/SpotRecordings'));
 const ProgramBlocks = lazy(() => import('./pages/admin/ProgramBlocks'));
+const HolidayMusic = lazy(() => import('./pages/admin/HolidayMusic'));
 const Databank = lazy(() => import('./pages/admin/Databank'));
 const Rds = lazy(() => import('./pages/admin/Rds'));
 const ScheduleCheck = lazy(() => import('./pages/admin/ScheduleCheck'));
@@ -187,6 +188,7 @@ export default function App() {
               <Route path="/admin/databank" element={<ProtectedRoute><Databank /></ProtectedRoute>} />
               <Route path="/admin/rds" element={<ProtectedRoute><Rds /></ProtectedRoute>} />
               <Route path="/admin/program-blocks" element={<ProtectedRoute><ProgramBlocks /></ProtectedRoute>} />
+              <Route path="/admin/holiday-music" element={<ProtectedRoute><HolidayMusic /></ProtectedRoute>} />
               <Route path="/admin/schedule-check" element={<ProtectedRoute><ScheduleCheck /></ProtectedRoute>} />
               <Route path="/admin/sponsorship-rules" element={<ProtectedRoute><SponsorshipRules /></ProtectedRoute>} />
               <Route path="/admin/playlists" element={<ProtectedRoute><Playlists /></ProtectedRoute>} />

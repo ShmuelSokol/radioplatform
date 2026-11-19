@@ -26,6 +26,7 @@ from app.api.v1.spot_schedules import router as spot_schedules_router
 from app.api.v1.copy_review import router as copy_review_router
 from app.api.v1.spot_recordings import router as spot_recordings_router
 from app.api.v1.program_blocks import router as program_blocks_router
+from app.api.v1.holiday_music import router as holiday_music_router
 from app.api.v1.databank import router as databank_router
 from app.api.v1.campaigns import router as campaigns_router
 from app.api.v1.billing import router as billing_router
@@ -79,6 +80,7 @@ router.include_router(spot_schedules_router)
 router.include_router(copy_review_router)
 router.include_router(spot_recordings_router)
 router.include_router(program_blocks_router)
+router.include_router(holiday_music_router)
 router.include_router(databank_router)
 router.include_router(campaigns_router)
 router.include_router(billing_router)

@@ -34,6 +34,8 @@ UPDATE 2026-11-18 admin-page-layout.md phone cards: row actions are 44 px button
 UPDATE 2026-11-18 databank.md /databank/items no longer joins a GROUP BY over play_logs (7 to 12 s a page on production); last played comes from services/last_played; slow and failed lists say so on the page; Asset trims title/artist/album on write, old rows by scripts/sql/tidy_asset_text.sql
 INGEST 2026-11-18 listener-player-bar.md a listener keeps hearing the station on /stations, /guide, /hosts, /archives: ListenHost keeps the Listen page mounted and hidden (no second player, no new tap), playerStore says what plays, AudioPlayer is the bar; old unused HLS bar code removed
 INGEST 2026-11-19 audio-engine.md silence removal shortens gaps in the middle to keep_gap instead of cutting them (cut_spans); bulk Auto-Clip Silence also does middle gaps (longer than 2 s become 0.75 s, settings box); AI Auto-Enhance renamed Smart Enhance on screen
+INGEST 2026-11-19 station-simulator.md the paused-shiur check counts resume entries per pause; the nightly Daf paused at the same second on two nights is not a double resume
+INGEST 2026-11-19 streaming-architecture.md the engine pause rule queues one resume entry per shiur, even when two timed groups close together pause it
 INGEST 2026-11-19 streaming-architecture.md setup.sh KBR_RESTART_ONLY restarts one station's engine first; the shared radio.liq means the other picks it up on any restart
 INGEST 2026-11-19 local-fm-box.md relay sends kept start reports before it asks the site again after the line returns (offline plays aired twice)
 INGEST 2026-11-19 audio-engine.md progress bar for AI Auto-Enhance and Remove All Found Silence (?progress_id + GET /assets/progress/{id}, services/job_progress.py, FFmpeg -progress on temp files); AI Auto-Enhance read a pipe with a 5 min limit and failed on long shiurim, now a temp file with 30 min; what AI Enhance does (rule-based)
@@ -444,5 +446,12 @@ INGEST 2026-11-19 back-navigation.md Back line on staff pages (BackNav.tsx), per
 UPDATE 2026-11-19 playlist-generation.md station IDs: air-time guard (station_id_guard.py) passes over an ID after a break/spoken item or near a break; soft breaks move at air time
 UPDATE 2026-11-19 playlist-generation.md station IDs: drop_misplaced tidies waiting IDs beside breaks after each top-up; queue page estimates use on-air lengths
 UPDATE 2026-11-19 playlist-generation.md station IDs: shortest automatic ID 4 s -> 1.5 s once both engines run the radio.liq that fetches ahead
+UPDATE 2026-11-19 playlist-generation.md station IDs: drop_misplaced moves a misplaced ID later instead of removing it, only 5-90 min ahead
+UPDATE 2026-11-19 playlist-generation.md station IDs: passed-over IDs move one song later instead of being skipped; tidy never removes; fill draws gaps from the first half of min..max
 INGEST 2026-11-19 blackout-window-generation.md regenerate now corrects a stored window whose computed times changed (future, this station only, never edited); SQLite returns zone-less clock times
 UPDATE 2026-11-19 control-room.md Sponsors list rows always open the Sponsor panel (SongTarget.sponsorship); station-day sends asset.sponsor_id: a block-placed sponsor recording with no spots category opened the song options on Main
+INGEST 2026-11-19 holiday-music.md holiday lists (holiday_items) mixed in before/during each holiday at a rising 1-in-N per station (holiday_settings); holiday-only items out of every ordinary pick (not_holiday_only); credit carried between top-ups; 2 h/6 h rest; Holiday Music page; queue tag
+UPDATE 2026-11-19 playlist-generation.md seasonal types switched by the calendar now exist as holiday lists (holiday-music.md)
+INGEST 2026-11-19 station-simulator.md every Yom Tov of 5787/5788 as broadcast days (tests/sim/yomtov.py); stand-in /skip now ends a timed item (late return after a blackout was the stand-in), one-station runs keep sponsorship audio tied to sponsors, quiet passes deep inside a blackout
+UPDATE 2026-11-19 hourly-slots.md the hour already begun still gets its :30 time check and weather (missing after a two-day Yom Tov or an empty-queue start)
+UPDATE 2026-11-19 station-simulator.md one-station runs: loose copies of contract audio (same title, other id) get the sponsor tie in seed() too; they were still drawn as filler on Jerusalem alone

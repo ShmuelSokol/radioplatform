@@ -225,7 +225,20 @@ def fit_for_random_pick():
         not_placeholder(),
         not_contract_audio(),
         not_station_id(),
+        not_holiday_only(),
     )
+
+
+def not_holiday_only():
+    """SQL condition: the item is not on a holiday list as holiday-only (a Chanukah
+    song, the Pesach 10 plagues series). Those air only through the holiday mix
+    before and during their holiday (services/holiday_music.py), never as ordinary
+    filler or from a rotation that names their category."""
+    from sqlalchemy import select
+
+    from app.models.holiday_music import HolidayItem
+
+    return Asset.id.notin_(select(HolidayItem.asset_id).where(HolidayItem.all_year.is_(False)))
 
 
 # Analyses made before this version measured every item as 180 s long (the length

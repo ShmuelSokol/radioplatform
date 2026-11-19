@@ -9,7 +9,7 @@ What it copies from radio.liq, because the backend's decisions depend on it:
   played in `seq` order. The group takes the air on its second, the music item on air is
   cut and does not come back (the backend re-queues a paused shiur itself). After the
   group the music lane carries on with its pre-loaded item.
-- /skip ends the music item now; /timed_drop forgets waiting timed items; /hello on start.
+- /skip ends the item on air now (music or timed); /timed_drop forgets waiting timed items; /hello on start.
 - With nothing to play the real engine plays its emergency music: logged here as
   `emergency`, which the checks count as dead air.
 
@@ -97,7 +97,9 @@ class FakeEngine:
             self.cued = None
             self.ask_next_at = now + 0.3
         elif path == "/skip":
-            if self.on_air is not None and self.on_air.lane in ("main", "emergency"):
+            # radio.liq's skip_on_air ends whatever is on air, a timed item too (the
+            # silence still playing when a blackout ends)
+            if self.on_air is not None:
                 self.sim.schedule(now + 0.2, self.sid, "skip")
         elif path == "/timed":
             eid = str(payload.get("id") or "")
@@ -132,7 +134,7 @@ class FakeEngine:
             if self.on_air is not None and self.on_air.end is not None and self.on_air.end <= now + 1e-6:
                 await self._item_ended()
         elif kind == "skip":
-            if self.on_air is not None and self.on_air.lane in ("main", "emergency"):
+            if self.on_air is not None:
                 self._close(now, cut=True)
                 await self._play_after(now)
         elif kind == "timed":
@@ -225,7 +227,10 @@ class FakeEngine:
                 got = await playout_engine.handle_next(db, self.station_id, list(self.given[:5]),
                                                        proto=PROTO, engine_live_on=False)
         if got is None:
-            self.ask_next_at = now + NEXT_RETRY
+            # Deep inside a Shabbos or Yom Tov window the answer stays "nothing" for
+            # hours; the real engine keeps asking every few seconds, here once a minute
+            deep = getattr(self.sim, "_deep_in_blackout", None)
+            self.ask_next_at = now + (60.0 if deep and deep(self.sid, now) else NEXT_RETRY)
             if self.on_air is None and any(w.at - now <= HOLD_SECONDS for w in self.timed):
                 pass  # radio.liq's hold lane: quiet for up to 8 s before a loaded timed item
             elif self.on_air is None:

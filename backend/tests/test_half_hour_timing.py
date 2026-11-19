@@ -282,3 +282,45 @@ async def test_air_watch_reports_a_missing_half_hour_time_check(db_session, conf
     assert bool(found) == alarm, found
     if alarm:
         assert "9:30 PM" in found[0].title
+
+
+@pytest.mark.asyncio
+async def test_the_hour_already_begun_still_gets_its_half_hour(db_session, monkeypatch):
+    """Back from a two-day Yom Tov at 9:01 PM (station simulator, last days of Pesach
+    5787): nothing was filled during the blackout and time and weather are queued only
+    48 h ahead, so no fill ever saw 9:00 PM as a coming hour and the 9:30 time check
+    and weather were missing. The same after a start with an empty queue."""
+    import time_machine
+
+    monkeypatch.setattr(type(settings), "supabase_storage_enabled", property(lambda self: True))
+    station, clock, weather, _, halves = await _setup(
+        db_session, {"half_hour_time_check": True, "spot_timing": {"half_hour": "hard"}})
+    await db_session.commit()
+    back = datetime(2027, 4, 29, 21, 1, 21, tzinfo=NY)
+    with time_machine.travel(back, tick=False):
+        await _hourly(db_session, station, clock, weather)
+        groups = await _groups(db_session, station)
+        half = datetime(2027, 4, 29, 21, 30, tzinfo=NY).astimezone(UTC)
+        assert half in groups, sorted(groups)[:3]
+        assert [e.asset_id for e in groups[half]] == [halves[21].id, weather.id]
+        assert [e.timing_mode for e in groups[half]] == ["hard", "hard"]
+        # nothing for the 9:00 PM that is already past, and the next hour as before
+        assert min(groups) == half
+        assert [e.asset_id for e in groups[half + timedelta(minutes=30)]] == [clock.id, weather.id]
+        # a second pass adds nothing
+        before = len((await db_session.execute(select(QueueEntry))).scalars().all())
+        await _hourly(db_session, station, clock, weather, max_pos=1000)
+        assert len((await db_session.execute(select(QueueEntry))).scalars().all()) == before
+
+
+@pytest.mark.asyncio
+async def test_a_half_hour_already_past_is_not_queued(db_session, monkeypatch):
+    import time_machine
+
+    monkeypatch.setattr(type(settings), "supabase_storage_enabled", property(lambda self: True))
+    station, clock, weather, _, _ = await _setup(db_session, {"half_hour_time_check": True})
+    await db_session.commit()
+    with time_machine.travel(datetime(2027, 4, 29, 21, 31, 0, tzinfo=NY), tick=False):
+        await _hourly(db_session, station, clock, weather)
+        groups = await _groups(db_session, station)
+        assert min(groups) == datetime(2027, 4, 29, 22, 0, tzinfo=NY).astimezone(UTC)

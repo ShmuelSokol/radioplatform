@@ -1012,6 +1012,28 @@ async def test_a_shiur_that_starts_after_the_time_check_was_handed_over_still_re
 
 
 @pytest.mark.asyncio
+async def test_two_timed_groups_close_together_queue_one_resume(client, db_session, eng):
+    """Simulator, Motzaei Shabbos 2027-10-09: the 8 PM Daf Yomi paused for the 8:30 time
+    check got two resume entries (only one aired). A second group due a few seconds after
+    the first is a new key for the pause rule while the shiur is still on air."""
+    station, _, _, _ = eng
+    st, shiur, clock = await _shiur_on_air(client, db_session, station, "pause")
+    await playout_engine.tick(db_session, st)
+    await _add(db_session, station, title="Sponsor", duration=20.0, kind="spot", position=60,
+                        timing_mode="hard", preempt_at=datetime.now(UTC) + timedelta(seconds=36))
+    # The first group's second has come; its start report is not in yet
+    row = await _fresh(db_session, clock.id)
+    row.preempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    await db_session.commit()
+    await playout_engine.tick(db_session, st)
+    pending = (await db_session.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station.id, QueueEntry.status == "pending")
+        .execution_options(populate_existing=True)
+    )).scalars().all()
+    assert len([e for e in pending if e.asset_id == shiur.asset_id]) == 1
+
+
+@pytest.mark.asyncio
 async def test_a_failed_long_item_rule_still_hands_over_the_time_check(client, db_session, eng, monkeypatch):
     """F-ENGINE2-22/24: a database error inside the long-item rule left the session failed,
     so the rest of the tick (handing the time check to the engine) failed too. The tick

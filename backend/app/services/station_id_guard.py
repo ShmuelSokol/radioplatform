@@ -14,9 +14,10 @@ automatically queued ID is passed over, for good, when
 - it is shorter than MIN_STATION_ID_SECONDS (1.5 s), or
 - the last ID aired less than the station's `min_minutes` ago.
 
-Passing one over only makes the gap to the next ID longer. The browser path marks it
-skipped at once; the engine's pick is read-only, so the IDs it passed over are kept
-here and marked skipped at the next start report (`take_passed`).
+One passed over moves one song later (`postpone`) and is asked again after that song;
+it is skipped only when it is too short or the next ordinary item is another ID. The
+browser path does this at once; the engine's pick is read-only, so the IDs it passed
+over are kept here and moved at the next start report (`take_passed`).
 """
 from __future__ import annotations
 
@@ -135,13 +136,38 @@ def passed(station_id) -> set[str]:
     return _passed.get(str(station_id), set())
 
 
+async def postpone(db: AsyncSession, station_id, entry: QueueEntry) -> bool:
+    """Move a waiting ID that may not air now one song later: it takes the place of the
+    next ordinary waiting item, which moves up. False (the caller skips it) when it is
+    too short to air at all, or the next ordinary item is another ID or there is none.
+    Skipping them outright left Main 50 to 74 minutes without an ID (2026-11-19): the
+    one after a :30 or :45 sponsorship was lost every time."""
+    asset = getattr(entry, "asset", None)
+    if float(getattr(asset, "duration", None) or 0.0) < MIN_STATION_ID_SECONDS:
+        return False
+    nxt = (await db.execute(
+        select(QueueEntry).options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending",
+               QueueEntry.preempt_at.is_(None), QueueEntry.id != entry.id,
+               QueueEntry.position >= entry.position)
+        .order_by(QueueEntry.position).limit(1)
+        .execution_options(populate_existing=True)
+    )).unique().scalar_one_or_none()
+    if nxt is None or is_auto_station_id(nxt):
+        return False
+    entry.position, nxt.position = nxt.position, entry.position
+    if entry.position == nxt.position:  # equal places: put the ID just after it
+        entry.position = nxt.position + 1
+    await db.flush()
+    return True
+
+
 async def take_passed(db: AsyncSession, station_id) -> int:
-    """Mark the IDs the engine's pick passed over as skipped (start report)."""
+    """The IDs the engine's pick passed over (start report): each moves one song later
+    (`postpone`), or is marked skipped when it cannot."""
     ids = _passed.pop(str(station_id), set())
     if not ids:
         return 0
-    from sqlalchemy import update
-
     uuids = []
     for x in ids:
         try:
@@ -150,23 +176,30 @@ async def take_passed(db: AsyncSession, station_id) -> int:
             pass
     if not uuids:
         return 0
-    res = await db.execute(
-        update(QueueEntry)
+    rows = (await db.execute(
+        select(QueueEntry).options(joinedload(QueueEntry.asset))
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending", QueueEntry.id.in_(uuids))
-        .values(status="skipped")
-        .execution_options(synchronize_session=False)
-    )
-    return res.rowcount or 0
+    )).unique().scalars().all()
+    for entry in rows:
+        if not await postpone(db, station_id, entry):
+            entry.status = "skipped"
+    await db.flush()
+    return len(rows)
 
 
 # Waiting IDs this close to air are left to the air-time check: the engine may have
 # loaded the next one already, and the estimate is good enough only further out
 _TIDY_FROM = timedelta(minutes=5)
+# Further out the estimate drifts by more than the margins (every song that starts a
+# little early or late shifts all of them against the fixed breaks), so IDs there are
+# left alone until they come nearer: tidying the whole two days at every top-up wore
+# Main's IDs away, 80 waiting down to 42 in 90 simulated minutes with 4 aired
+_TIDY_UNTIL = timedelta(minutes=90)
 
 
 async def drop_misplaced(db: AsyncSession, station_id, now: datetime | None = None) -> int:
-    """Remove waiting automatic IDs that the queue's own timeline now puts where they
-    would be passed over at air time: right after a break, sponsorship or other spoken
+    """Move later waiting automatic IDs that the queue's own timeline now
+    puts where they would be passed over at air time: right after a break, sponsorship or other spoken
     item, or within `clear_minutes` of a timed item. The fill placed them clear, but
     sponsorships planned afterwards, cut songs and soft breaks move things, and the
     queue page then showed an ID right after TEST SPONSOR 14 (2026-11-19). Walks the
@@ -210,20 +243,60 @@ async def drop_misplaced(db: AsyncSession, station_id, now: datetime | None = No
 
     clock = Clock(start, timed)
     margin = timedelta(minutes=settings.clear_minutes)
-    previous_kind = None
-    dropped = 0
-    for entry, seconds in waiting:
+    furthest = timedelta(minutes=max(settings.max_minutes - settings.min_minutes, 3.0))
+
+    def fits(seconds: float, previous_kind: str | None) -> bool:
         at = clock.start()
+        if previous_kind is not None and previous_kind in NOT_BEFORE_AN_ID:
+            return False
         before = clock.last_timed_end
-        if is_auto_station_id(entry) and at - now >= _TIDY_FROM:
-            after_spoken = (previous_kind or "") in NOT_BEFORE_AN_ID and previous_kind is not None
-            right_after_timed = before is not None and at - before < margin
-            if after_spoken or right_after_timed or not clock.clear_of_timed(at, seconds, margin):
-                await db.delete(entry)
-                dropped += 1
-                continue  # gone: it takes no air time
+        if before is not None and at - before < margin:
+            return False
+        return clock.clear_of_timed(at, seconds, margin)
+
+    previous_kind: str | None = None
+    # An ID that cannot stay where it is moves later, after the next song that leaves
+    # room, so the station keeps its every-12-to-20-minutes rhythm (only removing them
+    # left a 55-minute gap on Main, 2026-11-19). When no clear place comes before the
+    # next ID or within max-min minutes it stays where it is, and the air-time check
+    # (must_wait, postpone) settles it: removing them here wore Main's IDs away.
+    carried: QueueEntry | None = None
+    carried_seconds = 0.0
+    carried_from: datetime | None = None
+    passed: list[QueueEntry] = []
+    changed = 0
+
+    def leave_carried() -> None:
+        nonlocal carried
+        carried = None  # left in its place (its few seconds no longer count below)
+
+    for entry, seconds in waiting:
+        if carried is not None and passed:
+            if clock.start() - carried_from > furthest:
+                leave_carried()
+            elif fits(carried_seconds, previous_kind):
+                # it takes the place of the last song it passed; those songs move up one
+                places = [carried.position] + [e.position for e in passed]
+                for moved, place in zip(passed, places):
+                    moved.position = place
+                carried.position = places[-1]
+                clock.play(carried_seconds)
+                previous_kind = "jingle"
+                carried = None
+                changed += 1
+        if is_auto_station_id(entry):
+            if carried is not None:
+                leave_carried()  # this one takes its turn
+            at = clock.start()
+            if _TIDY_FROM <= at - now <= _TIDY_UNTIL and not fits(seconds, previous_kind):
+                carried, carried_seconds, carried_from, passed = entry, seconds, at, []
+                continue  # lifted out: it takes no air time here
         clock.play(seconds)
         previous_kind = (getattr(entry.asset, "asset_type", None) or "").lower() or None
-    if dropped:
+        if carried is not None:
+            passed.append(entry)
+    if carried is not None:
+        leave_carried()
+    if changed:
         await db.flush()
-    return dropped
+    return changed

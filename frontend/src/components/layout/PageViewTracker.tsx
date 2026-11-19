@@ -17,6 +17,7 @@ const TITLES: [string, string][] = [
   ['/admin/databank', 'Databank'],
   ['/admin/rds', 'RDS'],
   ['/admin/program-blocks', 'Program blocks'],
+  ['/admin/holiday-music', 'Holiday music'],
   ['/admin/schedule-check', 'Schedule check'],
   ['/admin/rules', 'Rules'],
   ['/admin/holidays', 'Blackouts'],

@@ -30,6 +30,7 @@ from app.models.asset import (
     fit_for_random_pick,
     in_category,
     not_contract_audio,
+    not_holiday_only,
     not_placeholder,
     stored_analysis,
 )
@@ -154,7 +155,11 @@ class StationIdSprinkler:
         return None
 
     def _gap(self) -> timedelta:
-        return timedelta(minutes=random.uniform(self.ids.min_minutes, self.ids.max_minutes))
+        # Drawn from the first half of min..max: an ID waits for the end of a song and
+        # for room clear of breaks, and at air time it can still move a song later, so
+        # drawing from the whole range put Main's IDs 25 to 30 minutes apart (2026-11-19)
+        low, high = self.ids.min_minutes, self.ids.max_minutes
+        return timedelta(minutes=random.uniform(low, low + (high - low) / 2))
 
     async def after(self, clock: "Clock", previous_type: str | None):
         """Called after each programme item. Returns (row, start) of the drawn ID
@@ -336,7 +341,7 @@ class _Library:
                 analysis["version"].astext.label("analysis_version"),
             ).where(Asset.asset_type == asset_type)
             if category:
-                stmt = stmt.where(in_category(category), not_placeholder(), not_contract_audio())
+                stmt = stmt.where(in_category(category), not_placeholder(), not_contract_audio(), not_holiday_only())
                 if category.lower().startswith(STATION_ID_CATEGORY_PREFIX):
                     stmt = stmt.where(Asset.duration >= MIN_STATION_ID_SECONDS)
             else:
@@ -610,6 +615,32 @@ async def generate(
         note(id_note)
     previous_type = (after_type or "music").lower()
 
+    # Before and during a holiday, now and then a holiday item instead of an
+    # ordinary song or shiur of the same kind (services/holiday_music.py)
+    from app.services.holiday_music import HolidayMix
+
+    async def _loaded() -> dict:
+        if library.last_used is None:
+            await library._load_last_used()
+        return library.last_used
+
+    holiday = await HolidayMix.for_station(db, station, start, _loaded)
+
+    def holiday_pick(asset_type: str | None, at: datetime, block_id: str, block_name: str):
+        """A holiday item to air instead of the ordinary pick, as a Pick, or None."""
+        if holiday is None:
+            return None, None
+        got = holiday.pick(asset_type, at)
+        if got is None:
+            return None, None
+        row, key = got
+        library.mark(row, at)
+        return row, Pick(
+            at=at, block_id=block_id, block_name=block_name, asset_type=row.asset_type,
+            category=row.category, asset_id=row.id, title=row.title, artist=row.artist,
+            duration=float(row.duration or DEFAULT_DURATION),
+        )
+
     async def maybe_station_id() -> None:
         """After a programme item: a station ID when one is due and the air is clear."""
         nonlocal previous_type
@@ -691,6 +722,16 @@ async def generate(
                 note("Some of this time has no schedule block, so any music plays then.")
             else:
                 note(f'Block "{block.name}" has no playlist sequence, so any music plays then.')
+            row, pick = holiday_pick("music", at, "", block.name if block is not None else "No block")
+            if pick is not None:
+                picks.append(pick)
+                artist = _artist_key(row.artist)
+                if artist and artist_distance:
+                    recent.append(artist)
+                clock.play(await library.on_air(row))
+                previous_type = (pick.asset_type or "music").lower()
+                await maybe_station_id()
+                continue
             row, relaxed = await library.draw(
                 "music", None, set(recent) if artist_distance else set(), at
             )
@@ -724,6 +765,17 @@ async def generate(
             if misses >= len(slots):
                 misses = 0
                 clock.at = at + SKIP
+            continue
+        row, pick = holiday_pick(slot.asset_type, at, key, block.name)
+        if pick is not None:
+            misses = 0
+            picks.append(pick)
+            artist = _artist_key(row.artist)
+            if artist and artist_distance:
+                recent.append(artist)
+            clock.play(await library.on_air(row))
+            previous_type = (pick.asset_type or "music").lower()
+            await maybe_station_id()
             continue
         row, relaxed = await library.draw(
             slot.asset_type, slot.category, set(recent) if artist_distance else set(), at
@@ -759,6 +811,11 @@ async def generate(
         previous_type = (picks[-1].asset_type or "music").lower()
         await maybe_station_id()
 
+    if holiday is not None:
+        for key, n in holiday.used.items():
+            from app.services.holiday_music import HOLIDAY_NAMES
+
+            note(f"{HOLIDAY_NAMES.get(key, key)}: {n} holiday item{'s' if n != 1 else ''} mixed in.")
     for asset_type, category in sorted(library.below_vote, key=str):
         name = f"{asset_type} / {category}" if category else asset_type
         note(f"No {name} has a vote of {min_vote} or more, so the minimum vote was ignored for that type.")
