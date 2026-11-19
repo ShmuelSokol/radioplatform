@@ -450,6 +450,9 @@ class SchedulerEngine:
                         message=str(e),
                         station_id=station_id,
                     )
+                    # Kept now: the pass ends in a rollback, which dropped the alert, so
+                    # every 3 s pass made (and texted) a new one instead of folding (V1-63)
+                    await db.commit()
                 except Exception:
                     logger.warning("Could not record the alert for station %s", station_id, exc_info=True)
     

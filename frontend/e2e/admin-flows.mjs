@@ -231,6 +231,16 @@ async function seeProgressBar(page, what) {
   await until(async () => /^100%/.test((await page.getByTestId('edit-progress-pct').innerText().catch(() => '')).trim()), `${what}: the bar reaches 100%`, 8000);
   assert(/Done/.test(await bar.innerText()), `${what}: the bar does not say Done at the end: ${await bar.innerText()}`);
 }
+// After the edit answers, "Done 100%" stays up a moment before the page moves on (the PC
+// saw a 35 minute Smart Enhance go from "Saving 92%" straight to gone, 2026-11-19)
+async function seeDoneHeld(page, what) {
+  const bar = page.getByTestId('edit-progress');
+  await bar.waitFor({ timeout: 2000 }).catch(() => {});
+  const text = await bar.innerText().catch(() => '');
+  assert(/Done/.test(text) && /100%/.test(text), `${what}: no "Done 100%" once it finished: "${text}"`);
+  await page.waitForTimeout(700);
+  assert(await bar.count() === 1, `${what}: "Done" vanished in under a second`);
+}
 async function timedSave(page, what, matcher, action, { expectStatus = s => s < 400 } = {}) {
   const r = await timedResponse(page, matcher, action);
   assert(expectStatus(r.status), `${what}: server answered ${r.status} ${(await r.resp.text().catch(() => '')).slice(0, 160)}`);
@@ -3074,6 +3084,7 @@ section('asset-detail', async () => {
           ]);
         } finally { await release(); }
         assert(r.status < 300, `remove all ${r.status}`);
+        await seeDoneHeld(page, 'Remove All');
         await page.getByTestId('edit-progress').waitFor({ state: 'detached' });
         await page.getByText('Trim applied — review the result').waitFor({ timeout: 15000 });
         const left = await lengthNow();
@@ -3199,6 +3210,7 @@ section('enhance', async () => {
       ]);
     } finally { await release(); }
     assert(ai.status < 300, `auto-enhance ${ai.status} ${(await ai.resp.text()).slice(0, 120)}`);
+    await seeDoneHeld(page, 'Smart Enhance');
     await page.getByTestId('edit-progress').waitFor({ state: 'detached' });
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await page.getByText('Enhancement saved.').waitFor();
