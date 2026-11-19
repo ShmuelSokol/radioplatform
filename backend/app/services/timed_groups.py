@@ -123,6 +123,8 @@ async def space_hard_groups(
             and at < free_at
             and (free_at - at).total_seconds() <= MAX_SHIFT_SECONDS
             and not any(str(e.id) in frozen for e in items)
+            # The song that ends at candle lighting never moves (shabbos_ending)
+            and not any(e.source == "shabbos_end" for e in items)
         ):
             start = free_at
             leader = lead_at or at

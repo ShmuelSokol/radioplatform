@@ -1070,6 +1070,13 @@ class SchedulerEngine:
             await fill_blackout_queue(db, station.id)
         except Exception as e:
             logger.warning("fill_blackout_queue failed for station %s: %s", station.id, e)
+        # The last song before Shabbos, ending at candle lighting (shabbos_ending)
+        try:
+            from app.services import shabbos_ending
+            await shabbos_ending.reconcile(db, station, now)
+        except Exception:
+            logger.warning("Shabbos ending failed for station %s", station.id, exc_info=True)
+            await _safe_rollback(db)
         if is_blacked_out:
             # Let normal queue advancement handle the silence entries
             return
