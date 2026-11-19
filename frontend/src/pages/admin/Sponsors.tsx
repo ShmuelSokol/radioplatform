@@ -87,10 +87,10 @@ export default function Sponsors() {
 
   return (
     <div className="w-full space-y-4">
-      {mayChange && params.get('book') && <BookSponsorship start={{ sponsorId: params.get('sponsor') || undefined }} onClose={() => setParam('book', '')} />}
+      {mayChange && params.get('book') && <BookSponsorship start={{ sponsorId: params.get('sponsor') || undefined, assetId: params.get('asset') || undefined }} onClose={() => { const next = new URLSearchParams(params); for (const k of ['book', 'sponsor', 'asset']) next.delete(k); setParams(next, { replace: true }); }} />}
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div>
-          <h1 className="text-3xl font-bold">Sponsors</h1>
+          <h1 className="text-3xl font-bold">Clients</h1>
           <p className="text-sm text-gray-600">Every client once: whether they are on the air, and since and until when. Open one for their spots, contracts and what played.</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -99,9 +99,10 @@ export default function Sponsors() {
               Book a sponsorship
             </button>
           )}
-          <Link to="/admin/spot-schedule" className="px-3 py-2 border rounded-lg text-sm">Spot Schedule</Link>
+          <Link to="/admin/sponsorship-board" className="px-3 py-2 border rounded-lg text-sm">Sponsorship board</Link>
+          <Link to="/admin/spot-schedule" className="px-3 py-2 border rounded-lg text-sm">All contracts</Link>
           <Link to="/admin/spot-recordings" className="px-3 py-2 border rounded-lg text-sm">Record Spots</Link>
-          <Link to="/admin/campaigns" className="px-3 py-2 border rounded-lg text-sm">Campaigns</Link>
+          <Link to="/admin/campaigns" className="px-3 py-2 border rounded-lg text-sm">Sponsor requests</Link>
           {mayChange && (
             <button
               onClick={() => { setShowForm(!showForm); setError(''); }}

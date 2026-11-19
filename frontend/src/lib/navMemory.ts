@@ -156,11 +156,12 @@ export function dropState(key: string): void {
 
 const NAMES: [RegExp, string][] = [
   [/^\/admin\/dashboard$/, 'Dashboard'],
-  [/^\/admin\/sponsors$/, 'Sponsors'],
+  [/^\/admin\/sponsors$/, 'Clients'],
   [/^\/admin\/sponsors\/[^/]+$/, 'client'],
-  [/^\/admin\/campaigns$/, 'Campaigns'],
+  [/^\/admin\/campaigns$/, 'Sponsor requests'],
   [/^\/admin\/campaigns\/[^/]+$/, 'campaign'],
-  [/^\/admin\/spot-schedule$/, 'Spot Schedule'],
+  [/^\/admin\/spot-schedule$/, 'All contracts'],
+  [/^\/admin\/sponsorship-board$/, 'Sponsorship board'],
   [/^\/admin\/spot-recordings$/, 'Record Spots'],
   [/^\/admin\/assets$/, 'Library'],
   [/^\/admin\/assets\/upload$/, 'Upload'],
@@ -197,7 +198,7 @@ export function parentOf(path: string, home: string): string {
     [/^\/admin\/reviews\/.+$/, '/admin/reviews'],
     [/^\/admin\/schedules\/.+$/, '/admin/schedules'],
     [/^\/admin\/live\/.+$/, '/admin/live'],
-    [/^\/admin\/(spot-schedule|spot-recordings|sponsorship-rules|campaigns)$/, '/admin/sponsors'],
+    [/^\/admin\/(spot-schedule|spot-recordings|sponsorship-rules|sponsorship-board|campaigns)$/, '/admin/sponsors'],
   ];
   for (const [re, to] of rules) if (re.test(p)) return to;
   return home;

@@ -267,11 +267,12 @@ radioplatform/
 - Login.tsx — Authentication
 - Holidays.tsx — Sabbath/holiday blackout management
 - Sponsors.tsx — Sponsors as a client list: on the air / starting soon / paused / ended / no contract, active dates, contracts, plays; filters and search (see `wiki/sponsor-accounts.md`)
-- SponsorDetail.tsx — One client: Book a sponsorship (`components/sponsors/BookSponsorship.tsx`, four steps with how full each slot is; also on the Sponsors list and Sponsors > Book a sponsorship, `/admin/sponsors?book=1`); spots by stage of the flow, contracts with their settings (Edit dialog `components/sponsors/ContractEditor.tsx`, also on Spot Schedule; pause, end date), play history with CSV, missed plays, details
-- Campaigns.tsx — Sponsorship campaigns across sponsors: sponsor and status filters, New Campaign for a chosen sponsor (managers/admins; DJs and viewers view only)
+- SponsorDetail.tsx — One client (tabs Contracts, Spots, What aired, Missed plays, Requests, Details): Book a sponsorship (`components/sponsors/BookSponsorship.tsx`, four steps with how full each slot is; also on the Sponsors list and Sponsors > Book a sponsorship, `/admin/sponsors?book=1`); spots by stage of the flow, contracts with their settings (Edit dialog `components/sponsors/ContractEditor.tsx`, also on Spot Schedule; pause, end date), play history with CSV, missed plays, details
+- Campaigns.tsx — "Sponsor requests" (campaigns from the portal) across sponsors: sponsor and status filters, New Campaign for a chosen sponsor (managers/admins; DJs and viewers view only)
 - CampaignDetail.tsx — One campaign for staff: drafts, comments, Save Status. Drafts and comments panels are shared with the sponsor portal (`components/campaigns/CampaignParts.tsx`)
 - ScheduleCheck.tsx — Look-ahead of schedule conflicts: what was settled automatically, what needs a choice
-- SpotSchedules.tsx — Schedule sponsor spots by day and daypart, with a 7-day look-ahead; station timing choices for :00, :30 and :15/:45 and the half-hour time check
+- SpotSchedules.tsx — "All contracts": every client's contracts, Book a sponsorship, the old form as "Book at exact clock times", a 7-day look-ahead, and the break settings (`components/sponsors/BreakSettings.tsx`: :00, :30 and :15/:45, half-hour time check)
+- SponsorshipBoard.tsx — Sponsorship board: the next 7 days on one station as three-hour slots against days, how full each is, who is booked, Book into this slot, Break settings (see `wiki/sponsor-accounts.md`)
 - SpotRecordings.tsx — Record Spots: write a script, make or upload audio, listen, approve into the library
 - Databank.tsx — KBR Studio's database window: Songs / Jingles / Spots / Blocks tables, Find, Edit mode, day log to the millisecond
 - Rds.tsx — RDS: what radios show now and next 10 minutes, PS and rotation settings, rotation lines (templates, sponsor lines, days/hours/dates), encoder pickup log, feed links for Magic RDS
@@ -357,11 +358,12 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/admin/schedules/:scheduleId/blocks` → ScheduleBlocks (protected)
 - `/admin/holidays` → Holidays (protected)
 - `/admin/sponsors` → Sponsors (protected)
-- `/admin/sponsors/:sponsorId` → SponsorDetail (protected; `?tab=contracts|plays|missed|details`)
+- `/admin/sponsors/:sponsorId` → SponsorDetail (protected; `?tab=spots|plays|missed|requests|details`, Contracts by default)
 - `/admin/campaigns` → AdminCampaigns (staff; managers/admins change, DJs/viewers view only)
 - `/admin/campaigns/:id` → AdminCampaignDetail (same roles)
 - `/admin/schedule-check` → ScheduleCheck (protected)
-- `/admin/spot-schedule` → SpotSchedules (protected)
+- `/admin/spot-schedule` → SpotSchedules ("All contracts"; protected)
+- `/admin/sponsorship-board` → SponsorshipBoard (protected)
 - `/admin/spot-recordings` → SpotRecordings (protected)
 - `/admin/databank` → Databank (protected)
 - `/admin/program-blocks` → ProgramBlocks (protected)
@@ -535,6 +537,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-compact.mjs
 
 # The Sponsors client list and client page at desktop and phone sizes (real backend with clients that have a running contract and plays)
 cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMIN_PASSWORD=... node e2e/sponsor-clients.mjs
+
+# The Sponsorship board: week grid, one day on a phone, who is booked, Book into this slot (real backend)
+cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMIN_PASSWORD=... node e2e/sponsorship-board.mjs
 
 # Book a sponsorship: the four steps, slot room, saving, desktop and iPhone (real backend with clients)
 cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMIN_PASSWORD=... node e2e/book-sponsorship.mjs

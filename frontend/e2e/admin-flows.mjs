@@ -370,7 +370,7 @@ function adminRoutes() {
     [`/admin/assets/${FX.assets[0].id}`, ALL], ['/admin/reviews', ALL], [`/admin/reviews/${FX.review.id}`, ALL],
     ['/admin/users', ['admin']], ['/admin/rules', ALL], ['/admin/schedules', ALL],
     [`/admin/schedules/${FX.schedule.id}/blocks`, ALL], ['/admin/holidays', MGR], ['/admin/sponsors', MGR], ['/admin/campaigns', ALL],
-    ['/admin/spot-schedule', MGR], ['/admin/spot-recordings', MGR], ['/admin/program-blocks', MGR],
+    ['/admin/spot-schedule', MGR], ['/admin/sponsorship-board', MGR], ['/admin/spot-recordings', MGR], ['/admin/program-blocks', MGR],
     ['/admin/schedule-check', MGR], ['/admin/sponsorship-rules', MGR], ['/admin/playlists', MGR],
     ['/admin/categories', MGR], ['/admin/asset-types', MGR], ['/admin/alerts', MGR], ['/admin/bug-reports', MGR],
     ['/admin/site-updates', ['admin']], ['/admin/activity', ['admin']], ['/admin/analytics', MGR],
@@ -711,7 +711,7 @@ section('shell', async () => {
 
   // F-GLOBAL-3 dropdown groups: every link navigates; hidden for roles that cannot open it
   const groups = {
-    Sponsors: [['All Clients', '/admin/sponsors'], ['Book a sponsorship', '/admin/sponsors?book=1'], ['Spot Schedule', '/admin/spot-schedule'], ['Record Spots', '/admin/spot-recordings'], ['Campaigns', '/admin/campaigns'], ['Sponsorship Rules', '/admin/sponsorship-rules']],
+    Sponsors: [['Clients', '/admin/sponsors'], ['Book a sponsorship', '/admin/sponsors?book=1'], ['Sponsorship board', '/admin/sponsorship-board'], ['All contracts', '/admin/spot-schedule'], ['Record Spots', '/admin/spot-recordings'], ['Sponsor requests', '/admin/campaigns'], ['Wording rules', '/admin/sponsorship-rules']],
     Content: [['Library', '/admin/assets'], ['Categories', '/admin/categories'], ['Types', '/admin/asset-types'], ['Playlists', '/admin/playlists'], ['Studio', '/admin/studio'], ['Reviews', '/admin/reviews']],
     Broadcast: [['Schedules', '/admin/schedules'], ['Program Blocks', '/admin/program-blocks'], ['Schedule Check', '/admin/schedule-check'], ['Rules', '/admin/rules'], ['Blackouts', '/admin/holidays'], ['Program Clock', '/admin/program-clock'], ['Live Shows', '/admin/live']],
     Audience: [['Listeners', '/admin/listeners'], ['Analytics', '/admin/analytics'], ['Requests', '/admin/requests'], ['Public Schedule', '/guide'], ['Archives', '/archives'], ['DJs', '/hosts']],
@@ -825,7 +825,7 @@ section('shell', async () => {
       await waitPath(page, '/admin/dashboard');
       await page.goto(`${BASE}/admin/stations`);
       const burger = page.locator('nav button.md\\:hidden');
-      const entries = [['Dashboard', '/admin/dashboard'], ['Library', '/admin/assets'], ['Schedules', '/admin/schedules'], ['Requests', '/admin/requests'], ['All Clients', '/admin/sponsors'], ['Manage Stations', '/admin/stations'], ['Stations', '/stations']];
+      const entries = [['Dashboard', '/admin/dashboard'], ['Library', '/admin/assets'], ['Schedules', '/admin/schedules'], ['Requests', '/admin/requests'], ['Clients', '/admin/sponsors'], ['Manage Stations', '/admin/stations'], ['Stations', '/stations']];
       for (const [label, p] of entries) {
         await burger.click();
         const menu = page.locator('nav div.md\\:hidden.border-t');
@@ -1732,7 +1732,7 @@ section('spot-schedule', async () => {
     const t1 = stationClock('America/New_York', 12), t2 = stationClock('America/New_York', 70);
     await step(`F-SPOTSCHED-1 ${view}: Save with nothing chosen says what is missing`, async () => {
       await page.goto(`${BASE}/admin/spot-schedule`);
-      await page.getByRole('button', { name: 'Schedule a spot' }).click();
+      await page.getByRole('button', { name: 'Book at exact clock times' }).click();
       await form.getByRole('button', { name: 'Save schedule' }).click();
       await form.getByText('Choose a sponsor and a spot.').waitFor({ timeout: 2000 });
     }, page);
@@ -1802,7 +1802,7 @@ section('spot-schedule', async () => {
     const page = await newPage('manager');
     await step('F-SPOTSCHED-1 time slots: no slot chosen is refused; Early morning + Late evening with plays per slot saves', async () => {
       await page.goto(`${BASE}/admin/spot-schedule`);
-      await page.getByRole('button', { name: 'Schedule a spot' }).click();
+      await page.getByRole('button', { name: 'Book at exact clock times' }).click();
       const form = page.locator('form');
       await field(form, 'Sponsor').selectOption(FX.sponsor.id);
       await form.getByPlaceholder("Type part of the spot's title").fill(spot.title.slice(0, 12));
@@ -1876,7 +1876,7 @@ section('spot-recordings', async () => {
       const approve = cardR().getByRole('button', { name: 'Approve for air' });
       await approve.waitFor();
       await timedResponse(page, (m, p) => m === 'POST' && p.includes('approve'), () => approve.click());
-      await cardR().getByRole('link', { name: 'Schedule this spot' }).waitFor();
+      await cardR().getByRole('link', { name: 'Book this spot' }).waitFor();
       const lib = await api('GET', `/assets?search=${encodeURIComponent(title)}&limit=5`, { token: USERS.admin.token }).catch(() => null);
       return lib ? `library has ${(lib.assets || []).length} match(es)` : 'approved';
     }, page);

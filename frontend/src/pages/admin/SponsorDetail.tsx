@@ -2,6 +2,8 @@ import { totalsLine } from '../../components/sponsors/contractTotals';
 import { useEffect, useMemo, useState } from 'react';
 import ContractEditor from '../../components/sponsors/ContractEditor';
 import BookSponsorship from '../../components/sponsors/BookSponsorship';
+import { useCampaigns } from '../../hooks/useCampaigns';
+import { CampaignFacts, StatusBadge } from '../../components/campaigns/CampaignParts';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -38,22 +40,23 @@ import {
  * (affidavit), the plays they missed, and their details.
  */
 
-type Tab = 'spots' | 'contracts' | 'plays' | 'missed' | 'details';
+type Tab = 'contracts' | 'spots' | 'plays' | 'missed' | 'requests' | 'details';
 const TABS: { key: Tab; label: string }[] = [
-  { key: 'spots', label: 'Spots' },
   { key: 'contracts', label: 'Contracts' },
-  { key: 'plays', label: 'Play history' },
+  { key: 'spots', label: 'Spots' },
+  { key: 'plays', label: 'What aired' },
   { key: 'missed', label: 'Missed plays' },
+  { key: 'requests', label: 'Requests' },
   { key: 'details', label: 'Details' },
 ];
 
 export default function SponsorDetail() {
   const { sponsorId = '' } = useParams();
   const [params, setParams] = useSearchParams();
-  const tab = (TABS.find((t) => t.key === params.get('tab'))?.key ?? 'spots') as Tab;
+  const tab = (TABS.find((t) => t.key === params.get('tab'))?.key ?? 'contracts') as Tab;
   const setTab = (t: Tab) => {
     const next = new URLSearchParams(params);
-    if (t === 'spots') next.delete('tab'); else next.set('tab', t);
+    if (t === 'contracts') next.delete('tab'); else next.set('tab', t);
     setParams(next, { replace: true });
   };
   const mayBook = useMayChange('/admin/spot-schedule');
@@ -101,7 +104,6 @@ export default function SponsorDetail() {
             </button>
           )}
           <Link to={`/admin/spot-recordings?sponsor=${c.id}`} className="px-3 py-2 border rounded-lg text-sm">Record a spot</Link>
-          <Link to={`/admin/campaigns?sponsor=${c.id}`} className="px-3 py-2 border rounded-lg text-sm">Campaigns</Link>
         </div>
       </div>
 
@@ -133,6 +135,7 @@ export default function SponsorDetail() {
       {tab === 'contracts' && <ContractsTab account={data} />}
       {tab === 'plays' && <PlaysTab account={data} />}
       {tab === 'missed' && <MissedTab loading={missed.isLoading} data={missed.data} />}
+      {tab === 'requests' && <RequestsTab clientId={c.id} />}
       {tab === 'details' && <DetailsTab account={data} />}
     </div>
   );
@@ -249,7 +252,7 @@ function SpotLine({ s, account, listen, onPlays }: {
       {s.status_detail && <p className="text-sm text-gray-700">{s.status_detail}</p>}
       {s.kind === 'audio' && (
         <p className="text-sm text-gray-600">
-          {s.plays_total ? `Played ${s.plays_total} times, first ${when(s.first_played_at)}, last ${when(s.last_played_at)}` : 'Never played'}
+          {s.plays_total ? `Played ${s.plays_total} ${s.plays_total === 1 ? 'time' : 'times'}, first ${when(s.first_played_at)}, last ${when(s.last_played_at)}` : 'Never played'}
           {contracts.length > 0 && ` · ${contracts.length === 1 ? 'in 1 contract' : `in ${contracts.length} contracts`}: ${contracts.map((c) => `${c.station_name} (${CONTRACT_STATE_LABEL[c.state].toLowerCase()})`).join(', ')}`}
         </p>
       )}
@@ -268,7 +271,7 @@ function SpotLine({ s, account, listen, onPlays }: {
           <button className="px-3 py-1 border rounded text-sm" onClick={() => onPlays(s.asset_id!)}>What played</button>
         )}
         {s.kind === 'recording' && <Link className="px-3 py-1 border rounded text-sm" to={`/admin/spot-recordings?sponsor=${account.client.id}`}>Open in Record Spots</Link>}
-        {s.kind === 'campaign' && <Link className="px-3 py-1 border rounded text-sm" to={`/admin/campaigns/${s.campaign_id}`}>Open campaign</Link>}
+        {s.kind === 'campaign' && <Link className="px-3 py-1 border rounded text-sm" to={`/admin/campaigns/${s.campaign_id}`}>Open request</Link>}
       </div>
       {listen.failed === s.key && <p className="text-sm text-red-600">The audio could not be loaded.</p>}
       {open && s.script && <p className="text-sm whitespace-pre-wrap bg-gray-50 border rounded p-2">{s.script}</p>}
@@ -359,7 +362,7 @@ function ContractLine({ c, listen, account }: { c: ClientContract; listen: Retur
       <td className="px-3 py-2 hidden md:table-cell" data-label="Station">{c.station_name}</td>
       <td className="px-3 py-2 hidden md:table-cell" data-label="When it airs">{describeContract(c)}</td>
       <td className="px-3 py-2 hidden md:table-cell" data-label="Dates">
-        {c.start_date ? day(c.start_date) : 'From the start'} to {c.end_date ? day(c.end_date) : 'no end date'}
+        {span(c.start_date, c.end_date, !c.end_date) || 'No start or end date'}
         {editingEnd && (
           <form
             className="flex flex-wrap items-center gap-2 mt-1"
@@ -400,6 +403,41 @@ function ContractLine({ c, listen, account }: { c: ClientContract; listen: Retur
         </div>
       </td>
     </tr>
+  );
+}
+
+// ── requests: what the sponsor asked for in their portal (campaigns) ──
+
+function RequestsTab({ clientId }: { clientId: string }) {
+  const { data, isLoading, isError } = useCampaigns({ sponsorId: clientId });
+  if (isLoading) return <Spinner />;
+  if (isError) return <p className="p-4 text-red-700">Could not load the requests. Try again in a moment.</p>;
+  return (
+    <section className="bg-white rounded-lg shadow" data-testid="requests-tab">
+      <div className="px-4 py-2 border-b flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-semibold">Requests from the sponsor</h2>
+        <Link to={`/admin/campaigns?sponsor=${clientId}`} className="text-sm text-blue-700 underline">New request or all requests</Link>
+      </div>
+      <p className="px-4 pt-2 text-xs text-gray-600">What the sponsor asked for in their portal: wording drafts and messages. Booking airtime is Book a sponsorship.</p>
+      {!data?.length ? (
+        <p className="p-4 text-gray-500 text-sm">No requests from this sponsor.</p>
+      ) : (
+        <ul className="divide-y">
+          {data.map((r) => (
+            <li key={r.id}>
+              <Link to={`/admin/campaigns/${r.id}`} className="flex items-start justify-between gap-3 px-4 py-3 hover:bg-gray-50 min-h-[44px]" data-testid="request-row">
+                <span className="min-w-0">
+                  <span className="block font-medium break-words">{r.name}</span>
+                  {r.description && <span className="block text-sm text-gray-600 line-clamp-1">{r.description}</span>}
+                  <CampaignFacts c={r} className="mt-1 text-xs text-gray-500" />
+                </span>
+                <StatusBadge status={r.status} />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
