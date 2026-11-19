@@ -1748,6 +1748,31 @@ async def test_a_moment_of_emergency_music_raises_no_alert(client, db_session, e
 
 
 @pytest.mark.asyncio
+async def test_no_emergency_alert_while_a_queue_start_report_is_being_taken(client, db_session, eng, monkeypatch):
+    """CI 2026-11-19: the queue item's start report took longer than the hold, and the
+    alert was raised in the middle of the report that was about to clear it."""
+    import asyncio
+
+    station, _, _, _ = eng
+    raised = []
+
+    async def record(db, station_id, state):
+        raised.append(str(station_id))
+
+    monkeypatch.setattr(playout_engine, "_emergency_alert", record)
+    monkeypatch.setattr(playout_engine, "EMERGENCY_ALERT_AFTER", 0.1)
+    await _on_air(client, station, "", lane="emergency")
+    state = playout_engine.get_state(station.id)
+    state.starting.add("in-flight")  # a slow start report for a queue item
+    await asyncio.sleep(0.3)
+    assert raised == []
+    state.on_emergency = False  # the report ends: back on the queue
+    state.starting.discard("in-flight")
+    await asyncio.sleep(0.2)
+    assert raised == []
+
+
+@pytest.mark.asyncio
 async def test_the_emergency_music_alert_is_kept(client, db_session, eng, monkeypatch):
     """Harness engine_rows 2026-11-19: the alert for lasting emergency music was logged
     and then gone from the alerts table about 25 s later: its own session only flushed

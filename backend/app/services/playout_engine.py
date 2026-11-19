@@ -1427,6 +1427,13 @@ async def _emergency_alert(db, station_id, state: EngineState) -> None:
 async def _emergency_alert_later(station_id, spell: int) -> None:
     await asyncio.sleep(EMERGENCY_ALERT_AFTER)
     state = get_state(station_id)
+    # A queue item's start report still being taken means the engine is back on the
+    # queue already: wait for it rather than raise the alert in the middle of it (CI
+    # 2026-11-19: a report slower than the hold raised the alert it was about to clear)
+    waited = 0.0
+    while state.starting and waited < 10.0:
+        await asyncio.sleep(0.05)
+        waited += 0.05
     if not state.on_emergency or state.emergency_spell != spell:
         return  # back on the queue meanwhile
     try:
