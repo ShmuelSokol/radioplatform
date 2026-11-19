@@ -29,8 +29,12 @@ PICK = {"main": MAIN, "jerusalem": JERUSALEM, "stories": STORIES}
 
 async def simulate(export_path, start: datetime, hours: float, stations: list[str], out_dir: Path,
                    overrides: dict | None = None, quiet: bool = True, daf_every_day: bool = True,
-                   quiet_pass: float = 3.0, restarts: int = 0, seed_value: int = 1):
+                   quiet_pass: float = 3.0, restarts: int = 0, seed_value: int = 1,
+                   events: list | None = None, blocks: dict | None = None):
+    """`events`: [(when, async fn(sim))] run at their moment (a scenario's hand on the
+    station); `blocks`: {block id: fields} changed in the export before it is loaded."""
     export = load_export(export_path)
+    extra_blocks = blocks
     keep = {PICK[s] for s in stations}
     out_dir.mkdir(parents=True, exist_ok=True)
     sim = Simulator(out_dir / f"sim-{uuid.uuid4().hex[:6]}.db", start, quiet_pass=quiet_pass)
@@ -40,6 +44,7 @@ async def simulate(export_path, start: datetime, hours: float, stations: list[st
         if daf_every_day:
             # Daf Yomi at 8 PM every day, as the PC job sets it up each day
             blocks = {b: {"is_active": True, "days_of_week": "0,1,2,3,4,5,6"} for b in DAF_BLOCK.values()}
+        blocks.update(extra_blocks or {})
         await seed(db, export, start, days=int(hours // 24) + 2, stations=keep, config_overrides=overrides,
                    block_overrides=blocks)
         return [uuid.UUID(s) for s in keep]
@@ -47,26 +52,30 @@ async def simulate(export_path, start: datetime, hours: float, stations: list[st
     wall = time.monotonic()
     await sim.setup(do_seed)
     try:
+        moments: list = []
         if restarts:
             # backend and engine restarts at random moments, half of them aimed at the
             # worst ones: the seconds around a quarter-hour mark
             rnd = random.Random(seed_value)
-            moments = []
             for _ in range(restarts):
                 t = start + timedelta(seconds=rnd.uniform(600, hours * 3600 - 300))
                 if rnd.random() < 0.5:
                     mark = t.replace(minute=(t.minute // 15) * 15, second=0, microsecond=0)
                     t = mark + timedelta(seconds=rnd.choice([-50, -20, -8, -2, 1, 5, 20]))
                 moments.append((t, rnd.choice(["backend", "engine"])))
-            for t, what in sorted(moments):
-                if t <= sim.now:
-                    continue
-                await sim.run_until(t)
-                if what == "backend":
-                    await sim.restart_backend()
-                else:
-                    for sid in list(sim.engines):
-                        await sim.restart_engine(sid)
+        moments += list(events or [])
+        for t, what in sorted(moments, key=lambda m: m[0]):
+            if t <= sim.now:
+                continue
+            await sim.run_until(t)
+            if what == "backend":
+                await sim.restart_backend()
+            elif what == "engine":
+                for sid in list(sim.engines):
+                    await sim.restart_engine(sid)
+            else:
+                await what(sim)
+                sim.last_action = sim.t
         await sim.run_until(start + timedelta(hours=hours))
         result = await checks.collect(sim)
         result.restarts = [(datetime.fromtimestamp(t, NY).strftime("%a %H:%M:%S"), w) for t, w in sim.restarts]

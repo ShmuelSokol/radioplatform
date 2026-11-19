@@ -587,9 +587,10 @@ def one_resume_per_pause(res: Result, ctx: Context):
     res.checks_run.setdefault(check, 0)
     for sid, rows in _per_station(res.rows).items():
         for i, r in enumerate(rows):
-            if not (r.is_long and r.cut and r.asset_id):
+            if not (r.cut and r.asset_id):
                 continue
-            parts = [x for x in rows[i + 1:i + 40] if x.asset_id == r.asset_id]
+            # a shiur, or anything long enough to count as one (12 min): it carries on later
+            parts = [x for x in rows[i + 1:i + 40] if x.asset_id == r.asset_id and (r.is_long or x.cue_in > 0)]
             if not parts:
                 continue
             _count(res, check)

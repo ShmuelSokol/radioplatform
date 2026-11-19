@@ -56,3 +56,16 @@ slowness, the engine's file downloads. Those stay with the engine harness
 ([engine-harness](engine-harness.md)) and live checks.
 
 Findings 2026-11-19 are in the PR that added it and in the review thread's checklist.
+
+## Scenarios with a hand on the station
+
+`simulate(..., events=[(when, async fn(sim))], blocks={block id: fields})` changes something
+at a chosen moment or in the export before it loads. `backend/tests/test_station_sim_scenarios.py`
+(SIM_LONG=1, about half a minute each): every waiting song removed before the hour (V3-7),
+the item on air and the pre-loaded one deleted (V3-34, V3-52m), a 15-minute song paused for
+the time check and resumed (V1-117, V3-52i, F-ENGINE2-22), a block whose season ends at
+midnight (V3-64). `--restarts N --seed S` on the command line restarts the backend or the
+engine at random moments, half of them within seconds of a quarter-hour mark.
+
+The site writes a play-log row when the *next* item starts. The item on air at the end of
+a run, and an item a restart cut at 0 s, have no row; the play-log check leaves them out.
