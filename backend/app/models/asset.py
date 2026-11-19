@@ -171,6 +171,24 @@ def not_contract_audio():
     return and_(Asset.id.notin_(select(SpotSchedule.asset_id)), Asset.sponsor_id.is_(None))
 
 
+# Station ID jingles ("station_id", "station_id_jerusalem", ...) air only through the
+# station's own "Station IDs between songs" rule or a pick that names their category.
+# A playlist step, rule or block item asking for "any jingle" drew them on the first
+# switch-on (2026-11-19): Jerusalem's ID on Main and on All Day Stories, IDs back to
+# back and right after a sponsorship, even with the setting off.
+STATION_ID_CATEGORY_PREFIX = "station_id"
+
+
+def not_station_id():
+    """SQL condition: not a station ID jingle (category station_id or station_id_*)."""
+    from sqlalchemy import func, or_
+
+    return or_(
+        Asset.category.is_(None),
+        func.lower(Asset.category).notlike(f"{STATION_ID_CATEGORY_PREFIX}%"),
+    )
+
+
 def fit_for_random_pick():
     """SQL condition: an asset that may be drawn at random (not do-not-play, not a
     test item, not a one-moment clip, not a placeholder). Category case does not matter."""
@@ -183,6 +201,7 @@ def fit_for_random_pick():
         ),
         not_placeholder(),
         not_contract_audio(),
+        not_station_id(),
     )
 
 

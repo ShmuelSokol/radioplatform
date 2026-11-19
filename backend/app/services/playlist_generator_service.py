@@ -714,6 +714,13 @@ async def generate(
         index = int(cursor.get(key, 0)) % len(slots)
         slot = slots[index]
         cursor[key] = (index + 1) % len(slots)
+        if (slot.asset_type or "").lower() in NOT_BEFORE_AN_ID and previous_type in NOT_BEFORE_AN_ID:
+            # Never two short items back to back (a jingle step right after a station ID)
+            misses += 1
+            if misses >= len(slots):
+                misses = 0
+                clock.at = at + SKIP
+            continue
         row, relaxed = await library.draw(
             slot.asset_type, slot.category, set(recent) if artist_distance else set(), at
         )
