@@ -1177,7 +1177,7 @@ REPEAT_START_SECONDS = 10.0
 
 async def handle_started(
     db: AsyncSession, station_id, entry_id: str | None, lane: str | None, at: float | None = None,
-    quiet: bool = False, kept: bool = False,
+    quiet: bool = False, kept: bool = False, asset_id: str | None = None,
 ) -> dict:
     """The engine reports what just went on air (see _handle_started). Reports for one
     station are taken one at a time, and an exact repeat (same entry within
@@ -1206,7 +1206,8 @@ async def _handle_started_locked(
                         entry_id, mono - state.last_started[1])
             _touch(state)
             return {"ok": True, "known": True, "repeat": True}
-        result = await _handle_started(db, station_id, entry_id, lane, at=at, quiet=quiet, kept=kept)
+        result = await _handle_started(db, station_id, entry_id, lane, at=at, quiet=quiet, kept=kept,
+                                       asset_id=asset_id)
         if entry_id:
             state.last_started = (str(entry_id), time.monotonic())
         return result
@@ -1214,7 +1215,7 @@ async def _handle_started_locked(
 
 async def _handle_started(
     db: AsyncSession, station_id, entry_id: str | None, lane: str | None, at: float | None = None,
-    quiet: bool = False, kept: bool = False,
+    quiet: bool = False, kept: bool = False, asset_id: str | None = None,
 ) -> dict:
     """The engine reports what just went on air.
 
@@ -1266,6 +1267,11 @@ async def _handle_started(
         await _handed_asset(db, state, station_id, str(entry_id))
         if entry is None and entry_id else None
     )
+    if entry is None and entry_id and not handed_asset and kept and asset_id:
+        # A local FM box aired it while its line was down: an entry removed on the site
+        # meanwhile, or an item the box worked out itself past the end of its queue. It
+        # aired, so it is logged (the box offline 16 h: removed songs aired unlogged).
+        handed_asset = str(asset_id)
 
     # Station IDs the pick passed over (station_id_guard) leave the queue
     from app.services.station_id_guard import take_passed
@@ -1317,7 +1323,8 @@ async def _handle_started(
             db.add(entry)
             await db.flush()
             await db.refresh(entry, ["asset"])
-            logger.warning("Engine started entry %s that was deleted here; on air as %s", entry_id, entry.id)
+            logger.warning("Engine started entry %s that %s; on air as %s", entry_id,
+                           "the local FM box aired offline" if kept else "was deleted here", entry.id)
 
     if entry is None:
         await db.commit()

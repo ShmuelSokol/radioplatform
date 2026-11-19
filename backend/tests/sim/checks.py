@@ -135,8 +135,11 @@ async def collect(sim) -> Result:
             spot_sponsor[str(s.asset_id)] = str(s.sponsor_id)
             spot_station[str(s.asset_id)].add(str(s.station_id) if s.station_id else None)
     rows = []
+    # Items a local FM box handed out that are not queue rows (tests/sim/offline.py):
+    # timed items it worked out for the days past its queue, songs it drew, resumes
+    box_items = getattr(sim, "box_items", None) or {}
     for seg in sim.log:
-        e = entries.get(seg.entry_id or "")
+        e = entries.get(seg.entry_id or "") or box_items.get(seg.entry_id or "")
         a = assets.get(str(e.asset_id)) if e else None
         tz = ZoneInfo(stations[seg.station].timezone or "America/New_York")
         rows.append(Row(

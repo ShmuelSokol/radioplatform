@@ -259,8 +259,11 @@ def occurrences_between(
 class _Resolver:
     """Turns a block's items into recordings for one occurrence."""
 
-    def __init__(self, db: AsyncSession, station: Station, dry_run: bool, sponsors=None):
+    def __init__(self, db: AsyncSession, station: Station, dry_run: bool, sponsors=None, prepare: bool = True):
         self.db = db
+        # False: time and weather only from recordings that exist (a local FM box's week
+        # ahead); nothing is made, so no day gets a report written from today's weather
+        self.prepare = prepare
         # (UTC start, block name) -> the sponsorships planned into its places, in order
         self.sponsors: dict[tuple, list] = sponsors or {}
         self.station = station
@@ -334,6 +337,18 @@ class _Resolver:
 
     async def _announcement(self, local: datetime):
         slot_key = local.strftime("%Y-%m-%dT%H")
+        if not self.prepare and slot_key not in self.announcements:
+            from app.services.weather_spot_service import (
+                find_time_clip_asset,
+                find_weather_spot_asset,
+                station_weather_region,
+            )
+
+            region = station_weather_region(self.station.automation_config)
+            self.announcements[slot_key] = (
+                await find_time_clip_asset(self.db, local.hour, region, 30 if local.minute == 30 else 0),
+                await find_weather_spot_asset(self.db, local.strftime("%Y-%m-%d"), region),
+            )
         if slot_key not in self.announcements:
             try:
                 from app.services.weather_spot_service import (
@@ -433,6 +448,7 @@ async def plan_blocks(
     now: datetime | None = None,
     dry_run: bool = True,
     blocks: list[ProgramBlock] | None = None,
+    prepare: bool = True,
 ) -> list[Occurrence]:
     """What the station's blocks will air over the coming hours.
 
@@ -457,7 +473,7 @@ async def plan_blocks(
         for p in placements:
             if p.block is not None:
                 sponsors.setdefault((p.at, p.block), []).append(p)
-    resolver = _Resolver(db, station, dry_run, sponsors)
+    resolver = _Resolver(db, station, dry_run, sponsors, prepare=prepare)
     for occurrence in found:
         await resolver.resolve(occurrence)
     return found

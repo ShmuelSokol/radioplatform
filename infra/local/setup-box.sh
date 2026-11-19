@@ -114,6 +114,7 @@ RELAY_PW="$(old KBR_ICECAST_RELAY_PASSWORD "$ENV_FILE")"; RELAY_PW="${RELAY_PW:-
 ADMIN_PW="$(old KBR_ICECAST_ADMIN_PASSWORD "$ENV_FILE")"; ADMIN_PW="${ADMIN_PW:-$(secret)}"
 MIRROR="$(old KBR_RELAY_MIRROR_LIBRARY "$RELAY_ENV")"; MIRROR="${MIRROR:-1}"
 TIMED="$(old KBR_RELAY_TIMED "$RELAY_ENV")"; TIMED="${TIMED:-offline}"
+OFFLINE_DAYS="$(old KBR_OFFLINE_DAYS "$RELAY_ENV")"; OFFLINE_DAYS="${OFFLINE_DAYS:-8}"
 
 # The station's name for the stream's title (the box still sets up if the site is away)
 NAME_TZ="$(BACKEND_URL="$BACKEND_URL" SID="$STATION" python3 -c '
@@ -174,6 +175,7 @@ KBR_ENGINE_CONTROL=http://127.0.0.1:${CONTROL_PORT}
 KBR_RELAY_DIR=${RELAY_DIR}
 KBR_RELAY_TIMED=${TIMED}
 KBR_RELAY_MIRROR_LIBRARY=${MIRROR}
+KBR_OFFLINE_DAYS=${OFFLINE_DAYS}
 RENV
 for f in "$ENV_FILE" "$STATION_ENV" "$RELAY_ENV"; do chown root:liquidsoap "$f"; chmod 640 "$f"; done
 umask 022

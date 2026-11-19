@@ -47,7 +47,7 @@ def _relay_module():
 class Box:
     """The relay on the box, its line to the backend and its engine."""
 
-    def __init__(self, sim: Simulator, station_id, data_dir: Path):
+    def __init__(self, sim: Simulator, station_id, data_dir: Path, offline_days: float = 8.0):
         self.sim, self.station_id = sim, station_id
         self.line_up = True
         self.loop = asyncio.get_running_loop()
@@ -78,7 +78,7 @@ class Box:
                 return asyncio.run_coroutine_threadsafe(eng.command(path, payload), box.loop).result()
 
         self.relay = SimRelay("http://backend.invalid/api/v1", str(station_id), "sim-token", data_dir,
-                              clock=lambda: sim.t, mirror_library=False)
+                              clock=lambda: sim.t, mirror_library=False, offline_days=offline_days)
         self.last_sync = -1e9
         self.kept_max = 0
 
@@ -97,14 +97,40 @@ class Box:
             if route == "/started":
                 got = await playout_engine.handle_started(
                     db, self.station_id, data.get("entry_id"), data.get("lane"), at=data.get("at"),
-                    kept=bool(data.get("kept")), quiet=bool(data.get("kept") and data.get("more")))
+                    kept=bool(data.get("kept")), quiet=bool(data.get("kept") and data.get("more")),
+                    asset_id=data.get("asset_id") if data.get("kept") else None)
                 return 200, json.dumps(got).encode()
             if route == "/hello":
                 await playout_engine.handle_hello(self.station_id, data.get("proto"), "sim-box")
                 return 200, b'{"ok":true}'
             if route == "/plan":
-                return 200, json.dumps(await playout_plan.build_plan(db, self.station_id)).encode()
+                q = urllib.parse.parse_qs(query)
+                days = float(q["days"][0]) if q.get("days") else None
+                return 200, json.dumps(await playout_plan.build_plan(db, self.station_id, days=days)).encode()
         return 404, b"{}"
+
+    def items_not_in_queue(self) -> dict:
+        """What the box aired that is not a queue row, shaped like one for the checks."""
+        from types import SimpleNamespace
+        from datetime import datetime as _dt
+
+        out = {}
+        for seg in self.sim.log:
+            eid = seg.entry_id or ""
+            item = self.relay.find_item(eid) if eid else None
+            if item is None and eid in self.relay.served:
+                # a queue entry removed on the site meanwhile: the box remembers its item
+                item = {"asset_id": self.relay.served[eid]}
+            if item is None or not item.get("asset_id"):
+                continue
+            at = item.get("at")
+            out[eid] = SimpleNamespace(
+                asset_id=item["asset_id"],
+                preempt_at=_dt.fromtimestamp(at, UTC) if at else None,
+                timing_mode=item.get("mode"), source=item.get("local") or "box-plan",
+                block_id=None, was_soft=None,
+            )
+        return out
 
     # what the engine calls (tests/sim/engine.py `backend`)
     async def next(self, given):
@@ -124,7 +150,8 @@ class Box:
         due = t - self.last_sync >= 60.0 or (r.hard_item_soon() and t - r.last_plan_at > 20.0)
         if due:
             self.last_sync = t
-            if await asyncio.to_thread(r.sync_plan):
+            synced = (await asyncio.to_thread(r.sync_extension)) if r.extension_due() else False
+            if synced or await asyncio.to_thread(r.sync_plan):
                 await asyncio.to_thread(r.catch_up)
         await asyncio.to_thread(r.hand_over_timed)
         try:
@@ -133,20 +160,23 @@ class Box:
             pass
 
 
-async def run(export_path, start, cut, back, end, changes=True, out=None):
+async def run(export_path, start, cut, back, end, changes=True, out=None, offline_days=8.0,
+              weather_days=None, regenerate_windows=False):
     export = load_export(export_path)
+    seed_days = max(3, int((end - start).total_seconds() // 86400) + 2)
     tmp = Path(tempfile.mkdtemp(prefix="station-sim-box-"))
     sim = Simulator(tmp / "sim.db", start, quiet_pass=12.0)
     sid = uuid.UUID(MAIN)
 
     async def do_seed(db):
-        await seed(db, export, start, days=3, stations={MAIN},
-                   block_overrides={b: {"is_active": True, "days_of_week": "0,1,2,3,4,5,6"} for b in DAF_BLOCK.values()})
+        await seed(db, export, start, days=seed_days, stations={MAIN},
+                   block_overrides={b: {"is_active": True, "days_of_week": "0,1,2,3,4,5,6"} for b in DAF_BLOCK.values()},
+                   weather_days=weather_days, regenerate_windows=regenerate_windows)
         return [sid]
 
     wall = time.monotonic()
     await sim.setup(do_seed)
-    box = Box(sim, sid, tmp / "box")
+    box = Box(sim, sid, tmp / "box", offline_days=offline_days)
     eng = sim.engines[MAIN]
     eng.backend = box
     notes: list[str] = []
@@ -178,6 +208,7 @@ async def run(export_path, start, cut, back, end, changes=True, out=None):
         notes.append(f"line back {back.astimezone(NY):%a %H:%M}: {kept} start reports kept on the box")
         await sim.run_until(end, on_step=box.step)
         playout_engine._command = inner
+        sim.box_items = box.items_not_in_queue()
         result = await checks.collect(sim)
         report = await _after(sim, sid, result, cut, back, made, notes)
     finally:
@@ -275,11 +306,16 @@ def main():
     for name in ("start", "cut", "back", "end"):
         p.add_argument(f"--{name}", required=True)
     p.add_argument("--no-changes", action="store_true")
+    p.add_argument("--offline-days", type=float, default=8.0, help="days past the queue the box keeps (0 = none)")
+    p.add_argument("--weather-days", type=int, help="daily weather reports exist this many days ahead")
+    p.add_argument("--windows", action="store_true", help="make Shabbos/Yom Tov windows for the run's dates")
     p.add_argument("--out")
     a = p.parse_args()
     logging.basicConfig(level=logging.ERROR)
     when = [datetime.fromisoformat(getattr(a, n)).replace(tzinfo=NY) for n in ("start", "cut", "back", "end")]
-    _, _, text = asyncio.run(run(a.export, *when, changes=not a.no_changes, out=a.out))
+    _, _, text = asyncio.run(run(a.export, *when, changes=not a.no_changes, out=a.out,
+                                 offline_days=a.offline_days, weather_days=a.weather_days,
+                                 regenerate_windows=a.windows))
     print(text)
 
 

@@ -29,6 +29,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import shutil
 import threading
@@ -36,9 +37,16 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import wave
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None
 
 log = logging.getLogger("kbr-relay")
 
@@ -53,8 +61,37 @@ CLOCK_BEHIND_SECONDS = 120.0
 # Live show audio with nothing new from the backend for this long ends the pass-through;
 # the engine's live lane goes quiet and opens it again.
 LIVE_STALL_SECONDS = 10.0
-DONE_KEEP = 5000
+DONE_KEEP = 8000  # a week offline hands out about 3,500 items
+# Days past the end of the queue the box keeps (GET /plan?days=): its timed items worked
+# out ahead, the songs it plays at each hour of the day, a month of Shabbos and Yom Tov
+OFFLINE_DAYS = 8.0
+EXTENSION_EVERY_SECONDS = 600.0
+# A song drawn by the box itself (the queue used up) is not repeated within this many
+# hours when the hour's list allows it; the least recently aired goes first
+SONG_REST_HOURS = 6.0
+AIRED_KEEP = 4000
+# A shiur or story paused for a hard item carries on from a little before where it
+# stopped, unless it was nearly over (long_items.py on the site)
+RESUME_REWIND_SECONDS = 3.0
+MIN_REMAINING_TO_RESUME = 30.0
+# A station ID is kept this far from any timed item (the site's clear_minutes default)
+ID_CLEAR_SECONDS = 180.0
+ID_MIN_GAP_SECONDS = 12 * 60.0  # and this far from the last ID (min_minutes default)
 URL_AT_END = re.compile(r'(?:^|(?<=":))(https?://\S+)$')
+CUE_IN = re.compile(r'liq_cue_in="[^"]*",?')
+
+
+def with_cue_in(uri: str, seconds: float) -> str:
+    """The engine URI starting `seconds` into its file (a paused shiur carrying on)."""
+    if not uri.startswith("annotate:"):
+        return uri
+    body = CUE_IN.sub("", uri[len("annotate:"):])
+    return f'annotate:liq_cue_in="{seconds:.3f}",' + body
+
+
+def cue_in_of(uri: str) -> float:
+    m = re.search(r'liq_cue_in="([0-9.]+)"', uri or "")
+    return float(m.group(1)) if m else 0.0
 
 
 class Offline(Exception):
@@ -72,6 +109,7 @@ class Relay:
         timed_mode: str = "offline",
         mirror_library: bool = True,
         clock=time.time,
+        offline_days: float = OFFLINE_DAYS,
     ):
         self.upstream = upstream.rstrip("/")
         self.station_id = station_id
@@ -87,10 +125,30 @@ class Relay:
         self.clock = clock
         self.lock = threading.RLock()
         self.plan: dict = self._read_json("plan.json", {"entries": [], "blackouts": []})
+        # The days after the queue (see sync_extension); {} until the first fetch
+        self.offline_days = offline_days
+        self.extension: dict = self._read_json("extension.json", {})
+        self.last_extension_at = 0.0
         state = self._read_json("state.json", {})
         # Entries that were handed to the engine or reported on air: never served again
         self.done: list[str] = list(state.get("done", []))
         self.timed_sent: set[str] = set(state.get("timed_sent", []))
+        # entry id -> asset id of what this box handed out, so a kept start report can
+        # name its item (the site logs it even if the entry is gone there)
+        self.served: dict[str, str] = dict(state.get("served", {}))
+        # asset id -> when it last aired here: songs the box draws itself rest
+        self.aired: dict[str, float] = dict(state.get("aired", {}))
+        # The music lane's item on air (from the start reports) and the one handed out
+        # after it, for the pause of a shiur by a hard item while offline
+        self.on_air: dict | None = state.get("on_air")
+        self.cued_main: str | None = state.get("cued_main")
+        # A paused shiur waiting to carry on, first thing in the music lane
+        self.resume: dict | None = state.get("resume")
+        self.paused_for: list[str] = list(state.get("paused_for", []))
+        # Local items: things the box hands out that are not in the site's queue (songs
+        # it drew, a shiur's resume), by entry id, for their start reports
+        self.local_items: dict[str, dict] = dict(state.get("local_items", {}))
+        self.last_id_at: float | None = state.get("last_id_at")
         self.online = True
         # The engine's own run id (X-Playout-Instance), passed on to the backend with every
         # call, so its one-engine-per-station rule also covers a box (a box set up with a
@@ -128,7 +186,18 @@ class Relay:
         os.replace(part, self.dir / name)
 
     def _save_state(self) -> None:
-        self._write_json("state.json", {"done": self.done[-DONE_KEEP:], "timed_sent": sorted(self.timed_sent)[-500:]})
+        if len(self.served) > DONE_KEEP:
+            self.served = dict(list(self.served.items())[-DONE_KEEP:])
+        if len(self.aired) > AIRED_KEEP:
+            self.aired = dict(sorted(self.aired.items(), key=lambda kv: kv[1])[-AIRED_KEEP:])
+        if len(self.local_items) > 200:
+            self.local_items = dict(list(self.local_items.items())[-200:])
+        self._write_json("state.json", {
+            "done": self.done[-DONE_KEEP:], "timed_sent": sorted(self.timed_sent)[-500:],
+            "served": self.served, "aired": self.aired, "on_air": self.on_air,
+            "cued_main": self.cued_main, "resume": self.resume, "paused_for": self.paused_for[-50:],
+            "local_items": self.local_items, "last_id_at": self.last_id_at,
+        })
 
     def local_path(self, url: str) -> Path:
         digest = hashlib.sha1(url.encode()).hexdigest()
@@ -265,7 +334,7 @@ class Relay:
 
     def catch_up_soon(self) -> threading.Thread | None:
         """Send the kept start reports in the background (one catch-up at a time)."""
-        if not self._catching.acquire(blocking=False):
+        if self._catching.locked():
             return None
 
         def run():
@@ -273,8 +342,6 @@ class Relay:
                 self.catch_up()
             except Exception:
                 log.exception("catch up")
-            finally:
-                self._catching.release()
 
         t = threading.Thread(target=run, daemon=True, name="catch_up")
         t.start()
@@ -302,8 +369,96 @@ class Relay:
                 pass
         return status, data
 
+    def blackouts(self) -> list[dict]:
+        return list(self.plan.get("blackouts", [])) + list(self.extension.get("blackouts", []))
+
     def in_blackout(self, now: float) -> bool:
-        return any(b["start"] <= now < b["end"] for b in self.plan.get("blackouts", []))
+        return any(b["start"] <= now < b["end"] for b in self.blackouts())
+
+    def timed_entries(self) -> list[dict]:
+        """Every timed item the box knows: the queue's, then those worked out for the days
+        after it (the extension), less any at a minute the queue already has."""
+        entries = self.plan.get("entries", [])
+        mine = [e for e in entries if e.get("at") is not None]
+        minutes = {round(e["at"] / 60) for e in mine}
+        extra = []
+        for i, e in enumerate(self.extension.get("timed", [])):
+            if round(e["at"] / 60) in minutes:
+                continue
+            extra.append({**e, "position": e.get("position") or (10_000_000 + i)})
+        return mine + extra
+
+    def find_item(self, entry_id: str | None) -> dict | None:
+        if not entry_id:
+            return None
+        if entry_id in self.local_items:
+            return self.local_items[entry_id]
+        for e in self.plan.get("entries", []):
+            if e["entry_id"] == entry_id:
+                return e
+        for e in self.extension.get("timed", []):
+            if e["entry_id"] == entry_id:
+                return e
+        return None
+
+    def _local_hour(self, now: float) -> int:
+        tz = self.plan.get("timezone") or "America/New_York"
+        try:
+            return datetime.fromtimestamp(now, ZoneInfo(tz)).hour if ZoneInfo else time.localtime(now).tm_hour
+        except Exception:
+            return time.localtime(now).tm_hour
+
+    def _id_must_wait(self, now: float, timed_waiting: list[dict]) -> bool:
+        """An automatic station ID is not put next to a break or a spoken item (the
+        site's station_id_guard, in short): the item before it must be a song, and no
+        timed item may be due within ID_CLEAR_SECONDS of when it would air."""
+        cur = self.on_air
+        if cur is None or (cur.get("kind") or "") != "music":
+            return True
+        if now - float(self.last_id_at or 0.0) < ID_MIN_GAP_SECONDS:
+            return True
+        ends = cur["at"] + float(cur.get("duration") or 0.0) - cue_in_of(cur.get("uri") or "")
+        airs = max(now, ends)
+        return any(abs(e["at"] - airs) < ID_CLEAR_SECONDS for e in timed_waiting)
+
+    def draw_song(self, now: float) -> dict | None:
+        """Past the end of the queue: a song the station plays at this hour of its day,
+        the one that has rested longest (not one aired in the last SONG_REST_HOURS when
+        the hour's list allows it)."""
+        songs = self.extension.get("songs", {})
+        if not songs:
+            return None
+        hour_list = self.extension.get("music", {}).get(str(self._local_hour(now)), [])
+        cands = [a for a in hour_list if a in songs and self.have(songs[a]["url"])]
+        if not cands:
+            cands = [a for a in songs if self.have(songs[a]["url"])]
+        if not cands:
+            return None
+        rested = [a for a in cands if now - self.aired.get(a, 0.0) >= SONG_REST_HOURS * 3600] or cands
+        rng = random.Random()
+        pick = min(rested, key=lambda a: (self.aired.get(a, 0.0), rng.random()))
+        song = songs[pick]
+        eid = str(uuid.uuid4())
+        template = self.extension.get("template_entry") or "00000000-0000-0000-0000-000000000000"
+        item = {
+            "entry_id": eid, "asset_id": pick, "title": song.get("title", ""), "kind": "music",
+            "duration": song.get("duration"), "url": song["url"], "long": False,
+            "uri_main": song["uri"].replace(template, eid), "local": "song",
+        }
+        self.local_items[eid] = item
+        return item
+
+    def _serve(self, item: dict) -> tuple[int, bytes]:
+        eid = item["entry_id"]
+        self.mark_done(eid)
+        with self.lock:
+            if item.get("asset_id"):
+                self.served[eid] = item["asset_id"]
+                self.aired[item["asset_id"]] = self.now()
+            self.cued_main = eid
+            self._save_state()
+        log.info("offline: next is %s (%s)", item.get("title"), eid)
+        return 200, json.dumps({"uri": self.localize(item["uri_main"]), "entry_id": eid}).encode()
 
     def offline_next(self) -> tuple[int, bytes]:
         now = self.now()
@@ -313,16 +468,26 @@ class Relay:
                 uri = f'annotate:kbr_entry="",kbr_lane="main",kbr_kind="silence",title="Off air":{self.silence_file()}'
                 return 200, json.dumps({"uri": uri, "entry_id": ""}).encode()
             done = set(self.done)
+            if self.resume and self.resume["entry_id"] not in done:
+                # A shiur paused for the hard item now in the timed lane carries on next
+                item, self.resume = self.resume, None
+                return self._serve(item)
             waiting = [
                 e for e in self.plan.get("entries", [])
                 if e["entry_id"] not in done and e["entry_id"] not in self.timed_sent
             ]
+            timed_waiting = [
+                e for e in self.timed_entries()
+                if e["entry_id"] not in done and e["entry_id"] not in self.timed_sent
+            ]
             chosen = None
             # Timed items whose time has come go first, by time then position (as /next)
-            due = sorted((e for e in waiting if clock_ok and e.get("at") is not None and e["at"] <= now),
+            due = sorted((e for e in timed_waiting if clock_ok and e["at"] <= now),
                          key=lambda e: (e["at"], e["position"]))
+            deferred = set(self.paused_for)
             for e in due:
-                limit = MISSED_HARD_SECONDS if e.get("mode") == "hard" else MISSED_SOFT_SECONDS
+                hard = e.get("mode") == "hard" and e["entry_id"] not in deferred
+                limit = MISSED_HARD_SECONDS if hard else MISSED_SOFT_SECONDS
                 if now - e["at"] > limit:
                     # A time check minutes late, or a sponsorship from before a long
                     # power cut, is not aired
@@ -332,16 +497,25 @@ class Relay:
                     chosen = e
                     break
             if chosen is None:
+                held_id = None
                 for e in waiting:
                     if e.get("at") is None and self.have(e["url"]):
+                        if e.get("station_id"):
+                            if held_id is not None:
+                                # Two IDs would end up together: the earlier one goes
+                                self.mark_done(held_id["entry_id"])
+                            if self._id_must_wait(now, timed_waiting):
+                                held_id = e
+                                continue  # stays in the queue for after the next song
                         chosen = e
                         break
             if chosen is None:
+                # The queue is used up (days offline): the box draws the station's songs
+                chosen = self.draw_song(now)
+            if chosen is None:
                 # Nothing left that is on this disk: the engine plays its emergency folder
                 return 204, b""
-            self.mark_done(chosen["entry_id"])
-            log.info("offline: next is %s (%s)", chosen["title"], chosen["entry_id"])
-            return 200, json.dumps({"uri": self.localize(chosen["uri_main"]), "entry_id": chosen["entry_id"]}).encode()
+            return self._serve(chosen)
 
     def started(self, body: bytes) -> tuple[int, bytes]:
         try:
@@ -349,6 +523,7 @@ class Relay:
         except ValueError:
             report = {}
         self.mark_done(report.get("entry_id"))
+        self._note_on_air(report)
         try:
             if self.spool_path.is_file() and self.spool_path.stat().st_size:
                 raise Offline("earlier reports still wait; keep the order")
@@ -357,9 +532,85 @@ class Relay:
             if report.get("entry_id"):  # an emergency or silence file is not in the queue
                 report.setdefault("at", self.clock())
                 report["kept"] = True  # the backend records it at `at`, not on arrival
+                # So the site logs it even when the entry is not in its queue (removed
+                # there meanwhile, or a song the box drew itself)
+                asset = self.served.get(report["entry_id"]) or (self.find_item(report["entry_id"]) or {}).get("asset_id")
+                if asset:
+                    report["asset_id"] = asset
                 with self.lock, open(self.spool_path, "a") as f:
                     f.write(json.dumps(report) + "\n")
             return 200, b'{"ok":true,"relay":"kept"}'
+
+    def _note_on_air(self, report: dict) -> None:
+        """What is on air now, for pausing a shiur offline."""
+        eid = report.get("entry_id")
+        item = self.find_item(eid)
+        with self.lock:
+            if eid and eid == self.cued_main:
+                self.cued_main = None
+            if not eid or item is None:
+                self.on_air = None
+            else:
+                self.on_air = {
+                    "entry_id": eid, "lane": report.get("lane"), "at": float(report.get("at") or self.clock()),
+                    "asset_id": item.get("asset_id"), "title": item.get("title"),
+                    "long": bool(item.get("long")), "duration": item.get("duration"),
+                    "uri": item.get("uri_main"), "url": item.get("url"), "kind": item.get("kind"),
+                }
+                if item.get("asset_id"):
+                    self.aired[item["asset_id"]] = self.on_air["at"]
+                if item.get("station_id"):
+                    self.last_id_at = self.on_air["at"]
+            self._save_state()
+
+    def _before_group(self, at: float, group: list[dict]) -> bool:
+        """A hard group is about to be handed over while a shiur or story is on air:
+        the station's rule (long_items) as the site applies it. pause: it carries on
+        after the group, from a little before where it stopped. wait: the group airs
+        when it ends (False: not handed over now). cut: nothing to do."""
+        cur = self.on_air
+        if not cur or not cur.get("long") or not cur.get("uri"):
+            return True
+        rule = self.plan.get("long_items") or "pause"
+        elapsed = at - cur["at"]
+        duration = float(cur.get("duration") or 0.0)
+        cue = cue_in_of(cur["uri"])
+        left = duration - cue - elapsed if duration else 1e9
+        if elapsed <= 0 or left <= 1.0:
+            return True
+        if rule == "wait":
+            with self.lock:
+                self.paused_for.extend(e["entry_id"] for e in group)
+                self._save_state()
+            log.info("offline: hard group at %.0f waits for %s to end", at, cur.get("title"))
+            return False
+        if rule != "pause" or left < MIN_REMAINING_TO_RESUME:
+            return True
+        key = f'{cur["entry_id"]}@{at:.0f}'
+        if key in self.paused_for or (self.resume and self.resume.get("asset_id") == cur.get("asset_id")):
+            return True
+        offset = cue + max(0.0, elapsed - RESUME_REWIND_SECONDS)
+        eid = str(uuid.uuid4())
+        item = {
+            "entry_id": eid, "asset_id": cur.get("asset_id"), "title": cur.get("title"),
+            "kind": cur.get("kind"), "long": True, "url": cur.get("url"),
+            "duration": duration, "uri_main": with_cue_in(cur["uri"].replace(cur["entry_id"], eid), offset),
+            "local": "resume",
+        }
+        with self.lock:
+            self.local_items[eid] = item
+            self.resume = item
+            self.paused_for.append(key)
+            dropped, self.cued_main = self.cued_main, None
+            if dropped and dropped in self.done and dropped not in self.local_items:
+                # The song the engine had pre-loaded is played later instead
+                self.done.remove(dropped)
+            self._save_state()
+        log.info("offline: %s pauses at %.0f s for the hard group at %.0f; it carries on after",
+                 cur.get("title"), offset, at)
+        # The engine drops its pre-loaded song and asks again: it gets the resume
+        self._post_engine("/flush", {})
+        return True
 
     def alert(self, body: bytes) -> tuple[int, bytes]:
         """An emergency alert went on air or came off (its own alert line works with no
@@ -419,13 +670,56 @@ class Relay:
             self.plan = plan
             self.last_plan_at = self.clock()
             self._write_json("plan.json", plan)
-            live = {e["entry_id"] for e in plan["entries"]}
+            live = {e["entry_id"] for e in plan["entries"]} | {e["entry_id"] for e in self.extension.get("timed", [])}
             self.timed_sent &= live
         return True
 
+    def sync_extension(self) -> bool:
+        """The days after the queue (GET /plan?days=): fetched every few minutes, as it is
+        a week of the station worked out on the site. Also takes the plan that comes with it."""
+        try:
+            status, data = self._call("GET", f"/plan?days={self.offline_days:g}", timeout=60.0)
+        except Offline:
+            return False
+        if status != 200:
+            log.warning("extension: backend answered %s", status)
+            return False
+        try:
+            plan = json.loads(data)
+            plan["entries"], plan["blackouts"]
+            ext = plan.pop("extension")
+            ext["timed"], ext["songs"], ext["music"]
+        except (ValueError, KeyError, TypeError):
+            return False
+        with self.lock:
+            self.extension = ext
+            self.last_extension_at = self.clock()
+            self._write_json("extension.json", ext)
+            self.plan = plan
+            self.last_plan_at = self.clock()
+            self._write_json("plan.json", plan)
+            live = {e["entry_id"] for e in plan["entries"]} | {e["entry_id"] for e in ext["timed"]}
+            self.timed_sent &= live
+        log.info("extension: %d timed items and %d songs for %.0f days past the queue",
+                 len(ext["timed"]), len(ext["songs"]), self.offline_days)
+        return True
+
+    def extension_due(self) -> bool:
+        return self.offline_days > 0 and self.clock() - self.last_extension_at >= EXTENSION_EVERY_SECONDS
+
     def catch_up(self) -> None:
         """Line is back: say hello if the engine restarted meanwhile, then send the kept
-        start reports in order."""
+        start reports in order. One at a time: two catch-ups at once (the sync loop and
+        an engine ask) sent every kept report twice, so every offline play was logged
+        twice (simulator, 2026-11-19)."""
+        if not self._catching.acquire(blocking=False):
+            return
+        try:
+            self._catch_up()
+        finally:
+            self._catching.release()
+
+    def _catch_up(self) -> None:
         if self.hello_owed:
             try:
                 self._call("POST", "/hello", b'{"proto":2}')
@@ -485,12 +779,14 @@ class Relay:
         """Audio for the plan, timed items first (they cannot wait). Returns files still missing."""
         with self.lock:
             entries = list(self.plan.get("entries", []))
+            later = [e["url"] for e in self.extension.get("timed", [])]
+            later += [s["url"] for s in self.extension.get("songs", {}).values()]
         entries.sort(key=lambda e: (e.get("at") is None, e.get("at") or 0, e["position"]))
         missing = 0
-        for e in entries:
+        for url in [e["url"] for e in entries] + later:
             if self.stop.is_set():
                 break
-            if not self.download(e["url"]):
+            if not self.download(url):
                 missing += 1
         return missing
 
@@ -619,8 +915,11 @@ class Relay:
         now = self.clock()
         with self.lock:
             done = set(self.done)
+            deferred = set(self.paused_for)
             groups: dict[float, list[dict]] = {}
-            for e in self.plan.get("entries", []):
+            for e in self.timed_entries():
+                if e["entry_id"] in deferred:
+                    continue  # waits for the shiur on air to end (station rule "wait")
                 at = e.get("at")
                 if e.get("mode") != "hard" or at is None or not e.get("uri_timed"):
                     continue
@@ -636,6 +935,9 @@ class Relay:
         sent = 0
         for at in sorted(groups):
             items = sorted(groups[at], key=lambda e: e["position"])
+            if not any(e["entry_id"] in self.timed_sent for e in self.timed_entries() if e.get("at") == at):
+                if not self._before_group(at, items):
+                    continue
             for seq, e in enumerate(items):
                 payload = {"uri": self.localize(e["uri_timed"]), "at": at, "id": e["entry_id"]}
                 if len(items) > 1:
@@ -653,7 +955,7 @@ class Relay:
         with self.lock:
             return any(
                 e.get("mode") == "hard" and e.get("at") is not None and 0 < e["at"] - now <= within
-                for e in self.plan.get("entries", [])
+                for e in self.timed_entries()
             )
 
     def run_background(self, plan_every: float = 60.0, library_every: float = 6 * 3600.0) -> None:
@@ -672,7 +974,9 @@ class Relay:
             last_library = 0.0
             while not self.stop.is_set():
                 try:
-                    if self.sync_plan():
+                    if self.extension_due() and self.sync_extension():
+                        self.catch_up()
+                    elif self.sync_plan():
                         self.catch_up()
                     self.fetch_plan_audio()
                     if self.mirror_library and self.online and time.time() - last_library > library_every:
@@ -711,6 +1015,7 @@ class Relay:
             "plan_entries": st["plan_entries"],
             "plan_audio_missing": st["plan_audio_missing"],
             "reports_kept": st["reports_kept"],
+            "offline_days_ahead": st["offline_days_ahead"],
             "disk_free_gb": free,
             "engine_ok": self._engine_call("/status", {}, wait=2.0)[0] == 200,
             "up_seconds": int(time.monotonic() - self.started_at),
@@ -731,7 +1036,24 @@ class Relay:
                 "in_blackout": self.in_blackout(self.now()),
                 "clock_ok": self.clock_ok(),
                 "commands_done": self.commands_done,
+                **self.reach(),
             }
+
+    def reach(self) -> dict:
+        """How long the box can carry the station from what is on its disk."""
+        now = self.clock()
+        ext = self.extension
+        songs = ext.get("songs", {})
+        until = ext.get("until")
+        timed = self.timed_entries()
+        last_timed = max((e["at"] for e in timed if e.get("at")), default=None)
+        return {
+            "offline_days_ahead": round(max(0.0, (until - now)) / 86400, 1) if until else 0.0,
+            "timed_until": last_timed,
+            "songs_for_rotation": len(songs),
+            "songs_on_disk": sum(1 for s in songs.values() if self.have(s["url"])),
+            "extension_age_seconds": round(now - self.last_extension_at, 1) if self.last_extension_at else None,
+        }
 
 
 def make_handler(relay: Relay):
@@ -801,6 +1123,7 @@ def main() -> None:
         engine_control=env.get("KBR_ENGINE_CONTROL", "http://127.0.0.1:" + env.get("KBR_CONTROL_PORT", "8081")),
         timed_mode=env.get("KBR_RELAY_TIMED", "offline"),
         mirror_library=env.get("KBR_RELAY_MIRROR_LIBRARY", "1") not in ("0", "false", ""),
+        offline_days=float(env.get("KBR_OFFLINE_DAYS", OFFLINE_DAYS)),
     )
     relay.silence_file()
     serve(relay, int(env.get("KBR_RELAY_PORT", "8090")))

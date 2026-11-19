@@ -38,6 +38,9 @@ class StartedReport(BaseModel):
     kept: bool = False
     # More kept reports follow at once: record this one quietly (no now-playing change)
     more: bool = False
+    # A kept report's item: logged by it when the entry is not (or no longer) in the
+    # queue (removed on the site while the box was offline, or worked out by the box)
+    asset_id: str | None = None
 
 
 def _require_engine(
@@ -75,11 +78,13 @@ def _require_token(
 async def plan(
     station_id: uuid.UUID = Depends(_require_token),
     hours: float = Query(default=48.0, gt=0, le=168),
+    days: float | None = Query(default=None, gt=0, le=playout_plan.MAX_EXTENSION_DAYS),
     db: AsyncSession = Depends(get_db),
 ):
     """The pending queue with each item's engine URI, and the blackout windows: what a
-    local FM box keeps so it can carry on with no internet (`wiki/local-fm-box.md`)."""
-    return await playout_plan.build_plan(db, station_id, hours)
+    local FM box keeps so it can carry on with no internet (`wiki/local-fm-box.md`).
+    `days`: also the days after the queue (`extension`), for a box offline for a week."""
+    return await playout_plan.build_plan(db, station_id, hours, days=days)
 
 
 @router.get("/{station_id}/library")
@@ -169,7 +174,7 @@ async def started(
     t0 = time.monotonic()
     result = await playout_engine.handle_started(
         db, station_id, body.entry_id, body.lane, at=body.at, kept=body.kept,
-        quiet=body.kept and body.more,
+        quiet=body.kept and body.more, asset_id=body.asset_id if body.kept else None,
     )
     # Every start report's time, for the production log: only those over 3 s were
     # logged, so a regression under that went unseen (2026-11-18)

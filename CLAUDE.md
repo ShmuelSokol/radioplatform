@@ -240,7 +240,7 @@ radioplatform/
 | station_modes.py | HS (hard start) and Spots mode switches: softens hard timed items while HS is off and restores them; Spots off plans no sponsorships (see `wiki/station-modes.md`) |
 | queue_positions.py | Renumbers a station's playing and pending queue entries from 1 in one statement (browser player's song change, blackout fill); `put_playing_first` moves only the item on air before the first waiting one (engine start report) |
 | playout_tunnel.py | Commands to an engine with no inbound line (a local FM box): its relay long-polls for them; used by playout_engine only while a relay is polling. Also keeps the box's health report and names its problems for air watch (see `wiki/local-fm-box.md`) |
-| playout_plan.py | Read-only plan (pending queue with engine URIs, blackouts) and library pages for a local FM box's relay (see `wiki/local-fm-box.md`) |
+| playout_plan.py | Read-only plan (pending queue with engine URIs, blackouts) and library pages for a local FM box's relay; `?days=` adds the extension for a week offline (timed items past the queue, songs by hour, 30 days of blackouts) (see `wiki/local-fm-box.md`) |
 | rds_service.py | RDS line now: clock-based weighted rotation, sponsor line while their spot airs, Latin-only text (Hebrew dropped), 8/64 limits, play log of encoder fetches (see `wiki/rds-feed.md`) |
 | sponsor_room.py | How full each three-hour slot is per day on a station: sponsor places (or clock minutes) on the air against the planner's bookings, and who is booked (see `wiki/sponsor-accounts.md`) |
 | sponsor_accounts.py | Sponsors as clients: status from contract dates, spots by stage of the flow, plays per contract, the as-run log (see `wiki/sponsor-accounts.md`) |

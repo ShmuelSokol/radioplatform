@@ -256,6 +256,70 @@ Checked with the real engine: harness `--local-box live_show_on_the_stream` 7 of
 heard through the relay, quiet during a stall, music back 0.9 s after); on the old relay
 the same run failed with 0.0 s of host heard.
 
+## Days offline (2026-11-19): a week without the internet
+
+Shmuel, 2026-11-19: "extend the offline to work for several days". His father: if the
+internet goes down someone must otherwise drive to BMG and program the day by hand.
+The queue holds about two days (time checks, weather and program blocks are queued 48 h
+ahead, music about as far), so on its own the box ran out on day three.
+
+**`GET /playout/{id}/plan?days=8`** (`playout_plan.build_extension`, cached 5 min per
+station) adds `extension` to the plan:
+- `timed`: what the site would queue after the queue's own reach (48 h), worked out the
+  same way: program blocks (`plan_blocks(..., prepare=False)`, sponsorship places from
+  `plan_for_station`) and the built-in hourly time check, :30 check and weather.
+  **Only recordings that exist**: the hour's own time clip, and the day's weather report
+  only for a date that has one (uploaded per date; the forecast reaches about 5 days).
+  A day with none has no weather item rather than an old report, and nothing is
+  generated for it (ElevenLabs would write a far day's report from today's weather).
+  A block whose programme is a shiur already queued or earlier that week is left out
+  (with what announces it): each day's Daf Yomi is put in the block by the PC job and
+  arrives only with the internet. Ids are stable uuid5-style hashes, so the box knows
+  across fetches what aired. A projected item is not a queue row.
+- `music` + `songs`: the station's songs by hour of its own day (what it queued for that
+  hour, or played at it over the last 8 days), each with an engine URI whose
+  `kbr_entry` is `template_entry` (all zeros); the box writes its own id in.
+- `blackouts`: Shabbos and Yom Tov for 30 days.
+
+**Relay:** fetches `?days=` (`KBR_OFFLINE_DAYS`, default 8) every 10 min
+(`extension.json`), the plain plan every minute as before. Offline it serves, in order:
+a paused shiur's resume; timed items whose time has come from the queue **and** the
+extension (an extension item at a minute the queue already has is ignored); the queue's
+next untimed item; and when the queue is used up a song drawn for the hour, the one
+that has rested longest (none within 6 h if the hour's list allows). Hard items from
+the extension go to the engine's timed lane like the queue's.
+
+**Logged on return:** every kept start report carries `asset_id` (`served`, plan or
+local item). `handle_started(kept=True, asset_id=...)` puts an entry that is not in the
+queue on air as a stand-in, so it is logged at its real time: songs removed on the site
+while the box was offline (the 16 h run: 20 of 20 aired unlogged) and the box's own
+picks. Two catch-ups at once (sync loop and an engine ask) sent every kept report
+twice, so every offline play had two log rows: `catch_up` now runs one at a time.
+
+**Shiur paused offline:** the relay follows what is on air from the start reports.
+Before handing over a hard group while a long item plays (plan `long_items`, the
+station's rule): pause = a local resume item (`liq_cue_in` = cue-in + elapsed - 3 s, not
+when under 30 s are left), engine `/flush`, the pre-loaded song put back to play later;
+wait = the group is not handed over and airs (as soft) after the item. On the 16 h run
+the Daf Yomi cut by the 8:30 PM check never came back.
+
+**Station IDs offline** (`station_id` in plan entries): only after a song, not within
+3 min of a timed item, not within 12 min of the last ID; two waiting IDs in a row, the
+earlier goes. Before this, the box put IDs next to sponsorship breaks.
+
+`/relay/status` and the health report add `offline_days_ahead`, `songs_for_rotation`,
+`songs_on_disk`, `timed_until`.
+
+What it still cannot do offline: new recordings (each day's Daf Yomi, new shiurim
+such as Weinberger, Dr. Dave, Rabbi Freedman-Mir) arrive only with the internet; weather
+past the last forecast day is dropped; a live show needs the line; the box's songs are
+drawn from what the station played at that hour, not from the schedule's playlists
+(close, not identical); no hour fitting or soft-item pause of a shiur offline.
+
+Simulator: `uv run python -m tests.sim.offline --start 2026-11-19T17:30 --cut 2026-11-19T18:00
+--back 2026-11-26T18:00 --end 2026-11-26T20:00 --windows --weather-days 5` (7 days, a
+Shabbos; `--offline-days 0` for the old behaviour).
+
 ## Known gaps (next stages; nothing is installed at BMG yet)
 
 
@@ -266,8 +330,8 @@ the same run failed with 0.0 s of host heard.
    to the relay and fail before they fall back to HTTPS (`CONNECTED_SECONDS`). Air watch
    reports it as engine drift ("The local FM box does not answer") after its usual
    delay. Fine while a box has a station of its own; look again before it carries Main.
-3. **Offline brain is simple:** the queue as it stood. No long-item rule (a shiur is cut
-   by a hard item, not paused), no `hard_by`, no hour fitting, no refill past the plan.
+3. **Offline brain is simpler than the site's:** no `hard_by`, no hour fitting, no
+   soft-item pause of a shiur. Long items and refill past the plan: see "Days offline".
 4. **Alert for silence on the card** and the card's
    state in the health report, **RDS** (the encoder model is not known yet), a way for
    us to reach the box for maintenance (it has no inbound line).
