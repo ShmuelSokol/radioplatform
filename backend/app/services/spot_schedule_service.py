@@ -67,6 +67,16 @@ SPONSOR_GAP = timedelta(minutes=60)
 # A soft break this close to a shiur's end waits for it anyway (long_items), so it
 # does not interrupt and stays usable.
 TALK_TAIL = timedelta(minutes=5)
+def talk_tier(b: "Break", quiet: "list[tuple[datetime, datetime]] | None") -> int:
+    """0: the break is outside every shiur or story (or in its last few minutes, where
+    a soft break waits for the end anyway). 1: a hard break inside one: the shiur pauses
+    there for the time check anyway, but sponsorships would make the pause longer.
+    2: a soft break inside one: it would pause the shiur just for sponsorships."""
+    if not any(start < b.local < end - TALK_TAIL for start, end in (quiet or ())):
+        return 0
+    return 2 if b.timing_mode == "soft" else 1
+
+
 # Talk windows read before a block rebuild deleted the queued shiurim it is about
 # to queue again (see program_block_service.reconcile_block_entries).
 TALKS_BEFORE_REBUILD: ContextVar[list[tuple[datetime, datetime]] | None] = ContextVar(
@@ -271,13 +281,6 @@ def plan_spots(
     """
     blackouts = blackouts or []
 
-    def inside_talk(b: Break) -> bool:
-        # A soft break during a shiur or story would pause it just for sponsorships;
-        # a hard one (time check, weather) pauses it anyway, so it stays usable.
-        return b.timing_mode == "soft" and any(
-            start < b.local < end - TALK_TAIL for start, end in (quiet or ())
-        )
-
     minutes = sorted({int(m) for m in (slot_minutes or DEFAULT_SLOT_MINUTES) if 0 <= int(m) < 60})
     ordered = sorted(schedules, key=lambda s: (str(s.created_at or ""), str(s.id)))
     placements: list[Placement] = []
@@ -460,7 +463,13 @@ def plan_spots(
                         n = len(day_breaks)
                         open_ = [(i, b) for i, b in enumerate(day_breaks) if fits(b, sched)]
                         # Steer around a shiur: only when the slot has no other room
-                        open_ = [ib for ib in open_ if not inside_talk(ib[1])] or open_
+                        # (a hard break there pauses it anyway for the time check, so
+                        # it is second choice; a soft one would pause it just for us)
+                        open_ = (
+                            [ib for ib in open_ if talk_tier(ib[1], quiet) == 0]
+                            or [ib for ib in open_ if talk_tier(ib[1], quiet) < 2]
+                            or open_
+                        )
                         chosen = min(
                             open_,
                             key=lambda ib: (
@@ -946,14 +955,11 @@ def settle_today(
                 and h_start <= b.local.hour < h_end
                 and b.local not in own_breaks
             ]
-            pool = [
-                b
-                for b in pool
-                if not (
-                    b.timing_mode == "soft"
-                    and any(s < b.local < e - TALK_TAIL for s, e in (quiet or ()))
-                )
-            ] or pool
+            pool = (
+                [b for b in pool if talk_tier(b, quiet) == 0]
+                or [b for b in pool if talk_tier(b, quiet) < 2]
+                or pool
+            )
             if not pool:
                 continue
             others = [where(q) for q in mine if q is not p and where(q).astimezone(UTC) > cutoff]

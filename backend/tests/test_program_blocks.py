@@ -414,7 +414,7 @@ async def test_a_rebuild_still_steers_sponsorships_around_a_shiur_it_requeues(
         entries = await _pending(db_session, station_id)
         shiur_at = {e.preempt_at for e in entries if e.asset_id == made["show"].id}
         inside = [e.preempt_at for e in entries if e.asset_id in spot_ids
-                  and e.preempt_at.minute == 15 and e.preempt_at - timedelta(minutes=15) in shiur_at]
+                  and any(st < e.preempt_at < st + timedelta(minutes=45) for st in shiur_at)]
         assert shiur_at and not inside, inside[:3]
         res = await client.put(f"/api/v1/program-blocks/{res.json()['id']}", json=quarter, headers=auth_headers)
         assert res.status_code == 200, res.text

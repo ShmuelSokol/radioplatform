@@ -412,3 +412,4 @@ UPDATE 2026-11-18 daf-yomi-intro.md speech check uses whisper_prompt() (all mase
 UPDATE 2026-11-18 spot-schedules.md spread sponsorships skip soft breaks inside a timed shiur/story (talk_windows); hard :00/:30 breaks stay usable
 INGEST 2026-11-18 deploys.md deploy gate: CI's last job on main waits while a live show is on air and around :00/:30; needs Railway Wait for CI; [deploy-now] skips it
 UPDATE 2026-11-19 spot-schedules.md a block rebuild reads talk windows before deleting the queued shiur (TALKS_BEFORE_REBUILD), so it no longer queues sponsorships inside it
+UPDATE 2026-11-19 spot-schedules.md sponsorships avoid hard breaks inside a shiur too (talk_tier: outside, then hard inside, then soft inside)
