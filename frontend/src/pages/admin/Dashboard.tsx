@@ -44,6 +44,7 @@ import type { StationDayPlay } from '../../api/spotSchedules';
 import ModeButtons from './controlroom/ModeButtons';
 import { panicRequest, setStationModes, type StationModes } from '../../api/queue';
 import { canAccess, canChange, isManager } from '../../auth/access';
+import { useNavState } from '../../hooks/useNavState';
 import { dayKey, isValidTz, useHotButtons, useMediaQuery, usePhoneLandscape, useStored } from './controlroom/shared';
 import type { CtlAsset, FireMode, SendHow } from './controlroom/shared';
 import { ResumePrompt, useResumeAfterRelease } from '../../components/audio/ResumeAfterRelease';
@@ -197,7 +198,8 @@ export default function Dashboard() {
   const liveBadge = liveShowBadge(liveAir);
 
   // ── UI state ───────────────────────────────────────────────
-  const [pane, setPane] = useState<Pane>('queue');
+  // Kept with this visit, so Back from a page opened here finds the same pane (useNavState)
+  const [pane, setPane] = useNavState<Pane>('pane', 'queue');
   const [sideTab, setSideTab] = useStored<SideTab>('kbr_ctl_side_tab', 'library');
   // The right-hand button column: does it hold more than is showing below?
   const controlsRef = useRef<HTMLElement>(null);
@@ -221,11 +223,17 @@ export default function Dashboard() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   // Quick actions panel for one song (the one on air or a queue row)
-  const [songTarget, setSongTarget] = useState<SongTarget | null>(null);
+  // Kept with this visit and its station: Back from the Sponsor page (or the item's page)
+  // opens the same panel again, and never on another station (Shmuel 2026-11-19).
+  const [keptSong, setKeptSong] = useNavState<{ station: string | null; target: SongTarget } | null>('song', null);
+  const songTarget = keptSong && keptSong.station === (stationId ?? null) ? keptSong.target : null;
+  const setSongTarget = useCallback((t: SongTarget | null) => {
+    setKeptSong(t ? { station: stationId ?? null, target: t } : null);
+  }, [setKeptSong, stationId]);
   const openRowSong = useCallback((row: QueueRow) => {
     if (row.asset) setSongTarget({ asset: row.asset, onAir: row.status === 'playing', source: row.source ?? null });
-  }, []);
-  const closeSong = useCallback(() => setSongTarget(null), []);
+  }, [setSongTarget]);
+  const closeSong = useCallback(() => setSongTarget(null), [setSongTarget]);
   // Keep today's Sponsors list read the whole time the room is open (every minute), so the tab
   // paints its rows at once: a one-off background read was not used on the first paint live
   // (2026-11-18, "Loading…" still flashed). Same query key as SponsorsToday.
@@ -239,7 +247,7 @@ export default function Dashboard() {
   // The Sponsors list: one tap opens that play's Sponsorship panel
   const openSponsorPlay = useCallback((play: StationDayPlay) => {
     setSongTarget({ asset: play.asset, onAir: play.status === 'playing', source: play.source || 'ad_slot' });
-  }, []);
+  }, [setSongTarget]);
   const songToast = useCallback((text: string, type: Toast['type']) => setToast({ text, type }), []);
   const [busyId, setBusyId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -873,11 +881,11 @@ export default function Dashboard() {
       setPane('library');
       setSideTab('library');
     }
-  }, [setSideTab]);
+  }, [setSideTab, setPane]);
   const cancelInsert = useCallback(() => {
     setInsertBeforeId(null);
     setPane(p => (p === 'library' || p === 'buttons' ? 'queue' : p));
-  }, []);
+  }, [setPane]);
 
   // Pre-listen (PFL): one off-air player shared by the cart and the library
   const pfl = usePfl();
@@ -932,7 +940,7 @@ export default function Dashboard() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setSideTab]);
+  }, [setSideTab, setPane]);
 
   // ── Panels ─────────────────────────────────────────────────
   const transport: TransportProps = {
