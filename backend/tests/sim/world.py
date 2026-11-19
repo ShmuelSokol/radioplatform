@@ -59,6 +59,7 @@ class Simulator:
         self._patched: list = []
         self.errors: list[str] = []
         self.passes = 0
+        self.restarts: list = []
 
     # ── clock ──────────────────────────────────────────────────────────────────
     @property
@@ -237,6 +238,30 @@ class Simulator:
                     await db.rollback()
                 except Exception:
                     pass
+
+    async def restart_backend(self):
+        """A deployment: the backend process is replaced. Everything it kept in memory about
+        the engine is gone; the engine keeps playing and its next call teaches it again."""
+        from app.services import playout_engine
+
+        playout_engine.reset_state()
+        self._scheduler = None
+        del self._scheduler
+        self.last_action = self.t
+        self.restarts.append((self.t, "backend"))
+
+    async def restart_engine(self, sid: str):
+        """The stream engine restarts (crash, setup.sh rerun): what was on air is cut, its
+        lanes are empty, it says hello and asks for its next track."""
+        eng = self.engines[sid]
+        if eng.on_air is not None:
+            eng._close(self.t, cut=True)
+        eng.cued, eng.timed, eng.group, eng.given = None, [], [], []
+        eng.timed_held.clear()
+        eng.ask_next_at = None
+        self.last_action = self.t
+        self.restarts.append((self.t, f"engine {sid[:8]}"))
+        await eng.start()
 
     def _pass_gap(self) -> float:
         """Every 3 s, as the real loop, near anything that matters: an item ending within

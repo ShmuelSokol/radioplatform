@@ -124,6 +124,11 @@ async def collect(sim) -> Result:
         stations = {str(s.id): s for s in (await db.execute(select(Station))).scalars().all()}
         entries = {str(e.id): e for e in (await db.execute(select(QueueEntry))).scalars().all()}
         assets = {str(a.id): a for a in (await db.execute(select(Asset))).scalars().all()}
+        from app.models.play_log import PlayLog
+
+        play_logs = [(str(p.station_id), str(p.asset_id), _utc(p.start_utc).timestamp(),
+                      _utc(p.end_utc).timestamp() if p.end_utc else None)
+                     for p in (await db.execute(select(PlayLog))).scalars().all()]
         spot_sponsor = {}
         spot_station = defaultdict(set)
         for s in (await db.execute(select(SpotSchedule))).scalars().all():
@@ -146,7 +151,7 @@ async def collect(sim) -> Result:
         ))
     rows.sort(key=lambda r: (r.station, r.start))
     res = Result(rows, names={k: v.name for k, v in stations.items()}, errors=list(sim.errors))
-    ctx = Context(sim, stations, entries, assets, spot_station)
+    ctx = Context(sim, stations, entries, assets, spot_station, play_logs)
     for check in ALL_CHECKS:
         check(res, ctx)
     return res
@@ -178,6 +183,7 @@ class Context:
     entries: dict
     assets: dict
     spot_station: dict
+    play_logs: list = field(default_factory=list)
 
     def window(self):
         return self.sim.start_dt.timestamp(), self.sim.t
@@ -518,11 +524,90 @@ def shabbos_silence(res: Result, ctx: Context):
                     _add(res, check, sid, f"{w['end'].astimezone(tz):%a %H:%M:%S}",
                          "programming not back at 72 min after shekia: "
                          + (f"first item {after.label()}" if after else "nothing"))
+                elif after.cut and after.seconds < 30 and after.timing_mode is None:
+                    _add(res, check, sid, after.local_start,
+                         f"only a {after.seconds:.0f} s fragment of {after.title!r} after the silence")
                 silence_after = [r for r in rows if r.kind == "silence" and r.start > we + 1]
                 for r in silence_after[:2]:
                     _add(res, check, sid, r.local_start, "silence item still airing after the window")
 
 
-ALL_CHECKS = [shabbos_silence, hard_items_on_time, time_checks_on_the_hour, no_dead_air, nothing_inside_a_shiur,
+def site_log_matches_air(res: Result, ctx: Context):
+    """The site's play log (what sponsors' reports and the day log are built from) holds
+    one row for every item that aired, starting when it really started, and rows of one
+    station never overlap (a paused shiur: first part, the time check, the rest)."""
+    check = "site play log: one row per item aired, at its real time, none overlapping"
+    res.checks_run.setdefault(check, 0)
+    if getattr(ctx.sim, "real_log", False):
+        return
+    start, end = ctx.window()
+    by_station = defaultdict(list)
+    for sid, asset_id, a, b in ctx.play_logs:
+        by_station[sid].append((a, b, asset_id))
+    for sid, rows in _per_station(res.rows).items():
+        logs = sorted(by_station.get(sid, []))
+        used = set()
+        for r in rows:
+            if not r.entry_id or r.asset_id is None or r.kind == "silence" or r.start > end - 5:
+                continue
+            _count(res, check)
+            hit = [i for i, (a, _b, asset) in enumerate(logs) if asset == r.asset_id and abs(a - r.start) <= 2.0]
+            fresh = [i for i in hit if i not in used]
+            if not hit:
+                near = [a for a, _b, asset in logs if asset == r.asset_id]
+                off = min((a - r.start for a in near), key=abs, default=None)
+                _add(res, check, r, r.local_start, f"{r.title!r} aired, " +
+                     ("no row in the play log" if off is None else f"its play log row starts {off:+.0f} s off"))
+            elif not fresh:
+                pass
+            else:
+                used.add(fresh[0])
+            if len(hit) > 1:
+                _add(res, check, r, r.local_start, f"{r.title!r} has {len(hit)} play log rows for one airing")
+        for (a1, b1, x1), (a2, _b2, x2) in zip(logs, logs[1:]):
+            if b1 is not None and b1 - a2 > 3.0 and a2 > start + 60 and ctx.assets.get(x1) is not None \
+                    and ctx.assets[x1].asset_type != "silence":
+                tz = rows[0].tz
+                _add(res, check, sid, datetime.fromtimestamp(a2, UTC).astimezone(tz).strftime("%a %H:%M:%S"),
+                     f"play log rows overlap by {b1 - a2:.0f} s: {ctx.assets[x1].title!r} and "
+                     f"{ctx.assets[x2].title!r}" if x2 in ctx.assets else "play log rows overlap")
+        extra = [(a, asset) for i, (a, _b, asset) in enumerate(logs)
+                 if i not in used and start + 60 < a < end - 5 and asset in ctx.assets
+                 and ctx.assets[asset].asset_type != "silence"
+                 and not any(r.asset_id == asset and abs(r.start - a) <= 2.0 for r in rows)]
+        for a, asset in extra[:10]:
+            _add(res, check, sid, datetime.fromtimestamp(a, UTC).astimezone(rows[0].tz).strftime("%a %H:%M:%S"),
+                 f"play log says {ctx.assets[asset].title!r} aired; the engine did not play it then")
+
+
+def one_resume_per_pause(res: Result, ctx: Context):
+    """A shiur paused for a timed group gets exactly one resume entry (the long-item rule
+    runs once per item on air and group), and each part plays from where the last stopped."""
+    check = "paused shiur: one resume per pause, no audio lost or repeated"
+    res.checks_run.setdefault(check, 0)
+    for sid, rows in _per_station(res.rows).items():
+        for i, r in enumerate(rows):
+            if not (r.is_long and r.cut and r.asset_id):
+                continue
+            parts = [x for x in rows[i + 1:i + 40] if x.asset_id == r.asset_id]
+            if not parts:
+                continue
+            _count(res, check)
+            nxt = parts[0]
+            stopped = r.cue_in + r.seconds
+            if not (-6.0 <= nxt.cue_in - stopped <= 1.0):
+                _add(res, check, nxt, nxt.local_start,
+                     f"{r.title!r} stopped at {stopped:.0f} s and carried on from {nxt.cue_in:.0f} s")
+        resumes = defaultdict(list)
+        for e in ctx.entries.values():
+            if str(e.station_id) == sid and (e.source or "").startswith("resume@"):
+                resumes[(str(e.asset_id), e.source)].append(e)
+        for (asset_id, source), es in resumes.items():
+            if len(es) > 1:
+                a = ctx.assets.get(asset_id)
+                _add(res, check, sid, "", f"{len(es)} resume entries '{source}' for {a.title if a else asset_id!r}")
+
+
+ALL_CHECKS = [site_log_matches_air, one_resume_per_pause, shabbos_silence, hard_items_on_time, time_checks_on_the_hour, no_dead_air, nothing_inside_a_shiur,
               sponsor_spacing, station_ids, station_isolation, time_check_says_the_hour,
               soft_items_wait_for_the_song, nothing_twice]
