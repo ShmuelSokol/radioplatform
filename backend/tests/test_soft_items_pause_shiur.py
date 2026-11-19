@@ -453,3 +453,27 @@ async def test_engine_plays_the_rest_of_a_paused_story_before_a_waiting_sponsors
     # once the rest of the story is handed out, the sponsorship comes next
     if timing == "soft":
         assert (await playout_engine.pick_next(db_session, station.id, {str(rest.id)})).id == waiting.id
+
+
+@pytest.mark.asyncio
+async def test_two_waiting_breaks_with_the_same_sponsorship_never_play_back_to_back(db_session):
+    """All Day Stories: the 12:00 and 12:30 breaks both carried Bagel Nosh and both
+    waited behind a story; when it ended they played 21 s apart (simulator, CI on
+    PR 460). The second is skipped (the make-up places it again later)."""
+    station, talk, (spot,), song = await _setup(
+        db_session, left=19 * 60, kind="story", soft_source="ad_slot", due_ago=30 * 60,
+        extra_config={long_items.SPONSORSHIPS_WAIT: True},
+    )
+    later = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=spot.id, position=3,
+                       status="pending", source="ad_slot", preempt_at=datetime.now(UTC) - timedelta(seconds=5))
+    await db_session.execute(
+        update(QueueEntry).where(QueueEntry.station_id == station.id, QueueEntry.status == "pending",
+                                 QueueEntry.position >= 3)
+        .values(position=QueueEntry.position + 1))
+    db_session.add(later)
+    await db_session.commit()
+    assert (await queue_module._check_advance(db_session, station.id)).asset_id == talk.id
+    assert (await _finish_current(db_session, station.id)).asset_id == spot.id
+    assert (await _finish_current(db_session, station.id)).asset_id == song.id
+    await db_session.refresh(later)
+    assert later.status == "skipped"

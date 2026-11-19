@@ -381,9 +381,11 @@ async def _skip_placeholders(db: AsyncSession, station_id) -> None:
         .execution_options(synchronize_session=False)
     )
     # A sponsorship still waiting in the queue on a day its contract no longer covers
-    from app.services.spot_schedule_service import skip_lapsed_sponsorships
+    from app.services.spot_schedule_service import skip_close_repeats, skip_lapsed_sponsorships
 
     await skip_lapsed_sponsorships(db, station_id)
+    # two waiting breaks that carry the same sponsorship never play back to back
+    await skip_close_repeats(db, station_id)
 
 
 async def _resume_before_soft(db: AsyncSession, station_id, entry: QueueEntry) -> QueueEntry:
