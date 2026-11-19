@@ -469,3 +469,17 @@ The backend's own Icecast source (`icecast_service.py`, "Start the FM feed",
 `ICECAST_HOST`) carried only the live host's microphone and dropped between shows;
 it was never configured in production and is retired. `/icecast/{id}/start` and
 `/stop` answer 410; `/icecast/status` names the engine's streams.
+
+## Broadcast sound: leveler, three bands, limiter (2026-11-19)
+Shmuel asked for "the best audio possible". Before: compressor -14 dB 3:1 and alimiter -3 dBFS only. The 8 PM recording of Main (2026-11-18 19:59 to 20:03 ET) measured -19.5 LUFS, items 6 LU apart (songs -17.6, the spoken run after the time check -24), peaks -5.7 dBFS: the limiter never worked.
+
+With `KBR_PROCESSING=broadcast` (per engine, in its station env file; setup.sh writes it from `KBR_BROADCAST_SOUND=<id>,...|all|none`, unset = each engine keeps what it had, light when new) the whole output goes through:
+1. **Leveler** (`leveler()` in radio.liq): a copy of Liquidsoap's `normalize()` with `amplify(override=null())`. Target `KBR_PROCESSING_TARGET` (-14 dB RMS), up 2 s, down 1 s, window 1 s, gain -10..+15 dB, frozen below -45 dB (pauses, the quiet hold, fade-outs). **Never use `normalize()` here**: it ends in a plain amplify, which takes each track's `liq_amplify` over its own gain, so the leveler stood still and each item's level applied twice (the same trap as above).
+2. **FFmpeg graph**: highpass 35 Hz, `acrossover` 150 Hz / 4 kHz (LR 4th order), `acompressor` per band (low -24 dB 3:1 40/350 ms +3; mid -22 dB 2.5:1 12/220 ms +2; high -26 dB 2.5:1 5/150 ms +3), `amix` (`inputs=3` is required, the default is 2), `alimiter` -1.5 dBFS.
+3. `amix` makes new frames, so frame metadata (titles) does not pass: `broadcast_sound` puts it back with `insert_metadata` from the leveler's `on_metadata`. Start reports come from `program`, before all of this.
+
+Measured on the same recording: -15.4 LUFS, items within about 2 LU, LRA 10.2 -> 3.6, true peaks under -1 dBFS. CPU: about +1.5% of one core per engine over no processing (old chain +1%), measured offline on a 2.3 GHz Xeon. Samples for Shmuel in project files `audio-quality/`.
+
+`light` (the script's default) is the old chain. radio.liq is one shared file on the droplet, so the switch is per engine env, not per script; a change restarts only the engines whose env changed. The harness runs with `light` by default (its level checks measure each lane's exact level, which the leveler evens out on purpose); scenario `broadcast_processing` restarts the engine with the broadcast chain; `KBR_HARNESS_PROCESSING=broadcast` runs any scenario with it.
+
+Not covered: All Day Stories on the browser player (no processing at all); FM later needs its own pre-emphasis-aware clipper on the box, not this chain.

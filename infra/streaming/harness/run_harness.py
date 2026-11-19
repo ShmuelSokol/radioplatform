@@ -121,6 +121,12 @@ class Stack:
         self.control_down = False
         # the local FM box's relay (infra/local/kbr_relay.py) when run with --local-box
         self.relay = None
+        # KBR_PROCESSING for the engine. The harness checks each lane's exact level
+        # (track_level, timed_and_mix_over_levels ...), which the broadcast leveler would
+        # even out on purpose, so it runs with the light chain; broadcast_processing
+        # restarts the engine with the broadcast chain. KBR_HARNESS_PROCESSING=broadcast
+        # runs every scenario with it (timing must not change; level checks will differ).
+        self.processing = os.environ.get("KBR_HARNESS_PROCESSING", "light")
         self.local_box = False
         # file name -> seconds the audio server waits before sending it (a slow download)
         self.slow_files: dict[str, float] = {}
@@ -492,6 +498,7 @@ class Stack:
             "KBR_ICECAST_MOUNT": "/harness",
             "KBR_DEBUG_WAV": str(self.wav),
             "KBR_HLS_DIR": str(self.hls),
+            "KBR_PROCESSING": self.processing,
             # A sound card for the local_box_sound_card scenario (see wiki/local-fm-box.md)
             "KBR_ALSA_DEVICE": os.environ.get("KBR_HARNESS_ALSA_DEVICE", ""),
             # The EAS box's audio line (emergency_alert_line; a PulseAudio null sink's monitor)
@@ -717,6 +724,19 @@ class Harness:
                          metadata_extra={"audio_analysis": {
                              "version": 99, "cue_in_seconds": 0.0, "cue_out_seconds": 40.0,
                              "cross_start_seconds": 37.0, "replay_gain_db": -6.0}}))
+            # broadcast_processing: song4's file measured at -18 LUFS (level 0) and song6's at
+            # -12 LUFS (level -6 dB); two files, since two items on one file in a row were
+            # not always both reported as started. Their loudness is stored, so no analysis runs on them: a failed
+            # analysis of the plain tones can take them off the air mid-scenario.
+            for key, lufs, src in (("lvl_unity", -18.0, "song4"), ("lvl_quiet", -12.0, "song6")):
+                aid = uuid.uuid4()
+                self.assets[key] = aid
+                db.add(Asset(id=aid, title=f"level test {key}", artist="Harness", duration=40.0,
+                             file_path=f"http://127.0.0.1:{AUDIO_PORT}/{src}.mp3", asset_type="music",
+                             review_status="approved",
+                             metadata_extra={"audio_analysis": {
+                                 "version": 99, "cue_in_seconds": 0.0, "cue_out_seconds": 40.0,
+                                 "cross_start_seconds": 37.0, "loudness_lufs": lufs}}))
             # Full-scale file with +6 dB of level on top: the output limiter must hold it
             aid = uuid.uuid4()
             self.assets["loud"] = aid
@@ -3668,6 +3688,57 @@ async def sc_output_limiter(h: Harness) -> None:
     h.check(name, "loud master" in title, f"stream title after the limiter: {title!r}")
 
 
+async def sc_broadcast_processing(h: Harness) -> None:
+    """The broadcast sound chain (KBR_PROCESSING=broadcast, production default since
+    2026-11-19): leveler, three-band compressor, limiter at -1.5 dBFS. A unity item and the
+    same file at -6 dB come out much closer than 6 dB apart and louder than they went in; a
+    full-scale master given +6 dB never passes -1.5 dBFS; the stream keeps its titles; the
+    music changes item without a gap."""
+    name = "broadcast_processing"
+    before = h.stack.processing
+    h.stack.processing = "broadcast"
+    try:
+        await asyncio.to_thread(h.stack.restart_engine)
+        await wait_music(h)
+        await h.clear_pending()
+        # No Next: after a skip the first item goes through the timed lane, and in this
+        # harness the item after it was then passed over (track_level fails the same way
+        # on main, 2026-11-19: the plain tones carry no loudness, their analysis fails and
+        # can take one off the air). The items follow the song on air by themselves.
+        await h.queue([("lvl_unity", {}), ("lvl_quiet", {}), ("loud", {}), ("song5", {})])
+        # They do not always air in the order given; each start is watched for at once
+        a, b, c = await asyncio.gather(h.wait_on_air("lvl_unity", 200), h.wait_on_air("lvl_quiet", 200),
+                                       h.wait_on_air("loud", 200))
+        if a is None or b is None or c is None:
+            h.check(name, False, f"items never went on air ({a}, {b}, {c})")
+            return
+        await asyncio.sleep(max(0.0, max(a, b, c) + 36 - time.time()))
+        # The last part of each item (40 s long), once the leveler has settled (it rides slowly)
+        unity = _mean_db(h.heard(a + 26, a + 34))
+        quiet = _mean_db(h.heard(b + 26, b + 34))
+        peak = wav_peak_db(h.stack.wav, h.stack.wav_t0, min(a, b, c), max(a, b, c) + 34)
+        ws = h.heard(min(a, b, c) - 2, max(a, b, c) + 34)
+        log(f"    levels from the unity item's start (a={_fmt(a)} b=+{b - a:.1f} c=+{c - a:.1f}): " + " ".join(
+            f"{t - a:+.0f}:{db:.0f}dB/{f:.0f}Hz" for t, db, f in ws[::10]))
+        log(f"    icecast source: {_icecast_source()}")
+        h.check(name, unity is not None and unity > -21,
+                f"unity tone raised towards the target: {unity} dBFS (went in at about -24.5)")
+        h.check(name, unity is not None and quiet is not None and abs(unity - quiet) < 3.0,
+                f"-6 dB item levelled: unity {unity} dBFS, -6 dB item {quiet} dBFS")
+        h.check(name, peak <= -1.4, f"sample peak of a full-scale master +6 dB: {peak:.2f} dBFS (limit -1.5)")
+        gaps = [t for t, db, _ in h.heard(min(a, b, c) + 1, max(a, b, c) + 34) if db < -50]
+        h.check(name, len(gaps) <= 3, f"no gap between items ({len(gaps)} silent 100 ms windows)")
+        title = str(_icecast_source().get("title") or "")
+        # The amix inside the chain drops frame metadata; radio.liq puts the titles back
+        h.check(name, title.startswith("Harness - "), f"stream title through the chain: {title!r}")
+        log_text = (h.stack.dir / "engine.log").read_text(errors="replace")
+        h.check(name, "sound: broadcast processing" in log_text, "engine says it runs the broadcast chain")
+    finally:
+        h.stack.processing = before
+        await asyncio.to_thread(h.stack.restart_engine)
+        await wait_music(h)
+
+
 async def sc_level_song_muted(h: Harness) -> None:
     """V1-4b: a song with a level of its own (liq_amplify) is still muted under a hard time
     check: the mute and fade gains are not replaced by the track's level."""
@@ -4783,6 +4854,7 @@ SCENARIOS = {
     "emergency_alert_two_in_a_row": sc_emergency_alert_two_in_a_row,
     "emergency_alert_tones": sc_emergency_alert_tones,
     "emergency_alert_line": sc_emergency_alert_line,
+    "broadcast_processing": sc_broadcast_processing,
     # restarts the engine: keep it last
     "engine_starts_backend_down": sc_engine_starts_backend_down,
 }
