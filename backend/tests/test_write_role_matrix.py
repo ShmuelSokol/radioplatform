@@ -112,6 +112,8 @@ WRITE_POLICY = {
     ("POST", "/assets/{asset_id}/detect-audience"): STAFF,
     ("POST", "/assets/{asset_id}/detect-silence"): STAFF,
     ("POST", "/assets/{asset_id}/do-not-play"): MANAGERS,
+    ("PUT", "/assets/{asset_id}/categories"): MANAGERS,
+    ("POST", "/assets/bulk-extra-category"): MANAGERS,
     ("POST", "/assets/{asset_id}/station-block"): MANAGERS,
     ("POST", "/assets/{asset_id}/enhance"): MANAGERS,
     ("POST", "/assets/{asset_id}/enhance-preview"): STAFF,

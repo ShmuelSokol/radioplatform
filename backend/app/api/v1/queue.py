@@ -1443,6 +1443,7 @@ async def _get_queue_impl(station_id, limit, db):
         QueueEntry.id, QueueEntry.station_id, QueueEntry.asset_id, QueueEntry.position,
         QueueEntry.status, QueueEntry.started_at, QueueEntry.preempt_at,
         QueueEntry.source, QueueEntry.timing_mode, QueueEntry.hard_by,
+        QueueEntry.block_id,
     )
     asset_cols = (
         Asset.id, Asset.title, Asset.artist, Asset.duration, Asset.intro_seconds,
@@ -1798,6 +1799,10 @@ async def _get_queue_impl(station_id, limit, db):
             d["blackout_name"] = current_blackout_name
         if str(e.asset_id) in holiday_of:
             d["holiday"] = holiday_of[str(e.asset_id)]
+        # The schedule block an automatic song was drawn for: the control room's
+        # "Playing from" column names its playlist and opens why the song is there
+        if getattr(e, "block_id", None):
+            d["block_id"] = e.block_id
         entries_data.append(d)
 
     return {

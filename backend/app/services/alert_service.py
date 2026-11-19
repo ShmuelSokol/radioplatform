@@ -358,6 +358,10 @@ async def detect_schedule_conflicts(
         # Start-only blocks hand over to each other; they cannot overlap.
         if getattr(target, "until_next", False) or getattr(other, "until_next", False):
             continue
+        # A higher priority is a deliberate override (the Erev Shabbos and Motzei Shabbos
+        # blocks over the daily ones): the higher block plays, nothing to warn about.
+        if (target.priority or 0) != (other.priority or 0):
+            continue
         # Overlap on a shared day, counting the part of a block that runs past midnight
         if target.start_time is not None and other.start_time is not None:
             if blocks_overlap(target, other):

@@ -94,6 +94,11 @@ class FakeEngine:
         now = self.sim.t
         self.commands.append((now, path, payload))
         if path == "/flush":
+            # radio.liq forgets the dropped entry was handed to it (it will not air), unless
+            # it is the one on air; otherwise the backend takes it for aired unreported
+            on_air = self.on_air.entry_id if self.on_air is not None and self.on_air.lane == "main" else None
+            if self.given and self.given[0] != on_air:
+                self.given.pop(0)
             self.cued = None
             self.ask_next_at = now + 0.3
         elif path == "/skip":

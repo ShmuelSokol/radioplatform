@@ -21,6 +21,11 @@ PASS_SECONDS = 3.0      # the scheduler's check_interval
 QUIET_PASS_SECONDS = 3.0  # can be raised for long runs (see Simulator.quiet_pass)
 
 
+# The queue page's estimated starts are read this often, for the hour after the read
+SNAPSHOT_EVERY = 1800.0
+SNAPSHOT_AHEAD = 3600.0
+
+
 class _VirtualTime(types.ModuleType):
     """`time` as the app modules see it: monotonic() and time() follow the virtual clock;
     everything else is the real module."""
@@ -60,6 +65,10 @@ class Simulator:
         self.errors: list[str] = []
         self.passes = 0
         self.restarts: list = []
+        # What the queue page showed (estimated_start), every SNAPSHOT_EVERY simulated
+        # seconds: (when, station, {entry id: estimated start}) for the hour after
+        self.snapshots: list = []
+        self._next_snapshot = self.t
 
     # ── clock ──────────────────────────────────────────────────────────────────
     @property
@@ -303,6 +312,29 @@ class Simulator:
                 return True
         return False
 
+    async def _snapshot_estimates(self):
+        """Read the queue as the control room does and keep each waiting entry's
+        estimated start for the next SNAPSHOT_AHEAD seconds."""
+        import uuid as _uuid
+
+        from app.api.v1.queue import _get_queue_impl
+
+        for sid in self.engines:
+            try:
+                async with self.session() as db:
+                    body = await _get_queue_impl(_uuid.UUID(sid), 400, db)
+            except Exception as e:  # a failed read is not what this looks at
+                self.errors.append(f"queue read for estimates failed: {e}")
+                continue
+            est = {}
+            for d in body.get("entries", []):
+                if d.get("status") != "pending" or not d.get("estimated_start"):
+                    continue
+                ts = datetime.fromisoformat(d["estimated_start"]).timestamp()
+                if self.t < ts <= self.t + SNAPSHOT_AHEAD:
+                    est[d["id"]] = ts
+            self.snapshots.append((self.t, sid, est))
+
     async def run_until(self, end: datetime, on_step=None):
         end_t = end.astimezone(UTC).timestamp()
         next_pass = self.t
@@ -323,6 +355,9 @@ class Simulator:
                 await self.scheduler_pass()
                 await self._settle()
                 next_pass = self.t + self._pass_gap()
+            if self.t + 1e-6 >= self._next_snapshot:
+                await self._snapshot_estimates()
+                self._next_snapshot = self.t + SNAPSHOT_EVERY
             if on_step is not None:
                 await on_step(self)
         for seg in self.log:

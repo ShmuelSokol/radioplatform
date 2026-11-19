@@ -128,6 +128,12 @@ async def test_schedule_conflict_alert(db_session):
         assert [a.title for a in found] == ["Schedule conflict: Morning vs Late morning"]
         assert await alert_service.detect_schedule_conflicts(db_session, sch.id, noon.id) == []
         assert await alert_service.detect_schedule_conflicts(db_session, sch.id, handover.id) == []
+        # a higher priority is a deliberate override (Erev Shabbos over the daily blocks)
+        erev = ScheduleBlock(id=uuid.uuid4(), schedule_id=sch.id, name="Erev Shabbos", start_time=dtime(6),
+                             end_time=dtime(12), priority=1)
+        db_session.add(erev)
+        await db_session.commit()
+        assert await alert_service.detect_schedule_conflicts(db_session, sch.id, erev.id) == []
 
 
 # --- Phone call-ins (Twilio webhooks) ---

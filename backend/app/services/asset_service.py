@@ -162,7 +162,13 @@ async def list_assets(
     if asset_type:
         conditions.append(Asset.asset_type == asset_type)
     if category:
-        conditions.append(func.lower(Asset.category) == category.lower())
+        # Main or extra category (a song can be in several, services/asset_categories.py)
+        from app.models.asset import asset_categories
+        from app.models.category import Category
+        extra = select(asset_categories.c.asset_id).join(
+            Category, Category.id == asset_categories.c.category_id
+        ).where(func.lower(Category.name) == category.lower())
+        conditions.append(or_(func.lower(Asset.category) == category.lower(), Asset.id.in_(extra)))
     if search:
         like_pat = f"%{search}%"
         conditions.append(or_(

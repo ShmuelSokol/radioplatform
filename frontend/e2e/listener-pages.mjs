@@ -434,7 +434,7 @@ const GUIDE_DAY = [
 ];
 const nowBlocks = (page) => page.evaluate(() => [...document.querySelectorAll('span')]
   .filter((s) => s.textContent.trim() === 'Now')
-  .map((s) => { const card = s.closest('.rounded-lg'); return `${card?.querySelector('h3')?.textContent.trim()} ${card?.querySelector('span.font-mono')?.textContent.replace(/\s+/g, ' ').trim()}`; }));
+  .map((s) => { const card = s.closest('.rounded-lg'); return `${card?.querySelector('h3')?.textContent.trim()} ${card?.querySelector('[data-testid=guide-time]')?.textContent.replace(/\s+/g, ' ').trim()}`; }));
 const dateLabel = (page) => page.locator('span.uppercase.tracking-wider').first().innerText();
 const dateValue = (page) => page.getByLabel('Date').inputValue();
 
@@ -540,6 +540,7 @@ async function guideChecks(browser) {
       { id: 'c1', name: 'Midnight to noon', description: 'Long words. '.repeat(60), start_time: '00:00', end_time: '12:00', playback_mode: 'weighted', schedule_name: 'Main' },
       { id: 'c2', name: 'Odd mode', description: null, start_time: '12:30', end_time: '13:05', playback_mode: 'mystery', schedule_name: null },
       { id: 'c3', name: 'No times', description: null, start_time: null, end_time: null, playback_mode: 'rotation', schedule_name: 'Main' },
+      { id: 'c4', name: 'Shabbos', description: null, start_time: '16:00', end_time: '23:59', playback_mode: 'off_air', off_air: true, schedule_name: null },
     ]));
     const { ctx, page } = await openAt(browser, DESKTOP, st, '/guide');
     await page.getByText('Midnight to noon').waitFor({ timeout: 8000 }).catch(() => {});
@@ -547,11 +548,14 @@ async function guideChecks(browser) {
     const c1 = await card('Midnight to noon').innerText();
     const c2 = await card('Odd mode').innerText();
     const c3 = await card('No times').innerText();
-    const greyBadge = await card('Odd mode').locator('span.border').filter({ hasText: /mystery/i }).getAttribute('class');
+    const c4 = await card('Shabbos').innerText();
     const clamp = await card('Midnight to noon').locator('p.line-clamp-2').evaluate((el) => getComputedStyle(el).webkitLineClamp).catch(() => '');
-    check(`${tag}-7: 12-hour times (12:00 AM - 12:00 PM, 12:30 PM - 1:05 PM), "Schedule: <name>", description clamped`,
-      c1.includes('12:00 AM - 12:00 PM') && c2.includes('12:30 PM - 1:05 PM') && c1.includes('Schedule: Main') && !c2.includes('Schedule:') && clamp === '2', `${c1.slice(0, 40)} | ${c2.slice(0, 30)}`);
-    check(`${tag}-7: playback-mode badge; an unknown mode is grey`, /weighted/i.test(c1) && /bg-gray-600/.test(greyBadge || ''), greyBadge);
+    check(`${tag}-7: 12-hour times (12:00 AM - 12:00 PM, 12:30 PM - 1:05 PM), description clamped`,
+      c1.includes('12:00 AM - 12:00 PM') && c2.includes('12:30 PM - 1:05 PM') && clamp === '2', `${c1.slice(0, 40)} | ${c2.slice(0, 30)}`);
+    // Listeners see what is on, not how the station picks songs (Shmuel 2026-11-19: tidy the public schedule)
+    check(`${tag}-7: no staff words on the cards (playback mode, schedule name)`,
+      !/weighted|mystery|rotation|Schedule:/i.test(c1 + c2 + c3), `${c1.slice(-60)} | ${c3}`);
+    check(`${tag}-7: a block off the air says "Off air"`, /off air/i.test(c4), c4);
     check(`${tag}-7: a missing time shows "??:??"`, c3.includes('??:?? - ??:??'), c3.slice(0, 30));
     await ctx.close();
   }

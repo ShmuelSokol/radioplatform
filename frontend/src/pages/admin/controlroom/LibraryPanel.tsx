@@ -1,7 +1,18 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { useAssets } from '../../../hooks/useAssets';
 import { useAssetTypes } from '../../../hooks/useAssetTypes';
-import { fmtDur, useDebounced } from './shared';
+import { fmtDur, useDebounced, useMediaQuery } from './shared';
+import { ColumnHeads, useColumnWidths } from './columns';
+import type { ColumnDef } from './columns';
+
+// The library list's columns: drag a heading's right border, double-click it to fit
+// (same as the queue above it; columns.tsx)
+const COLS: ColumnDef[] = [
+  { id: 'artist', label: 'Artist', width: 200, min: 60, shrink: true },
+  { id: 'title', label: 'Title', width: 420, min: 120, shrink: true },
+  { id: 'type', label: 'Song type', width: 96, min: 40, title: 'The song\'s category (its song type), or its kind when it has none' },
+  { id: 'len', label: 'Length', width: 52, min: 36, align: 'right' },
+];
 import { useMayChange } from '../../../hooks/useMayChange';
 import type { CtlAsset, SendFn } from './shared';
 
@@ -25,6 +36,10 @@ const PAGE = 50;
 function LibraryPanel(p: Props) {
   // A viewer searches and pre-listens; sending to the queue and the instant buttons are off
   const readOnly = !useMayChange();
+  const isDesktop = useMediaQuery('(min-width: 1024px)');
+  const listRef = useRef<HTMLDivElement>(null);
+  const colApi = useColumnWidths('kbr-cr-library-cols', COLS);
+  const col = (id: string) => colApi.cell(COLS.find(c => c.id === id) as ColumnDef);
   const [search, setSearch] = useState('');
   const [type, setType] = useState('all');
   const [limit, setLimit] = useState(PAGE);
@@ -99,17 +114,17 @@ function LibraryPanel(p: Props) {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain" data-testid="library-scroll">
+      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain" data-testid="library-scroll">
         <div className="px-2 py-0.5 text-[11px] font-normal text-gray-400">
           {isError ? 'Could not load the library.' : `${total.toLocaleString()} ${total === 1 ? 'item' : 'items'}${isFetching ? ' · searching…' : ''}`}
         </div>
-        {assets.length > 0 && (
-          <div className="hidden lg:flex h-[18px] items-stretch qn-log-head text-[11px] leading-[18px] px-1 gap-1.5 sticky top-0 z-10" aria-hidden="true">
-            <span className="w-6 shrink-0" />
-            <span className="flex-1 min-w-0 flex gap-2">
-              <span className="w-[30%]">Artist</span><span className="flex-1">Title</span><span className="w-28">Type</span><span className="w-10 text-right">Length</span>
+        {assets.length > 0 && isDesktop && (
+          <div role="row" className="flex h-[18px] items-stretch qn-log-head text-[11px] leading-[18px] px-1 gap-1.5 sticky top-0 z-10 select-none" data-testid="library-head">
+            <span className="w-6 shrink-0 !shadow-none" aria-hidden="true" />
+            <span className="flex-1 min-w-0 flex !shadow-none !p-0">
+              <ColumnHeads cols={COLS} api={colApi} rowsRef={listRef} name="library" />
             </span>
-            <span className="w-[150px] shrink-0" />
+            <span className="shrink-0 !shadow-none" style={{ width: 150 }} />
           </div>
         )}
         <div className={stale ? 'opacity-40 pointer-events-none' : ''} aria-busy={stale}>
@@ -131,12 +146,14 @@ function LibraryPanel(p: Props) {
                   {asset.artist ? `${asset.artist} · ` : ''}{asset.category || asset.asset_type}{' · '}{fmtDur(asset.duration)}
                 </div>
               </div>
-              <div className="hidden lg:flex flex-1 min-w-0 items-center gap-2 text-[13px] leading-tight">
-                <span className="w-[30%] truncate">{asset.artist}</span>
-                <span className="flex-1 min-w-0 truncate">{asset.title}</span>
-                <span className="w-28 truncate" title={asset.asset_type}>{asset.category || asset.asset_type}</span>
-                <span className="w-10 text-right tabular-nums">{fmtDur(asset.duration)}</span>
-              </div>
+              {isDesktop && (
+                <div className="flex flex-1 min-w-0 items-center text-[13px] leading-tight">
+                  <span className="px-1 truncate" data-col="artist" style={col('artist')}>{asset.artist}</span>
+                  <span className="px-1 truncate" data-col="title" style={col('title')}>{asset.title}</span>
+                  <span className="px-1 truncate" data-col="type" style={col('type')} title={asset.asset_type}>{asset.category || asset.asset_type}</span>
+                  <span className="px-1 text-right tabular-nums whitespace-nowrap overflow-hidden" data-col="len" style={col('len')}>{fmtDur(asset.duration)}</span>
+                </div>
+              )}
               {!readOnly && <button type="button" onClick={() => p.onTogglePin(asset)}
                 title={pinned ? 'Remove from instant buttons' : 'Add to instant buttons'}
                 aria-label={pinned ? 'Remove from instant buttons' : 'Add to instant buttons'}

@@ -38,6 +38,9 @@ LOOK = 60
 ACCEPTABLE_CUT = 15.0
 # A swap must save at least this much, or the queue is left as it is
 WORTH_IT = 20.0
+# ...except one that brings the loss within ACCEPTABLE_CUT: that needs to save only
+# this much (a song losing 19 s could never be saved 20 s; Main 15:28Z 2026-11-19)
+WORTH_IT_INTO_ACCEPTABLE = 5.0
 # A timed item due within this of a song's end starts at once (queue.TIMED_EARLY_START_SECONDS)
 EARLY_START = 8.0
 # Songs overlap by about this much at a change when a song has no measured
@@ -366,7 +369,9 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
                 cut = _cut(secs(a) + secs(b), room2)
                 if cut is not None and cut < best_cut:
                     best_cut, best = cut, (a, b)
-    if best is None or loses - best_cut < WORTH_IT:
+    saves = loses - best_cut if best is not None else 0.0
+    worth = saves >= WORTH_IT or (best_cut <= ACCEPTABLE_CUT and saves >= WORTH_IT_INTO_ACCEPTABLE)
+    if best is None or not worth:
         # Said once per hard item, so a live report can tell "looked and found nothing"
         # from "did not look"
         # (and again when songs to choose from appear: the first look often has none

@@ -6,6 +6,7 @@ import { useAssetDetail } from '../../../hooks/useAssets';
 import { useCategories } from '../../../hooks/useCategories';
 import { useAssetTypes } from '../../../hooks/useAssetTypes';
 import { assetLabel, isSponsorSpot } from './shared';
+import AlsoInCategories from '../../../components/AlsoInCategories';
 import type { CtlAsset } from './shared';
 
 /** The song a quick-actions panel is open for, and where it was opened from. */
@@ -18,6 +19,8 @@ export interface SongTarget {
   itemOptions?: boolean;
   /** Known to be a sponsorship play (a row of the Sponsors list), whatever its source */
   sponsorship?: boolean;
+  /** The queue row it was opened from */
+  entryId?: string;
 }
 
 /** A sponsorship spot opens the Sponsor panel instead of the song options. */
@@ -32,6 +35,8 @@ interface Props {
   stationName?: string | null;
   /** Managers and admins change things; everyone else only looks */
   canEdit: boolean;
+  /** Opened from a queue row: where it plays from, and a way to see why it is there */
+  why?: { short: string; open: () => void };
   onClose: () => void;
   onToast: (text: string, type: 'ok' | 'warn' | 'error') => void;
 }
@@ -52,7 +57,7 @@ function errText(e: unknown, fallback: string): string {
  * play this song again" takes it off every station (the library is shared). Nothing
  * here touches the audio on air; both remove the song's waiting copies on the server.
  */
-export default function SongPanel({ target, stationId, stationName, canEdit, onClose, onToast }: Props) {
+export default function SongPanel({ target, stationId, stationName, canEdit, why, onClose, onToast }: Props) {
   const qc = useQueryClient();
   const id = target.asset.id;
   const { data: full } = useAssetDetail(id);
@@ -176,6 +181,15 @@ export default function SongPanel({ target, stationId, stationName, canEdit, onC
             )}
           </div>
 
+          {why && (
+            <button type="button" onClick={why.open} data-testid="song-why"
+              className="qn-btn w-full min-h-11 lg:min-h-8 px-2 flex items-center gap-1.5 text-left text-sm">
+              <span className="shrink-0">Playing from:</span>
+              <span className="flex-1 min-w-0 truncate font-bold">{why.short}</span>
+              <span className="shrink-0 underline">Why ›</span>
+            </button>
+          )}
+
           {!canEdit && (
             <p className="text-sm" data-testid="song-view-only">View only. A manager can change this song.</p>
           )}
@@ -189,6 +203,9 @@ export default function SongPanel({ target, stationId, stationName, canEdit, onC
             </select>
             <span className="block text-[11px] mt-0.5">Saved as soon as you pick. Copies already in the queue stay where they are.</span>
           </label>
+
+          <AlsoInCategories assetId={id} mainCategory={category} canEdit={canEdit} compact
+            onSaved={(text) => onToast(text, 'ok')} />
 
           <div className="border-t border-[#808080] pt-2 space-y-2" data-testid="song-stop">
             <div className="text-xs font-bold">Stop this song from playing</div>

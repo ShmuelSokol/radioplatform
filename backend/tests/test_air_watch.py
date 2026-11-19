@@ -624,6 +624,41 @@ async def test_soft_item_waiting_with_hs_off_is_fine(db_session):
     assert [f for f in await AirWatch().check_station(db_session, st, now) if f.kind == "late_timed"] == []
 
 
+async def _sponsor_behind_story(db, *, with_weather=False):
+    """All Day Stories (sponsorships_wait_for_talks): a story with 19 min left and a
+    sponsorship due 2 min ago, alone or together with the weather."""
+    now = datetime.now(UTC)
+    st = await _station(db, sponsorships_wait_for_talks=True)
+    story = await _asset(db, "Ufros Alenu", kind="stories", duration=49 * 60)
+    spot = await _asset(db, "TEST SPONSOR 16 - Bagel Nosh", kind="spot", duration=21)   # clock-slot play (ad_slot)
+    due = now - timedelta(seconds=120)
+    entries = [_entry(st, story, status="playing", started_at=now - timedelta(seconds=30 * 60)),
+               _entry(st, spot, position=2, preempt_at=due, timing_mode="soft", source="ad_slot")]
+    if with_weather:
+        weather = await _asset(db, "Weather", kind="spot", duration=40)
+        entries.append(_entry(st, weather, position=3, preempt_at=due, timing_mode="soft", source="block"))
+    db.add_all(entries)
+    await db.commit()
+    return st, now
+
+
+@pytest.mark.asyncio
+async def test_sponsorship_waiting_for_a_story_by_rule_is_fine(db_session):
+    """All Day Stories: sponsorships alone wait for the story's end (PR 412), so the watch
+    raises nothing (it raised "should have paused" every half hour on 2026-11-19)."""
+    st, now = await _sponsor_behind_story(db_session)
+    assert [f for f in await AirWatch().check_station(db_session, st, now) if f.kind == "late_timed"] == []
+
+
+@pytest.mark.asyncio
+async def test_weather_with_a_sponsorship_still_should_pause_the_story(db_session):
+    """A group that is not sponsorships alone (weather rides with it) still pauses the
+    story on that station, so waiting is still reported."""
+    st, now = await _sponsor_behind_story(db_session, with_weather=True)
+    found = [f.title for f in await AirWatch().check_station(db_session, st, now) if f.kind == "late_timed"]
+    assert found and all("waiting behind Ufros Alenu" in t for t in found), found
+
+
 @pytest.mark.asyncio
 async def test_soft_item_just_due_is_given_time(db_session):
     st, now = await _soft_behind_shiur(db_session, left=19 * 60, waited=10)

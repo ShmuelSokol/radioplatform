@@ -13,6 +13,7 @@ import type { SilenceRegion } from '../../types';
 import { useAuth } from '../../hooks/useAuth';
 import { veryQuietBy } from '../../lib/loudness';
 import { isManager } from '../../auth/access';
+import AlsoInCategories from '../../components/AlsoInCategories';
 
 function formatDuration(seconds: number | null): string {
   if (!seconds) return '--';
@@ -136,6 +137,11 @@ export default function AssetDetail() {
             <span className="text-gray-500">Category</span>
             <p className="font-medium">{asset.category ?? '--'}</p>
           </div>
+          {assetId && (
+            <div className="col-span-full">
+              <AlsoInCategories assetId={assetId} mainCategory={asset.category ?? null} canEdit={canEdit} />
+            </div>
+          )}
           <div>
             <span className="text-gray-500">Vote</span>
             {!canEdit ? <p className="font-medium">{asset.vote ?? 0}</p> : <input

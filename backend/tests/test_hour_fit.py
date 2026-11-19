@@ -605,3 +605,22 @@ def test_the_song_on_air_ends_at_the_same_moment_whatever_its_cue_in(engine, mon
 
         # the file from its top, so 4 s less from the moment it came on air
         assert (until - on_air).total_seconds() == pytest.approx(210.0 - handover_seconds(entry) - 4.0)
+
+
+@pytest.mark.asyncio
+async def test_a_song_that_would_lose_a_little_more_than_acceptable_is_still_fitted(db_session: AsyncSession):
+    """Main 15:28Z 2026-11-19: a 133 s song started 114 s before the hard :30 and lost
+    19 s. It was over the 15 s that is let alone, but no swap could save 20 s (the most
+    it could save was 19), so nothing was done. A swap that brings the loss within
+    the acceptable cut is made when it saves a few seconds."""
+    station = await _station(db_session)
+    station_id = station.id
+    songs = [("A", 240.0), ("B", 210.0), ("Latke", 115.0), ("After", 200.0), ("Fits", 102.0)]
+    await _queue(db_session, station, ENDS, songs)
+    title, played, lost = await _lost_at_the_hour(db_session, station_id, ENDS)
+    assert title == "Latke" and hour_fit.ACCEPTABLE_CUT < lost < hour_fit.WORTH_IT, (title, played, lost)
+
+    assert await fit_before_hard_item(db_session, station_id, NOW, force=True) is True
+    await db_session.commit()
+    title, played, lost = await _lost_at_the_hour(db_session, station_id, ENDS)
+    assert lost <= hour_fit.ACCEPTABLE_CUT, (title, played, lost)
