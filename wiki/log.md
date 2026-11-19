@@ -435,7 +435,9 @@ UPDATE 2026-11-19 spot-schedules.md never a sponsorship inside a shiur or one sp
 UPDATE 2026-11-19 bug-reports.md a lifted 🐞 appears above any dialog that covers every 🐞 (hit-tested twice a second, free spot), e2e/bug-everywhere.mjs
 UPDATE 2026-11-19 station-simulator.md scenarios with events and restarts; play-log row is written when the next item starts
 INGEST 2026-11-19 spot-schedules.md automation_config.sponsorships_wait_for_talks: sponsorship-only groups wait for a story's end (All Day Stories)
+UPDATE 2026-11-19 spot-schedules.md a soft item due while a paused story waits plays after the resume, not in the time check's pause (_resume_before_soft)
 UPDATE 2026-11-19 spot-schedules.md block_talk_windows: a block's own shiur counts before it is queued (Daf block queued in the same pass as the breaks); loose copies of contract audio (same title) never drawn at random (old "Sponsor Ad Every 30min" rules)
 INGEST 2026-11-19 spot-schedules.md contract totals (plays a day, days and plays over the dates, spot length) in Edit contract, client contract rows and Spot Schedule: components/sponsors/contractTotals.ts
 INGEST 2026-11-19 back-navigation.md Back line on staff pages (BackNav.tsx), per-tab history notes keyed by history.state.idx (lib/navMemory.ts), useNavState for page state, tapped row lit on return, deleted pages skipped via api/client.ts DELETE hook
 INGEST 2026-11-19 blackout-window-generation.md regenerate now corrects a stored window whose computed times changed (future, this station only, never edited); SQLite returns zone-less clock times
+UPDATE 2026-11-19 control-room.md Sponsors list rows always open the Sponsor panel (SongTarget.sponsorship); station-day sends asset.sponsor_id: a block-placed sponsor recording with no spots category opened the song options on Main

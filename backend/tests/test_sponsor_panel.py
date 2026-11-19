@@ -170,7 +170,11 @@ async def test_station_day_lists_todays_sponsorships_only(client: AsyncClient, d
                    asset_type="spot", category=None)
     loose = Asset(id=uuid.uuid4(), title="Kesher spot, played by hand", file_path="l.mp3", duration=30.0,
                   asset_type="spot", category="Spots")
-    db_session.add_all([weather, report, loose])
+    # live 2026-11-19 on Main: a sponsor's recording placed by a half-hour program block, filed
+    # under no spots category; only its sponsor link says it is a sponsorship
+    in_block = Asset(id=uuid.uuid4(), title="TEST - Southside Smokehouse", file_path="b.mp3", duration=30.0,
+                     asset_type="spot", category=None, sponsor_id=sponsor.id)
+    db_session.add_all([weather, report, loose, in_block])
     await db_session.flush()
     now = datetime.now(UTC)
     db_session.add_all([
@@ -186,6 +190,8 @@ async def test_station_day_lists_todays_sponsorships_only(client: AsyncClient, d
                    source="block", preempt_at=now + timedelta(minutes=8)),
         QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=loose.id, position=6, status="pending",
                    source="manual", preempt_at=now + timedelta(minutes=9)),
+        QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=in_block.id, position=7, status="pending",
+                   source="block", preempt_at=now + timedelta(minutes=10)),
         QueueEntry(id=uuid.uuid4(), station_id=other.id, asset_id=spot.id, position=1, status="pending",
                    source="ad_slot", preempt_at=now + timedelta(minutes=5)),
     ])
@@ -198,10 +204,15 @@ async def test_station_day_lists_todays_sponsorships_only(client: AsyncClient, d
     # today's sponsorship plays on this station only (tomorrow's, the weather, the weather report, the song
     # and the other station's are left out), unless the clock is within minutes of midnight
     titles = [p["asset"]["title"] for p in plays]
-    # (in the last 9 minutes before midnight the later ones fall on tomorrow: a prefix of the list;
+    # (in the last 10 minutes before midnight the later ones fall on tomorrow: a prefix of the list;
     # CI at 11:52 PM ET got only the first, 2026-11-19)
-    expected = ["TEST SPONSOR 27 - Kesher Moving", "Kesher spot, played by hand"]
+    expected = ["TEST SPONSOR 27 - Kesher Moving", "Kesher spot, played by hand", "TEST - Southside Smokehouse"]
     assert titles == expected[:len(titles)], titles
+    # each row says whose recording it is, so the control room opens the Sponsor panel for it
+    by_play = {p["asset"]["title"]: p["asset"] for p in plays}
+    if "TEST - Southside Smokehouse" in by_play:
+        assert by_play["TEST - Southside Smokehouse"]["sponsor_id"] == str(sponsor.id)
+        assert by_play["TEST - Southside Smokehouse"]["category"] is None
     assert "Weather Report - 2026-11-18" not in titles
     # the queue tells the control room which recordings belong to a sponsor
     r = await client.get(f"{API}/stations/{station_id}/queue", headers=headers)
