@@ -197,10 +197,20 @@ class AirWatch:
                 and hard_start_on(station)
             ):
                 end = long_items.ends_at(current)
+                # A station where sponsorships wait for a talk to end (All Day Stories,
+                # PR 412): a group of sponsorships alone waiting behind a story is the
+                # rule, not a fault (it raised 14 false alarms there on 2026-11-19).
+                waiting_by_rule: set = set()
+                if end is not None and long_items.sponsorships_wait(station):
+                    from app.api.v1.queue import _sponsorship_only_groups
+
+                    waiting_by_rule = {
+                        _aware(at) for at in await _sponsorship_only_groups(db, station.id, current, end)
+                    }
                 for e in rows:
                     if (
                         e.status != "pending" or e.preempt_at is None or e.id in hard_ids
-                        or end is None
+                        or end is None or _aware(e.preempt_at) in waiting_by_rule
                     ):
                         continue
                     due = _aware(e.preempt_at)
