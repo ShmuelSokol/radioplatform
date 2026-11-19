@@ -64,6 +64,8 @@ ENGINE_PROTO_HOLD = 3
 # engine fills up to 3 s with quiet and starts the timed item early for more, as the
 # browser player does (queue.TIMED_EARLY_START_SECONDS, the same 8 s).
 HOLD_BEFORE_HARD_SECONDS = 8.0
+# A flush this long before the item on air ends surely dropped the pre-loaded entry
+FLUSH_DROPS_IF_BEFORE_END = 15.0
 # From this version the engine loads its next item while a host is on air (its live
 # lane keeps it off the stream), so music is back the moment the show ends instead of
 # after a download (about 5 s on Main, 2026-11-18). An older engine is handed nothing
@@ -143,6 +145,10 @@ class EngineState:
     # was the second part of the story the show had paused.
     show_preloaded: list[str] = field(default_factory=list)
     flushed_unplayed: set[str] = field(default_factory=set)
+    # The pre-loaded entry the last flush took back, and when: the engine still lists it
+    # first in `given`, but no longer holds it unless it was already starting
+    last_flushed: str | None = None
+    last_flushed_at: datetime | None = None
     # The engine said hello and has put nothing on air since: the entry we still show as
     # playing is not on air any more (it was cut by the restart), so the hold rule must
     # not wait for its end
@@ -383,6 +389,8 @@ async def engine_live(station_id, on: bool) -> bool:
 async def engine_flush(station_id) -> bool:
     """Drop the engine's pre-loaded next track so it asks again."""
     state = get_state(station_id)
+    if state.cued_entry_id:
+        state.last_flushed, state.last_flushed_at = state.cued_entry_id, datetime.now(UTC)
     state.cued_entry_id = None
     # During a live show nothing of the music lane is on air: all it was handed is dropped
     state.flushed_unplayed.update(state.show_preloaded)
@@ -946,6 +954,7 @@ async def handle_next(
         # now starts now. Waiting for that item's end left the engine 20 s on emergency
         # music when it ended just before a hard item (harness, engine crash 2026-11-18)
         skipping=state.skip_requested or state.fresh_start,
+        flushed=(state.last_flushed, state.last_flushed_at),
     ):
         return None
 
@@ -998,6 +1007,8 @@ async def handle_next(
         if uri:
             entry_id, asset_id = str(entry.id), str(entry.asset_id)
             state.cued_entry_id = entry_id
+            if state.last_flushed == entry_id:
+                state.last_flushed = None  # handed again: the engine holds it once more
             state.cued_at = time.monotonic()
             state.cued_for_after_show = entry_id if during_show else None
             state.flushed_unplayed.discard(entry_id)   # handed out again: the engine has it
@@ -1036,7 +1047,7 @@ async def handle_next(
 
 async def _hold_before_hard_item(
     db: AsyncSession, station_id, cued: str | None = None, now: datetime | None = None,
-    skipping: bool = False,
+    skipping: bool = False, flushed: tuple[str | None, datetime | None] = (None, None),
 ) -> bool:
     """True when the item on air ends within a few seconds before a hard timed item.
 
@@ -1070,6 +1081,17 @@ async def _hold_before_hard_item(
         change = now
         end = end or now
     held = None
+    flushed_id, flushed_at = flushed
+    if (
+        cued and flushed_id == str(cued) and flushed_at is not None
+        and end is not None and (end - flushed_at).total_seconds() > FLUSH_DROPS_IF_BEFORE_END
+    ):
+        # Taken back well before the item on air ends: the engine dropped it, though it
+        # still lists it first in `given`. Counting its length held the next song back and
+        # put 4 to 6 s of emergency music where the song on air ended (simulator,
+        # 2026-11-19). A flush at the very end can come too late (the song is already
+        # starting), so then it still counts.
+        cued = None
     if cued and (current is None or str(current.id) != str(cued)):
         try:
             held = (

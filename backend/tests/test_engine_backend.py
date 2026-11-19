@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 
 import app.api.v1.queue as queue_module
 from app.config import settings
@@ -2042,3 +2043,69 @@ async def test_the_paused_story_still_resumes_after_a_sponsorship_held_for_the_s
     assert (await _fresh(db_session, uuid.UUID(resume))).status == "pending"
     await _on_air(client, station, resume)
     assert (await _fresh(db_session, uuid.UUID(resume))).status == "playing"
+
+
+@pytest.mark.asyncio
+async def test_a_flushed_song_does_not_hold_back_the_next_one(db_session, eng):
+    """After a flush the engine holds nothing, but it still lists the flushed song first in
+    `given`. The hold rule took that song as still pre-loaded, counted its length, found
+    the following song would start seconds before the hard item and answered nothing:
+    4 to 6 s of emergency music where the song on air ended (simulator, Main Fri Apr 30
+    2027 08:54:56, Sun Oct 10 01:24:54, Jerusalem Fri Oct 22 14:23:38)."""
+    from app.api.v1.queue import handover_seconds
+
+    station, entries, engine, _ = eng
+    now = datetime.now(UTC)
+    on_air = await _fresh(db_session, entries[0].id)
+    on_air.status = "playing"
+    on_air.started_at = now - timedelta(seconds=120)  # 180 s song: ends in 60 s
+    await db_session.commit()
+    first = await playout_engine.handle_next(db_session, station.id, [], proto=5)
+    assert first is not None
+    flushed = (await db_session.execute(
+        select(QueueEntry).options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.id == uuid.UUID(first["entry_id"]))
+    )).unique().scalar_one()
+    on_air = (await db_session.execute(
+        select(QueueEntry).options(joinedload(QueueEntry.asset)).where(QueueEntry.id == entries[0].id)
+    )).unique().scalar_one()
+    # A hard item due 3 s after the flushed song would have ended
+    due = (now + timedelta(seconds=60 - handover_seconds(on_air))
+           + timedelta(seconds=180 - handover_seconds(flushed) + 3))
+    await _add(db_session, station, title="The time is", duration=5.0, kind="jingle", position=90,
+               timing_mode="hard", preempt_at=due)
+
+    # Taken back a minute before the song on air ends (a queue change)
+    await playout_engine.engine_flush(station.id)
+    again = await playout_engine.handle_next(db_session, station.id, [first["entry_id"]], proto=5)
+    assert again is not None, "the engine holds nothing after the flush: it must get the next song"
+
+
+@pytest.mark.asyncio
+async def test_a_song_taken_back_as_it_starts_still_counts_for_the_hold(db_session, eng):
+    """A flush in the last seconds of the song on air can reach the engine when the
+    pre-loaded song is already starting (harness song_ends_before_hour): that song is
+    still the one before the hard item, and the hold rule keeps counting it."""
+    from app.api.v1.queue import handover_seconds
+
+    station, entries, engine, _ = eng
+    now = datetime.now(UTC)
+    on_air = await _fresh(db_session, entries[0].id)
+    on_air.status = "playing"
+    on_air.started_at = now - timedelta(seconds=175)  # ends in 5 s
+    await db_session.commit()
+    first = await playout_engine.handle_next(db_session, station.id, [], proto=5)
+    assert first is not None
+    flushed = (await db_session.execute(
+        select(QueueEntry).options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.id == uuid.UUID(first["entry_id"]))
+    )).unique().scalar_one()
+    on_air = (await db_session.execute(
+        select(QueueEntry).options(joinedload(QueueEntry.asset)).where(QueueEntry.id == entries[0].id)
+    )).unique().scalar_one()
+    due = (now + timedelta(seconds=5 - handover_seconds(on_air))
+           + timedelta(seconds=180 - handover_seconds(flushed) + 3))
+    await _add(db_session, station, title="The time is", duration=5.0, kind="jingle", position=90,
+               timing_mode="hard", preempt_at=due)
+    await playout_engine.engine_flush(station.id)
+    assert await playout_engine.handle_next(db_session, station.id, [first["entry_id"]], proto=5) is None
