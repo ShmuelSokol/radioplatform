@@ -93,10 +93,16 @@ class QueueReplenishService:
         """Fill the queue (`_replenish`), then take out waiting station IDs that now
         sit next to a break or timed item (station_id_guard.drop_misplaced)."""
         await self._replenish()
-        from app.services.station_id_guard import drop_misplaced
+        from app.services.station_id_guard import drop_misplaced, pull_late_id
 
         try:
-            if await drop_misplaced(self.db, self.station_id):
+            changed = await drop_misplaced(self.db, self.station_id)
+            # and the next ID forward when moves and pass-overs left it late (12-20 min apart)
+            from app.services.playlist_generator_service import id_settings_for
+
+            if id_settings_for(getattr(self, "automation_config", None)).enabled:  # no extra read when IDs are off
+                changed += await pull_late_id(self.db, self.station_id)
+            if changed:
                 await self.db.commit()
         except Exception:
             logger.exception("Station %s: misplaced station IDs could not be tidied", self.station_id)
