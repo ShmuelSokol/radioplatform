@@ -2,11 +2,15 @@
 V3-20, V3-21, V1-146, V1-147, V1-120, V2-116, B-JOB-109, B-SET-35, B-SET-45."""
 import asyncio
 import json
+import os
 import pathlib
 import re
+import shutil
+import subprocess
 import sys
 import types
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -471,11 +475,80 @@ async def test_listener_heartbeat_has_no_rate_limit(client: AsyncClient, db_sess
 
 # ------------------------------------------------------------- V2-36
 
-@pytest.mark.xfail(strict=True, reason="found 2026-11-19: the CRM raffle form reads Start/End in the browser time zone (new Date(datetime-local).toISOString()) and lists them in the viewer zone, not the station clock (lib/stationTime.ts)")
-def test_raffle_times_use_the_station_clock():
-    """V2-36: like the other staff pages (wiki/admin-page-layout.md), the raffle form must
-    turn the typed time into UTC in the station's zone (fromZonedInput) and show times
-    with formatInZone, so an admin abroad opens the raffle at the right local hour."""
+def _run_station_time(script: str, tz: str) -> list:
+    """Run lib/stationTime.ts in Node (type stripping, Node 22.6+) with the browser
+    clock set to `tz`; the script prints JSON. Skips when no such Node is here, except
+    in CI, which installs one, so there it never quietly skips."""
+    node = shutil.which("node")
+    ok = False
+    if node:
+        v = subprocess.run([node, "--version"], capture_output=True, text=True).stdout.strip().lstrip("v")
+        major, minor = (int(x) for x in v.split(".")[:2])
+        ok = (major, minor) >= (22, 6)
+    if not ok:
+        if os.environ.get("CI"):
+            pytest.fail("Node 22.6+ is needed in CI to run lib/stationTime.ts")
+        pytest.skip("Node 22.6+ not installed")
+    lib = (FRONTEND_SRC / "lib" / "stationTime.ts").as_uri()
+    code = f"const m = await import({json.dumps(lib)});\n{script}"
+    r = subprocess.run([node, "--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", code],
+                       capture_output=True, text=True, env={**os.environ, "TZ": tz}, timeout=60)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+def _utc(value: str) -> datetime:
+    d = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_raffle_times_use_the_station_clock(client: AsyncClient, db_session: AsyncSession):
+    """V2-36: like the other staff pages (wiki/admin-page-layout.md), the raffle form
+    turns the typed Start/End into UTC on the station's clock and lists raffles on that
+    clock, so an admin abroad opens a Lakewood raffle at 4 PM Lakewood time.
+
+    Checked three ways: the page sends fromZonedInput(typed, station zone) and shows
+    formatInZone(time, the raffle's station zone); running that helper in a browser set
+    to Jerusalem gives 4 PM New York (where the old new Date(typed) gave 4 PM Jerusalem);
+    and the API keeps that moment for that station and lists it back unchanged."""
     page = (FRONTEND_SRC / "pages" / "admin" / "CrmDashboard.tsx").read_text(encoding="utf-8")
-    assert "new Date(rfStart).toISOString()" not in page and "new Date(rfEnd).toISOString()" not in page
-    assert "fromZonedInput" in page and "formatInZone" in page
+    # No conversion on the viewer's clock is left on the raffles tab.
+    assert "new Date(rfStart)" not in page and "new Date(rfEnd)" not in page
+    assert ".toLocaleString()" not in page.split("Raffles Tab", 1)[1]
+    # Saving: both boxes go through the zone of the chosen station, and the station is sent.
+    assert re.search(r"starts_at:\s*fromZonedInput\(rfStart,\s*formZone\)", page)
+    assert re.search(r"ends_at:\s*fromZonedInput\(rfEnd,\s*formZone\)", page)
+    assert re.search(r"formZone\s*=\s*zoneOf\(rfStation\)", page)
+    assert re.search(r"station_id:\s*rfStation", page)
+    # zoneOf reads the station's own timezone field.
+    assert re.search(r"zoneOf\s*=.*?stations\.find\(s => s\.id === id\).*?\?\.timezone", page, re.S)
+    # Showing: start and end on the raffle's station clock.
+    assert "formatInZone(r.starts_at, zoneOf(r.station_id))" in page
+    assert "formatInZone(r.ends_at, zoneOf(r.station_id))" in page
+
+    # What the page sends from a browser on Jerusalem time, for 4:00 PM to 6:00 PM typed
+    # for a Lakewood (New York) station, and how it then shows the saved times.
+    starts, ends, shown_start, shown_end, old_way = _run_station_time("""
+        const z = 'America/New_York';
+        const s = m.fromZonedInput('2030-01-04T16:00', z), e = m.fromZonedInput('2030-01-04T18:00', z);
+        console.log(JSON.stringify([s, e, m.formatInZone(s, z), m.formatInZone(e, z),
+                                    new Date('2030-01-04T16:00').toISOString()]));
+    """, tz="Asia/Jerusalem")
+    assert (starts, ends) == ("2030-01-04T21:00:00.000Z", "2030-01-04T23:00:00.000Z")
+    assert shown_start == "Fri, Jan 4, 4:00 PM EST" and shown_end == "Fri, Jan 4, 6:00 PM EST"
+    assert old_way == "2030-01-04T14:00:00.000Z"  # the bug: 4 PM Jerusalem is 9 AM in Lakewood
+
+    # The API stores that moment for that station and lists it back as sent.
+    st = Station(id=uuid.uuid4(), name="Lakewood", timezone="America/New_York")
+    db_session.add(st)
+    await db_session.commit()
+    h = await _sign_in(client, await _person(db_session, UserRole.MANAGER))
+    r = await client.post("/api/v1/crm/raffles", headers=h, json={
+        "title": "Chanukah raffle", "station_id": str(st.id), "starts_at": starts, "ends_at": ends})
+    assert r.status_code == 201, r.text
+    listed = next(x for x in (await client.get("/api/v1/crm/raffles", headers=h)).json()
+                  if x["id"] == r.json()["id"])
+    assert listed["station_id"] == str(st.id)
+    assert _utc(listed["starts_at"]) == datetime(2030, 1, 4, 21, 0, tzinfo=timezone.utc)
+    assert _utc(listed["ends_at"]) == datetime(2030, 1, 4, 23, 0, tzinfo=timezone.utc)

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { login } from '../../api/auth';
 import { useAuthStore } from '../../stores/authStore';
 import Spinner from '../../components/Spinner';
+import SignInExpiredNotice from '../../components/auth/SignInExpiredNotice';
 
 export default function SponsorLogin() {
   const [email, setEmail] = useState('');
@@ -37,6 +38,7 @@ export default function SponsorLogin() {
         <h1 className="text-3xl font-bold mb-2 text-center text-indigo-700">Sponsor Portal</h1>
         <p className="text-center text-gray-500 mb-6">Sign in to manage your campaigns</p>
         <form onSubmit={handleSubmit} className="bg-white shadow-lg rounded-xl p-8 space-y-5">
+          <SignInExpiredNotice />
           {error && (
             <div className="bg-red-50 text-red-600 p-3 rounded text-sm">{error}</div>
           )}

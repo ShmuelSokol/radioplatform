@@ -45,3 +45,15 @@ the zone named ("4:12 PM EST"), never the viewer's clock or UTC. Use `lib/statio
 `formatInZone`, `toZonedInput` and `fromZonedInput` (for `datetime-local` boxes). Blackouts
 used to put the UTC time in the edit box and save it as the viewer's local time, so every
 edit moved the window. Check: `e2e/display-findings.mjs` 14.
+Raffles (Listener CRM) have a Station choice; their times use that station's clock, and a
+raffle for every station uses the first station's. `test_raffle_times_use_the_station_clock`
+(backend) runs `lib/stationTime.ts` in Node 22 with the browser clock on Jerusalem; the
+backend CI job installs Node 22 for it.
+
+## When the sign-in runs out
+
+If the renewal (refresh token) has expired too, `api/client.ts` sends the page to the login
+page with `?expired=1`, or `?expired=action` when a change was refused; the login pages
+(admin and sponsor) then say "Your sign-in has expired. Please sign in again." and, for a
+change, that the last action was not done. Nothing is replayed later. Check:
+`e2e/staff-sessions.mjs` V3-14.

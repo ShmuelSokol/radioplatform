@@ -14,12 +14,12 @@
  */
 import { chromium, checker, sleep, makeStation, adminContext, newPage, allowEverywhere } from './lib/fake-station.mjs';
 
+allowEverywhere(/Your sign-in has expired/, 'the login page says why the operator was sent there (V3-14)');
 allowEverywhere(/net::ERR_INTERNET_DISCONNECTED|Network Error|did not go through|Could not|Can't reach|offline|connection/i, 'the network is cut on purpose (V3-19)');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4302';
 const DESKTOP = { viewport: { width: 1440, height: 900 } };
 const KNOWN = {
-  'V3-14 the login page says the sign-in expired (sign in again)': 'found 2026-11-19: an expired renewal sends the operator to the plain login form with no word that the sign-in expired or that the press was not done',
 };
 const { check, done } = checker(KNOWN);
 

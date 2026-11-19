@@ -8,6 +8,8 @@ import {
   useDrawRaffle,
   useRaffleEntries,
 } from '../../hooks/useCrm';
+import { useStations } from '../../hooks/useStations';
+import { formatInZone, fromZonedInput } from '../../lib/stationTime';
 
 type Tab = 'members' | 'rankings' | 'raffles';
 
@@ -22,6 +24,7 @@ export default function CrmDashboard() {
   const [rfDesc, setRfDesc] = useState('');
   const [rfStart, setRfStart] = useState('');
   const [rfEnd, setRfEnd] = useState('');
+  const [rfStation, setRfStation] = useState('');
 
   const { data: membersData, isLoading: membersLoading } = useCrmMembers(0, 100, search || undefined);
   const deactivateMember = useDeactivateMember();
@@ -30,6 +33,13 @@ export default function CrmDashboard() {
   const createRaffle = useCreateRaffle();
   const drawRaffle = useDrawRaffle();
   const { data: entries } = useRaffleEntries(selectedRaffle);
+  const { data: stationsData } = useStations();
+  const stations = stationsData?.stations ?? [];
+  // Raffle times are the station's clock (wiki/admin-page-layout.md). A raffle for
+  // every station uses the first station's clock, as the blackouts page does.
+  const zoneOf = (id?: string | null) =>
+    (stations.find(s => s.id === id) ?? stations[0])?.timezone || undefined;
+  const formZone = zoneOf(rfStation);
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'members', label: 'CRM Members' },
@@ -195,6 +205,17 @@ export default function CrmDashboard() {
                 <input type="text" value={rfDesc} onChange={e => setRfDesc(e.target.value)}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
               </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Station</label>
+                <select value={rfStation} onChange={e => setRfStation(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                  <option value="">Every station</option>
+                  {stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+                {formZone && (
+                  <p className="text-xs text-gray-500 mt-1">Start and End are on the station's clock ({formZone}).</p>
+                )}
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Start *</label>
                 <input type="datetime-local" value={rfStart} onChange={e => setRfStart(e.target.value)}
@@ -213,10 +234,11 @@ export default function CrmDashboard() {
                   title: rfTitle.trim(),
                   prize: rfPrize.trim() || undefined,
                   description: rfDesc.trim() || undefined,
-                  starts_at: new Date(rfStart).toISOString(),
-                  ends_at: new Date(rfEnd).toISOString(),
+                  station_id: rfStation || undefined,
+                  starts_at: fromZonedInput(rfStart, formZone),
+                  ends_at: fromZonedInput(rfEnd, formZone),
                 }, {
-                  onSuccess: () => { setRfTitle(''); setRfPrize(''); setRfDesc(''); setRfStart(''); setRfEnd(''); },
+                  onSuccess: () => { setRfTitle(''); setRfPrize(''); setRfDesc(''); setRfStart(''); setRfEnd(''); setRfStation(''); },
                 });
               }}
               disabled={createRaffle.isPending}
@@ -239,7 +261,7 @@ export default function CrmDashboard() {
                       {r.prize && <p className="text-sm text-gray-500">Prize: {r.prize}</p>}
                       {r.description && <p className="text-sm text-gray-400">{r.description}</p>}
                       <div className="flex items-center gap-4 mt-1 text-xs text-gray-400">
-                        <span>{new Date(r.starts_at).toLocaleString()} — {new Date(r.ends_at).toLocaleString()}</span>
+                        <span>{formatInZone(r.starts_at, zoneOf(r.station_id))} — {formatInZone(r.ends_at, zoneOf(r.station_id))}</span>
                         <span>{r.entry_count} entries</span>
                       </div>
                     </div>
@@ -281,7 +303,7 @@ export default function CrmDashboard() {
                           <div key={e.id} className="flex items-center justify-between text-sm bg-gray-50 rounded px-3 py-1.5">
                             <span>{e.member_name}</span>
                             <span className="text-xs text-gray-400">
-                              {e.created_at ? new Date(e.created_at).toLocaleString() : ''}
+                              {e.created_at ? formatInZone(e.created_at, zoneOf(r.station_id)) : ''}
                             </span>
                           </div>
                         ))}

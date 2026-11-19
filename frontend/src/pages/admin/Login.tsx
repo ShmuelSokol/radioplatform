@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { login } from '../../api/auth';
 import { useAuthStore } from '../../stores/authStore';
 import Spinner from '../../components/Spinner';
+import SignInExpiredNotice from '../../components/auth/SignInExpiredNotice';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -35,6 +36,7 @@ export default function Login() {
     <div className="max-w-md mx-auto mt-20">
       <h1 className="text-2xl font-bold mb-6 text-center">Admin Login</h1>
       <form onSubmit={handleSubmit} className="bg-white shadow rounded-lg p-6 space-y-4">
+        <SignInExpiredNotice />
         {error && (
           <div className="bg-red-50 text-red-600 p-3 rounded text-sm">{error}</div>
         )}
