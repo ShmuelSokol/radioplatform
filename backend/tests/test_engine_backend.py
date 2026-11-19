@@ -1830,7 +1830,7 @@ async def test_kept_start_reports_in_one_batch_are_recorded_when_they_aired(clie
                        position=50, preempt_at=base + timedelta(seconds=100), timing_mode="hard")
     coming = await _add(db_session, station, title="The time is 11:00", duration=5.0, kind="jingle",
                         position=51, preempt_at=datetime.now(UTC) + timedelta(minutes=20), timing_mode="hard")
-    reports = [{"entry_id": str(entries[i].id), "lane": "main", "kept": True,
+    reports = [{"entry_id": str(entries[i].id), "lane": "main", "kept": True, "asset_id": str(entries[i].asset_id),
                 "at": (base + timedelta(seconds=180 * i)).timestamp()} for i in range(3)]
     r = await client.post(f"/api/v1/playout/{station.id}/started-batch", headers=HEADERS,
                           json={"reports": reports})
@@ -1852,9 +1852,15 @@ async def test_kept_start_reports_in_one_batch_are_recorded_when_they_aired(clie
     more = [{**reports[0], "more": True}]
     r = await client.post(f"/api/v1/playout/{station.id}/started-batch", headers=HEADERS, json={"reports": more})
     assert pe.get_state(station.id).box_catch_up_until > 0
+    again = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=entries[0].asset_id,
+                       position=60, status="pending", source="auto")
+    db_session.add(again)
+    await db_session.commit()
     r = await client.post(f"/api/v1/playout/{station.id}/started-batch", headers=HEADERS,
                           json={"reports": [reports[2]]})
     assert pe.get_state(station.id).box_catch_up_until == 0
+    # a song the box aired in its last hours is not played again from the site's queue
+    assert (await _fresh(db_session, again.id)).status == "skipped"
     # a droplet engine's station is never held
     monkeypatch.setattr(settings, "PLAYOUT_RELAY_STATION_ID", "")
     r = await client.post(f"/api/v1/playout/{station.id}/started-batch", headers=HEADERS, json={"reports": more})

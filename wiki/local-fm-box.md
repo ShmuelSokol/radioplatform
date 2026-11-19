@@ -328,7 +328,12 @@ simulator the site's view lagged for the whole two hours after the return, missi
 three time checks). An older backend answers 404 and gets them one by one. The batch
 then sets aside (`skipped`) the site's own timed rows from before the newest kept
 report: the box aired its own copies, and left pending they all went out as "due"
-(Saturday's weather and a ":30" time check at 6:14 on Thursday).
+(Saturday's weather and a ":30" time check at 6:14 on Thursday). The last batch also sets
+aside the site's own automatic songs queued meanwhile that the box aired in its last 4 h
+(a week offline: 14 of the first 40 items after the return were such repeats). While
+more batches follow, the playout tick is held for 30 s at a time (box stations only):
+between batches the "playing" row is from the offline days, and the tick took a
+Shabbos silence row as on air and skipped the real song.
 
 **Station ID guard detail:** the hard items already in the engine's timed lane count as
 breaks; a soft item already due counts as airing right after the song; a hard item due

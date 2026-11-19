@@ -92,6 +92,8 @@ class EngineState:
     # till then the "playing" row is some item of the offline days, and the tick must
     # not act on it (it took Shabbos silence as on air and skipped the real song)
     box_catch_up_until: float = 0.0
+    # Assets a box's kept reports aired, by when, gathered over one return's batches
+    box_recent_assets: dict = field(default_factory=dict)
     # Monotonic time of the engine's last call to us
     last_contact: float = 0.0
     last_alert: float = 0.0
@@ -1252,6 +1254,7 @@ async def handle_started_batch(db: AsyncSession, station_id, reports: list[dict]
                 kept_at.append(float(r["at"]))
         except (TypeError, ValueError):
             pass
+    _note_box_assets(state, reports)
     if kept_at:
         upto = datetime.fromtimestamp(min(max(kept_at), datetime.now(UTC).timestamp()), UTC)
         # never a row whose start report is on its way
@@ -1276,7 +1279,49 @@ async def handle_started_batch(db: AsyncSession, station_id, reports: list[dict]
         if gone.rowcount:
             logger.info("Station %s: %d timed rows of the box's offline hours set aside",
                         station_id, gone.rowcount)
+        if not more:
+            # The site's own songs queued while the box was offline were drawn without
+            # knowing what it played: one the box aired in its last hours is not played
+            # again now (a week offline: 14 of the first 40 items after the return)
+            recent = box_recent_music(state, max(kept_at))
+            if recent:
+                again = await db.execute(
+                    update(QueueEntry)
+                    .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending",
+                           QueueEntry.preempt_at.is_(None), QueueEntry.source == "auto",
+                           QueueEntry.asset_id.in_(recent), QueueEntry.id.notin_(keep_ids))
+                    .values(status="skipped")
+                    .execution_options(synchronize_session=False)
+                )
+                await db.commit()
+                if again.rowcount:
+                    logger.info("Station %s: %d queued songs the box aired lately set aside",
+                                station_id, again.rowcount)
     return len(reports)
+
+
+# A song the box aired this long before its return is not played again from the queue
+BOX_RECENT_SONG_SECONDS = 4 * 3600.0
+
+
+def _note_box_assets(state: "EngineState", reports: list[dict]) -> None:
+    """Remember when the box aired each asset, over the batches of one return."""
+    seen = state.box_recent_assets
+    for r in reports:
+        try:
+            aid, at = uuid.UUID(str(r.get("asset_id"))), float(r.get("at") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        seen[aid] = max(at, seen.get(aid, 0.0))
+
+
+def box_recent_music(state: "EngineState", newest: float) -> set:
+    """Assets the box aired within BOX_RECENT_SONG_SECONDS of its newest report; the
+    return's record is then cleared."""
+    seen = state.box_recent_assets
+    out = {a for a, at in seen.items() if newest - at <= BOX_RECENT_SONG_SECONDS}
+    seen.clear()
+    return out
 
 
 async def _handle_started(
