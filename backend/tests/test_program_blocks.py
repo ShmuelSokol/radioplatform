@@ -412,7 +412,12 @@ async def test_a_rebuild_still_steers_sponsorships_around_a_shiur_it_requeues(
     for _ in range(2):  # created, then re-saved unchanged: both rebuild the queue
         db_session.expire_all()
         entries = await _pending(db_session, station_id)
-        shiur_at = {e.preempt_at for e in entries if e.asset_id == made["show"].id}
+        # Only shiurim in a daypart that has not begun: late in a daypart there may be
+        # no room left outside the shiur, and then a break inside it is the right
+        # overflow (this ran at 7:47 PM ET on 2026-11-18 and found 8:15 used).
+        later = datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=6)
+        shiur_at = {e.preempt_at for e in entries if e.asset_id == made["show"].id
+                    and e.preempt_at.replace(tzinfo=None) > later}
         inside = [e.preempt_at for e in entries if e.asset_id in spot_ids
                   and any(st < e.preempt_at < st + timedelta(minutes=45) for st in shiur_at)]
         assert shiur_at and not inside, inside[:3]
