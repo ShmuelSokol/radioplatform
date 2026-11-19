@@ -1361,9 +1361,20 @@ class QueueReplenishService:
             return any(b.covers(at) for b in blackouts)
 
         hours_scheduled = 0
-        for hour_boundary in local_hour_marks(now, zone, 48):
+        # The hour that has already begun still owes its :30. Only coming hours were
+        # walked, and a :30 is made with its hour, so nothing made it when the hour's
+        # own start was never a coming hour of a fill: after a Yom Tov longer than the
+        # 48 h time and weather are queued ahead (nothing is filled during a blackout;
+        # back at 9:01 PM, no 9:30 time check), or a start with an empty queue
+        marks = local_hour_marks(now, zone, 48)
+        begun = local_hour_marks(now - timedelta(hours=1), zone, 1)
+        if begun and begun[0] <= now and begun[0] not in marks:
+            marks.insert(0, begun[0])
+        for hour_boundary in marks:
             half_boundary = hour_boundary + timedelta(minutes=30)
-            need_hour = hour_boundary not in existing_preempts and not off_air(hour_boundary)
+            need_hour = (
+                hour_boundary > now and hour_boundary not in existing_preempts and not off_air(hour_boundary)
+            )
             half_ok = (
                 half_boundary > now
                 and half_boundary.astimezone(zone).minute == 30

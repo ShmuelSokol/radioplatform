@@ -102,9 +102,19 @@ async def seed(db, export: dict, start: datetime, days: int = 2, stations: set[s
                        is_active=True, automation_config=config))
     await db.flush()
 
+    for s in export["sponsors"]:
+        db.add(Sponsor(id=uuid.UUID(s["id"]), name=s["name"], length_seconds=s.get("length_seconds") or 30.0,
+                       audio_file_path=f"https://cdn.example.com/sponsor/{s['id']}.mp3"))
+    await db.flush()
+    # Sponsorship audio is tied to its sponsor on the site (the export leaves the tie
+    # out). Without it a run of one station drew another station's sponsorships as
+    # filler, because that station's contracts are not loaded
+    known = {s["id"] for s in export["sponsors"]}
+    sponsor_of = {s["asset_id"]: s["sponsor_id"] for s in export["spot_schedules"] if s["sponsor_id"] in known}
     for a in export["assets"]:
         db.add(Asset(id=uuid.UUID(a["id"]), title=a["title"] or "untitled", asset_type=a["asset_type"],
                      category=a["category"], duration=a["duration"],
+                     sponsor_id=uuid.UUID(sponsor_of[a["id"]]) if a["id"] in sponsor_of else None,
                      file_path=f"https://cdn.example.com/audio/{a['id']}.mp3",
                      metadata_extra={"cues": a.get("cues") or {}} if a.get("cues") else None))
     for a in extra_assets or []:
@@ -125,9 +135,6 @@ async def seed(db, export: dict, start: datetime, days: int = 2, stations: set[s
     _add_announcements(db, start, days)
     await db.flush()
 
-    for s in export["sponsors"]:
-        db.add(Sponsor(id=uuid.UUID(s["id"]), name=s["name"], length_seconds=s.get("length_seconds") or 30.0,
-                       audio_file_path=f"https://cdn.example.com/sponsor/{s['id']}.mp3"))
     for t in export["playlist_templates"]:
         if t.get("station_id") in keep or t.get("station_id") is None:
             db.add(_row(PlaylistTemplate, t))
