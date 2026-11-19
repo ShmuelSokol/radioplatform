@@ -79,10 +79,10 @@ def _export_with_motzei_shabbos(tmp_path: Path, stations) -> tuple[Path, set[str
     return path, (hot, hits)
 
 
-async def _run(tmp_path, station, tz, also=()):
+async def _run(tmp_path, station, tz, also=(), start=None, hours=4.0):
     export, hot = _export_with_motzei_shabbos(tmp_path, (station, *also))
-    start = datetime(2026, 11, 21, 15, 30, tzinfo=tz)
-    _, result = await simulate(export, start, 4.0, [station, *also], tmp_path, quiet_pass=12.0,
+    start = start or datetime(2026, 11, 21, 15, 30, tzinfo=tz)
+    _, result = await simulate(export, start, hours, [station, *also], tmp_path, quiet_pass=12.0,
                                regenerate_windows=True)
     print(result.report())
     for check in MUST_PASS:
@@ -124,6 +124,14 @@ async def test_main_motzei_shabbos(tmp_path):
 async def test_jerusalem_motzei_shabbos(tmp_path):
     """Saturday Nov 21, 2026 in Jerusalem, with Main seeded beside it (see test_holiday_sim)."""
     _check(*await _run(tmp_path, "jerusalem", JLM, also=("main",)))
+
+
+async def test_main_motzei_shabbos_after_a_whole_friday(tmp_path):
+    """From Friday afternoon, as the live site gets there: the queue drawn before candle
+    lighting held Friday songs and songs drawn a day early. The songs after Shabbos are
+    drawn again just before it ends (redraw_before_blackout_end), so the first song back
+    is still a Motzei Shabbos song (2026-11-19: four Friday songs aired first, 25 min)."""
+    _check(*await _run(tmp_path, "main", NY, start=datetime(2026, 11, 20, 14, 0, tzinfo=NY), hours=29.5))
 
 
 def test_the_export_change_is_well_formed(tmp_path):

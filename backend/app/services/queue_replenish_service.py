@@ -74,6 +74,7 @@ class QueueReplenishService:
         # left out of every count while the new ones are picked, then old and
         # new are swapped in one short transaction (_fill_from_playlists)
         self.replace_all = False  # set by the caller: redraw everything
+        self.keep_next: int | None = None  # songs a redraw keeps (None: KEEP_NEXT)
         self.replacing: list = []
         self.cursor_back: dict = {}
         self.replaced = 0
@@ -176,7 +177,7 @@ class QueueReplenishService:
                 redraw = True
         if redraw and generation.enabled:
             self.replacing, self.cursor_back = await songs_to_replace(
-                self.db, self.station_id, keep_next=KEEP_NEXT
+                self.db, self.station_id, keep_next=KEEP_NEXT if self.keep_next is None else self.keep_next
             )
         await self.db.flush()
 
