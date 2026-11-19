@@ -17,7 +17,7 @@ from app.db.engine import async_session_factory
 from app.models.asset import Asset, stored_analysis
 from app.models.holiday_window import HolidayWindow
 from app.models.station import Station
-from app.models.queue_entry import resume_offset
+from app.models.queue_entry import aired_from, resume_offset
 
 logger = logging.getLogger(__name__)
 
@@ -1010,8 +1010,7 @@ class SchedulerEngine:
             # `offset` s ago (started_at), which is before the time check that paused
             # it: announcements are ordered by this, not by started_at
             "on_air_at": (
-                (entry.started_at + timedelta(seconds=resume_offset(entry))).isoformat()
-                if entry.started_at else None
+                aired_from(entry).isoformat() if entry.started_at else None
             ),
             "stream_url": settings.public_stream_url(station_id),
             "asset": {
