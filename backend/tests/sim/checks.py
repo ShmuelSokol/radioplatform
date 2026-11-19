@@ -721,6 +721,37 @@ def weather_is_todays(res: Result, ctx: Context):
             _add(res, check, r, r.local_start, f"{a.title!r} aired with no timed place (source {r.source})")
 
 
-ALL_CHECKS = [site_log_matches_air, one_resume_per_pause, shabbos_silence, shabbos_ending, hard_items_on_time, time_checks_on_the_hour, no_dead_air, nothing_inside_a_shiur,
+# A start this far from what the queue page showed within the hour before counts as wrong
+ESTIMATE_OFF_SECONDS = 180.0
+
+
+def estimates_hold(res: Result, ctx: Context):
+    """What the queue page showed is when it airs: each item's estimated start, read
+    every 30 minutes for the hour after, against its real start (Main 2026-11-19: a
+    Chanukah song shown at 11:07 aired at 10:28 and Shmuel looked for it in vain)."""
+    check = "queue page times hold: items air within 3 min of the time shown"
+    res.checks_run.setdefault(check, 0)
+    started = {(r.station, r.entry_id): r for r in res.rows if r.entry_id and r.lane != "emergency"}
+    worst: dict = {}
+    for t, sid, est in getattr(ctx.sim, "snapshots", []):
+        for eid, ts in est.items():
+            r = started.get((sid, eid))
+            # Automatic station IDs move on purpose (station_id_guard.postpone)
+            if r is None or r.start < t or r.is_id:
+                continue
+            _count(res, check)
+            off = r.start - ts
+            if abs(off) > ESTIMATE_OFF_SECONDS:
+                key = (sid, eid)
+                if key not in worst or abs(off) > abs(worst[key][0]):
+                    worst[key] = (off, t, ts, r)
+    for (sid, eid), (off, t, ts, r) in worst.items():
+        shown = datetime.fromtimestamp(ts, UTC).astimezone(r.tz).strftime("%H:%M:%S")
+        read = datetime.fromtimestamp(t, UTC).astimezone(r.tz).strftime("%H:%M")
+        _add(res, check, r, r.local_start,
+             f"{r.title!r} shown at {shown} (queue read {read}), aired {off / 60:+.1f} min off")
+
+
+ALL_CHECKS = [estimates_hold, site_log_matches_air, one_resume_per_pause, shabbos_silence, shabbos_ending, hard_items_on_time, time_checks_on_the_hour, no_dead_air, nothing_inside_a_shiur,
               sponsor_spacing, station_ids, station_isolation, time_check_says_the_hour, weather_is_todays,
               soft_items_wait_for_the_song, nothing_twice]
