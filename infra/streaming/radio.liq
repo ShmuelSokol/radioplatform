@@ -895,14 +895,31 @@ def broadcast_sound(s) =
   processed
 end
 
+# KBR_PROCESSING=clean (2026-11-19): the leveler and the limiter only, no bands. Shmuel
+# heard the broadcast chain on Jerusalem: "really just not clean, not like my father".
+# Measured on his father's voice, the bands' makeup added about +3.5 dB above 4 kHz and
+# +2.5 dB of bass against the voice range; this keeps the recording's own tone (within
+# 1 dB) at the same loudness (-18 dB RMS target gives about -14.5 LUFS).
+clean_target = float_of_string(environment.get(default="-18.", "KBR_CLEAN_TARGET"))
+def clean_sound(s) =
+  s = leveler(target=clean_target, up=2., down=1., window=1.,
+              gain_min=-10., gain_max=15., threshold=-45., s)
+  processed = insert_metadata(id="processed", ffmpeg_chain(s, fun (graph, a) -> begin
+    a = ffmpeg.filter.highpass(graph, f=35., poles=2, a)
+    ffmpeg.filter.alimiter(graph, limit=lin_of_dB(-1.5), attack=5., release=60., level=false, a)
+  end))
+  s.on_metadata(fun (m) -> processed.insert_metadata(m))
+  processed
+end
+
 def light_sound(s) =
   s = compress(threshold=-14., ratio=3., attack=20., release=200., s)
   ffmpeg_chain(s, fun (graph, a) ->
     ffmpeg.filter.alimiter(graph, limit=0.708, attack=5., release=50., level=false, a))
 end
 
-log.important("sound: #{processing} processing" ^ (if processing == "light" then "" else ", leveler target #{processing_target} dB" end))
-radio = if processing == "light" then light_sound(radio) else broadcast_sound(radio) end
+log.important("sound: #{processing} processing" ^ (if processing == "light" then "" elsif processing == "clean" then ", leveler target #{clean_target} dB" else ", leveler target #{processing_target} dB" end))
+radio = if processing == "light" then light_sound(radio) elsif processing == "clean" then clean_sound(radio) else broadcast_sound(radio) end
 
 # ── Tell the backend what really went on air ─────────────────────────────────
 def report_to_backend(entry, lane, title) =

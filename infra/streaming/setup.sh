@@ -18,6 +18,9 @@
 # chain (leveler, three bands, limiter; KBR_PROCESSING=broadcast); the others run the
 # light one. Unset: every engine keeps what it had (light for a new one). One station
 # first (KBR Jerusalem), the others once Shmuel has listened.
+# KBR_CLEAN_SOUND=<id>[,<id>] | all: these engines run the clean chain instead (leveler
+# and limiter only, the recording's own tone; KBR_PROCESSING=clean). It wins over
+# KBR_BROADCAST_SOUND for a station named in both.
 #
 # At the end it prints the settings the backend needs. No password is ever written
 # to the repository; they are generated here and stay on this machine.
@@ -30,6 +33,7 @@ REF="${KBR_SETUP_REF:-main}"
 RESTART_ONLY="$(echo "${KBR_RESTART_ONLY:-}" | tr ',' ' ')"
 BROADCAST_SOUND="$(echo "${KBR_BROADCAST_SOUND-}" | tr ',' ' ')"
 BROADCAST_SOUND_SET="${KBR_BROADCAST_SOUND+yes}"
+CLEAN_SOUND="$(echo "${KBR_CLEAN_SOUND-}" | tr ',' ' ')"
 RAW="https://raw.githubusercontent.com/ShmuelSokol/radioplatform/${REF}/infra/streaming"
 ENV_FILE=/etc/kbr-engine/env
 STATION_DIR=/etc/kbr-engine/stations
@@ -125,6 +129,9 @@ while IFS='|' read -r SID SNAME; do
     PROCESSING="$( [ -f "$STATION_DIR/$SID.env" ] && grep -E '^KBR_PROCESSING=' "$STATION_DIR/$SID.env" | head -1 | cut -d= -f2- || true)"
     PROCESSING="${PROCESSING:-light}"
   fi
+  case " $CLEAN_SOUND " in
+    *" all "*|*" $SID "*) PROCESSING=clean ;;
+  esac
   echo "Engine $SID: sound chain $PROCESSING"
   cat > "$STATION_DIR/$SID.env" <<SENV
 KBR_STATION_ID=${SID}

@@ -63,8 +63,12 @@ def test_levels_and_output_processing():
     assert "ffmpeg.filter.alimiter(graph, limit=0.708" in liq and "level=false" in liq
     # The light chain (default) and the broadcast chain (KBR_PROCESSING=broadcast, 2026-11-19)
     assert 'processing = environment.get(default="light", "KBR_PROCESSING")' in liq
-    assert 'radio = if processing == "light" then light_sound(radio) else broadcast_sound(radio) end' in liq
+    assert ('radio = if processing == "light" then light_sound(radio) elsif processing == "clean" '
+            'then clean_sound(radio) else broadcast_sound(radio) end') in liq
     assert "ffmpeg.filter.alimiter(graph, limit=lin_of_dB(-1.5)" in liq
+    # clean: the leveler and the limiter only, no bands (Shmuel 2026-11-19: "not clean")
+    clean = liq.split("def clean_sound(s) =")[1].split("\nend\n")[0]
+    assert "acrossover" not in clean and "acompressor" not in clean and "alimiter" in clean
     assert 'ffmpeg.filter.acrossover(graph, split="150 4000", order=1, a)' in liq
     assert "ffmpeg.filter.amix(graph, inputs=3, normalize=false" in liq
     # The leveler keeps its own gain: normalize() and a plain amplify take liq_amplify
@@ -372,9 +376,9 @@ def test_the_limiter_is_not_wrapped_in_mksafe_and_a_long_gap_starts_the_timed_it
     # ends more than 3 s before a hard item is followed by that item at once (Jerusalem
     # 00:00Z 2026-11-18: 6.6 s were filled with the start of a song that was then cut).
     liq = (INFRA / "radio.liq").read_text()
-    assert 'radio = if processing == "light" then light_sound(radio) else broadcast_sound(radio) end' in liq
+    assert 'elsif processing == "clean" then clean_sound(radio)' in liq
     assert "mksafe(" not in liq.split("def ffmpeg_chain(")[1].split("\nend\n")[0]
-    assert "mksafe(light_sound" not in liq and "mksafe(broadcast_sound" not in liq
+    assert "mksafe(light_sound" not in liq and "mksafe(broadcast_sound" not in liq and "mksafe(clean_sound" not in liq
     assert "output.file(%wav, fallible=true, debug_wav, radio)" in liq
     assert "if left > 1. and timed_pending() > 0 and timed_queue.is_ready() then" in liq
     assert "{if timed_early() != at then timed_go_on_air(180, at) end}" in liq
