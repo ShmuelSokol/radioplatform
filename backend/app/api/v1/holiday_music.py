@@ -28,6 +28,7 @@ from app.services.holiday_music import (
     Setting,
     clean_setting,
     every_n,
+    in_season,
     kind_of,
     load_settings,
     seasons_between,
@@ -43,7 +44,7 @@ KEYWORDS = {
     "rosh_hashana": ["rosh hashan", "rosh hashon", "shofar", "avinu malkeinu", "tekiah", "teshuva", "elul", "hayom harat", "unesaneh"],
     "yom_kippur": ["yom kippur", "kol nidre", "kol nidrei", "neilah", "viduy", "selichos", "selichot", "teshuva"],
     "sukkos": ["sukkos", "sukkot", "succos", "sukkah", "succah", "lulav", "esrog", "etrog", "simchas torah", "simchat torah", "hoshana", "ushpizin", "simchas beis", "simchat beit", "shemini atzeres"],
-    "chanukah": ["chanuk", "hanuk", "hanuc", "chanuc", "maoz tzur", "maoz tsur", "dreidel", "dreidle", "menorah", "latke", "al hanisim", "haneiros", "mi yemalel", "sevivon"],
+    "chanukah": ["chanuk", "hanuk", "hanuc", "chanuc", "maoz tzur", "maoz tsur", "ma'oz tzur", "ma'oz tsur", "hanerot", "haneros", "dreidel", "dreidle", "menorah", "latke", "al hanisim", "haneiros", "mi yemalel", "sevivon"],
     "tu_bishvat": ["tu bishvat", "tu b'shvat", "tu bshvat", "shivas haminim", "seven species"],
     "purim": ["purim", "haman", "mordechai", "esther", "megill", "shoshanas yaakov", "shoshanat yaakov", "mishenichnas adar", "adar", "venahafoch", "ad delo yada", "grogger", "groggers", "mishloach"],
     "pesach": ["pesach", "passover", "seder", "haggad", "matzah", "matza", "maror", "chad gadya", "dayeinu", "dayenu", "echad mi yodea", "ma nishtana", "mah nishtana", "plague", "makos", "makkot", "exodus", "yetzias mitzrayim", "yetziat", "mitzrayim", "kriyas yam suf", "az yashir", "had gadya", "10 plagues", "ten plagues"],
@@ -61,6 +62,85 @@ DAF_TITLE = re.compile(
     re.I,
 )
 NOT_SUGGESTED_CATEGORIES = ("do_not_play", "daf_yomi", "block_only")
+
+
+# A queue is drawn about two days ahead, so a list or setting change in season would
+# otherwise reach the air only after the songs already drawn (Shmuel 2026-11-19:
+# "start putting in the Hanukkah songs to play now"). The unplayed automatic songs
+# are drawn again shortly after such a change, in the background.
+REDRAW_INLINE = False  # tests set True to see the redrawn queue at once
+REDRAW_DELAY = 2.0
+QUEUE_DAYS = 4  # days of queue a change can reach (fill-ahead is 48 h, plus margin)
+_redraw_waiting: set[str] = set()
+_redraw_tasks: set = set()
+
+
+def touches_queue(station: Station, key: str, settings: list[Setting]) -> bool:
+    """Is the holiday mixed in (under any of `settings`) on a day the queue holds?"""
+    today = _today(station)
+    israel = is_israel_timezone(station.timezone)
+    for season in seasons_between(today - timedelta(days=1), today + timedelta(days=200), israel):
+        if season.key != key:
+            continue
+        for setting in settings:
+            if any(in_season(setting, season, today + timedelta(days=d)) for d in range(QUEUE_DAYS)):
+                return True
+    return False
+
+
+async def _redraw_later(station_id) -> None:
+    import asyncio
+
+    from app.db.engine import async_session_factory
+    from app.services.schedule_refresh_service import replace_automatic_songs
+
+    try:
+        await asyncio.sleep(REDRAW_DELAY)
+    finally:
+        _redraw_waiting.discard(str(station_id))
+    try:
+        async with async_session_factory() as db:
+            removed = await replace_automatic_songs(db, station_id)
+            logger.info("Holiday music change: redrew %d automatic songs on station %s", removed, station_id)
+    except Exception:
+        logger.exception("Queue redraw after a holiday music change failed for station %s", station_id)
+
+
+async def _redraw(db: AsyncSession, stations: list[Station]) -> list[str]:
+    """Draw the unplayed automatic songs of these stations again (soon, or now in
+    tests). Returns the stations redrawn."""
+    import asyncio
+
+    done = []
+    for station in stations:
+        key = str(station.id)
+        done.append(key)
+        if REDRAW_INLINE:
+            from app.services.schedule_refresh_service import replace_automatic_songs
+
+            await replace_automatic_songs(db, station.id)
+            continue
+        if key in _redraw_waiting:
+            continue  # a redraw is already waiting and will read this change too
+        _redraw_waiting.add(key)
+        task = asyncio.get_running_loop().create_task(_redraw_later(station.id))
+        _redraw_tasks.add(task)
+        task.add_done_callback(_redraw_tasks.discard)
+    return done
+
+
+async def _redraw_for_items(db: AsyncSession, key: str, station_id) -> list[str]:
+    """After a list change: every station the list reaches where the holiday is
+    being mixed in now or within the queue's days."""
+    if station_id is not None:
+        stations = [s for s in [await db.get(Station, station_id)] if s is not None]
+    else:
+        stations = list((await db.execute(select(Station))).scalars().all())
+    reach = []
+    for station in stations:
+        if touches_queue(station, key, [(await load_settings(db, station.id))[key]]):
+            reach.append(station)
+    return await _redraw(db, reach)
 
 
 def _key(holiday: str) -> str:
@@ -209,7 +289,10 @@ async def save_settings(
     for k, v in new.as_dict().items():
         setattr(row, k, v)
     await db.commit()
-    return {"holiday": key, "settings": new.as_dict()}
+    redrawn = []
+    if new != current and touches_queue(station, key, [current, new]):
+        redrawn = await _redraw(db, [station])
+    return {"holiday": key, "settings": new.as_dict(), "queue_redrawn": bool(redrawn)}
 
 
 @router.get("/{holiday}/items")
@@ -291,7 +374,9 @@ async def add_items(
             )
         )).rowcount or 0
     await db.commit()
-    return {"added": len(added), "already_listed": len(have), "removed_from_queues": removed}
+    redrawn = await _redraw_for_items(db, key, body.station_id) if added else []
+    return {"added": len(added), "already_listed": len(have), "removed_from_queues": removed,
+            "queues_redrawn": len(redrawn)}
 
 
 class ItemPatch(BaseModel):
@@ -311,6 +396,7 @@ async def update_item(
     item = await db.get(HolidayItem, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Not on the list")
+    key, old_station = item.holiday, item.station_id
     if body.all_year is not None:
         item.all_year = body.all_year
     if body.every_station:
@@ -321,8 +407,13 @@ async def update_item(
             raise HTTPException(status_code=403, detail="You are not assigned to this station")
         item.station_id = body.station_id
     await db.commit()
-    return {"id": str(item.id), "station_id": str(item.station_id) if item.station_id else None,
-            "all_year": item.all_year}
+    new_station = item.station_id
+    out = {"id": str(item.id), "station_id": str(new_station) if new_station else None, "all_year": item.all_year}
+    if old_station != new_station:
+        await _redraw_for_items(db, key, None if old_station is None or new_station is None else old_station)
+        if old_station is not None and new_station is not None:
+            await _redraw_for_items(db, key, new_station)
+    return out
 
 
 @router.delete("/items/{item_id}")
@@ -334,8 +425,10 @@ async def remove_item(
     item = await db.get(HolidayItem, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Not on the list")
+    key, station_id = item.holiday, item.station_id
     await db.delete(item)
     await db.commit()
+    await _redraw_for_items(db, key, station_id)
     return {"removed": True}
 
 
