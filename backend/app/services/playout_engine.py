@@ -1502,10 +1502,15 @@ async def _apply_long_item_rule(db: AsyncSession, station, state: EngineState, n
         )
         .order_by(QueueEntry.preempt_at, QueueEntry.position)
     )
-    upcoming = [e for e in res.unique().scalars().all() if str(e.id) not in state.timed_sent]
+    upcoming = res.unique().scalars().all()
     if not upcoming:
         return
     timed = upcoming[0]
+    # Already handed to the engine: what was on air then was not a shiur, but one may have
+    # started since (a story that went on air 20 s before the hour was cut with 33 minutes
+    # left and never resumed, simulator 2026-11-19). Only the pause applies from here on:
+    # the engine holds the item at its time, so it can no longer wait or move.
+    handed = str(timed.id) in state.timed_sent
     res = await db.execute(
         select(QueueEntry)
         .options(joinedload(QueueEntry.asset))
@@ -1525,6 +1530,8 @@ async def _apply_long_item_rule(db: AsyncSession, station, state: EngineState, n
     state.long_done.add(key)
 
     rule = long_items.policy(station)
+    if handed and rule != "pause":
+        return
     if rule == "wait" and current.preempt_at is not None and not is_soft_timed(current):
         # The shiur itself is in the engine's timed lane (part of an earlier hard block):
         # a soft group would go to the music lane, which only takes over after the

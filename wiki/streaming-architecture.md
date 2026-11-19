@@ -178,6 +178,7 @@ Not tested: real Icecast listeners at scale, real iPhone Safari on the stream.
 - `/next` now returns `seconds`. For an item under 12 s (station IDs, time checks, sponsor tags) the engine fetches and downloads the item after it at once, in a thread, and adds it to the main lane. Before, the follow-up was asked only when the short item started, and a download longer than the item played emergency music (Jerusalem 03:46:43Z and 04:00:13Z).
 - If the follow-up is still downloading when the short item ends, the hold lane gives quiet (at most 6 s after the hand-over, `handed_loading()`) instead of emergency music. The harness case `short_item_before_slow_file` (2 s and 9 s items, 4 s download) checks it.
 - Emergency copies are named after the asset (`<asset id>.mp3`), so the folder holds one copy per item.
+- A shiur or story that starts after the time check was handed to the engine (in the last 45 s before it) is still paused and resumed: the pause rule looks at what is on air until the item's second, not only at hand-over (simulator, Stories 11:00, cut with 33 min left).
 - Engine restart during a shiur: the first `/next` after a fresh start queues a resume entry at the point it reached (`_resume_after_restart`), so the shiur carries on instead of being lost. Timed items the engine missed raise one alert per pass, not one each.
 
 ## Old path

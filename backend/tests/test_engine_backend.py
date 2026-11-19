@@ -982,6 +982,36 @@ async def test_long_item_rule_runs_once_per_shiur_and_time_check(client, db_sess
 
 
 @pytest.mark.asyncio
+async def test_a_shiur_that_starts_after_the_time_check_was_handed_over_still_resumes(client, db_session, eng):
+    """Simulator 2026-11-19 (All Day Stories, 11:00): the time check was handed to the
+    engine while a song was on air, so the pause rule had nothing to pause. A story
+    started in the seconds before the hour and was cut with 33 minutes left, never to
+    resume. The rule looks again at what is on air until the time check's second."""
+    station, _, engine, _ = eng
+    st = await db_session.get(Station, station.id)
+    st.automation_config = {"timed_during_long_items": "pause"}
+    song = await _add(db_session, station, title="Song", duration=200.0, kind="music", position=0)
+    shiur = await _add(db_session, station, title="Mussaf", duration=2000.0, kind="shiur", position=1)
+    await _next(client, station)
+    await _on_air(client, station, song.id)
+    clock = await _add(db_session, station, title="Time", duration=8.0, kind="time", position=50,
+                       timing_mode="hard", preempt_at=datetime.now(UTC) + timedelta(seconds=30))
+    await playout_engine.tick(db_session, st)
+    assert [c["id"] for c in engine.timed()] == [str(clock.id)]
+    # The story goes on air 20 s before the hour, after the hand-over
+    await _next(client, station, given=str(song.id))
+    await _on_air(client, station, shiur.id)
+    await playout_engine.tick(db_session, st)
+    pending = (await db_session.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station.id, QueueEntry.status == "pending")
+        .execution_options(populate_existing=True)
+    )).scalars().all()
+    assert len([e for e in pending if e.asset_id == shiur.asset_id]) == 1
+    # Handed over once only
+    assert [c["id"] for c in engine.timed()] == [str(clock.id)]
+
+
+@pytest.mark.asyncio
 async def test_a_failed_long_item_rule_still_hands_over_the_time_check(client, db_session, eng, monkeypatch):
     """F-ENGINE2-22/24: a database error inside the long-item rule left the session failed,
     so the rest of the tick (handing the time check to the engine) failed too. The tick
