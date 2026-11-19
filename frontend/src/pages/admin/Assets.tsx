@@ -14,6 +14,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { isManager } from '../../auth/access';
 import { veryQuietBy } from '../../lib/loudness';
 import { useEscape } from '../../hooks/useEscape';
+import { useNavState } from '../../hooks/useNavState';
 
 const EXPORT_FORMATS = ['original', 'mp2', 'mp3', 'wav', 'flac', 'ogg', 'aac'] as const;
 const PAGE_SIZE_OPTIONS = [50, 100, 200] as const;
@@ -219,18 +220,18 @@ export default function Assets() {
   const [gapOver, setGapOver] = useState(2);
   const [keepGap, setKeepGap] = useState(0.75);
 
-  // Per-field search state
-  const [titleSearch, setTitleSearch] = useState('');
-  const [artistSearch, setArtistSearch] = useState('');
-  const [albumSearch, setAlbumSearch] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
-  const [durationMin, setDurationMin] = useState('');
-  const [durationMax, setDurationMax] = useState('');
+  // Per-field search state, kept with this visit: Back from an item finds the same search (useNavState)
+  const [titleSearch, setTitleSearch] = useNavState('titleSearch', '');
+  const [artistSearch, setArtistSearch] = useNavState('artistSearch', '');
+  const [albumSearch, setAlbumSearch] = useNavState('albumSearch', '');
+  const [categoryFilter, setCategoryFilter] = useNavState('categoryFilter', '');
+  const [typeFilter, setTypeFilter] = useNavState('typeFilter', '');
+  const [durationMin, setDurationMin] = useNavState('durationMin', '');
+  const [durationMax, setDurationMax] = useNavState('durationMax', '');
 
   // Pagination
-  const [pageSize, setPageSize] = useState<number>(50);
-  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useNavState<number>('pageSize', 50);
+  const [page, setPage] = useNavState<number>('page', 0);
 
   // Bulk category picker
   const [showBulkCategory, setShowBulkCategory] = useState(false);
@@ -256,7 +257,15 @@ export default function Assets() {
   const debouncedDurMax = useDebounce(durationMax, 300);
 
   // Reset page and selectAllFiltered when filters change
-  useEffect(() => { setPage(0); setSelectAllFiltered(false); }, [debouncedTitle, debouncedArtist, debouncedAlbum, categoryFilter, typeFilter, debouncedDurMin, debouncedDurMax]);
+  // Not on first draw: a page kept for Back (useNavState) must survive opening the screen.
+  const filtersSeen = useRef<string | null>(null);
+  useEffect(() => {
+    const now = JSON.stringify([debouncedTitle, debouncedArtist, debouncedAlbum, categoryFilter, typeFilter, debouncedDurMin, debouncedDurMax]);
+    const before = filtersSeen.current;
+    filtersSeen.current = now;
+    if (before === null || before === now) return;
+    setPage(0); setSelectAllFiltered(false);
+  }, [debouncedTitle, debouncedArtist, debouncedAlbum, categoryFilter, typeFilter, debouncedDurMin, debouncedDurMax, setPage]);
 
   // Poll auto-trim job status
   useEffect(() => {
@@ -308,7 +317,7 @@ export default function Assets() {
     setDurationMin('');
     setDurationMax('');
     setPage(0);
-  }, []);
+  }, [setAlbumSearch, setArtistSearch, setCategoryFilter, setDurationMax, setDurationMin, setPage, setTitleSearch, setTypeFilter]);
 
   const realAssets = useMemo(() => assets.filter((a: Asset) => hasRealAudio(a.file_path)), [assets]);
 

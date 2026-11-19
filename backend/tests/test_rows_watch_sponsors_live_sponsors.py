@@ -71,16 +71,15 @@ def test_same_sponsor_twice_goes_to_different_blocks_when_there_are_some():
     assert len(times) == 2 and times[0] != times[1]
 
 
-@pytest.mark.xfail(strict=True, reason="found 2026-11-19: with one block, a sponsor's two plays take "
-                   "seats 0 and 1 and air back to back although another sponsorship could sit between")
 def test_same_sponsor_is_not_back_to_back_inside_one_block():
-    """V3-46: with only one block that evening, one sponsor's two plays are not side by
-    side when another sponsorship can go between them."""
+    """V3-46: with only one block that evening, one sponsor's second play has no place
+    20 minutes from its first, so it is left out (and warned about) rather than aired
+    twice in the same break (Shmuel 2026-11-18: never one sponsor twice within 20 min)."""
     busy = _spot("busy", plays=2)
     placed, unplaced = plan_spots([busy, _spot("other")], NY, DAY, 1, breaks=[_break(DAY, 19, places=10)])
-    names = [n for _, n in _order(placed)]
-    assert len(names) == 3
-    assert all(x != y for x, y in zip(names, names[1:])), names
+    names = sorted(n for _, n in _order(placed))
+    assert names == ["busy", "other"], names
+    assert [u.schedule.name for u in unplaced] == ["busy"]
 
 
 # ── V3-47: every song blocked by the repeat rules ────────────────────────────
