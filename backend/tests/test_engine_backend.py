@@ -2042,3 +2042,52 @@ async def test_the_paused_story_still_resumes_after_a_sponsorship_held_for_the_s
     assert (await _fresh(db_session, uuid.UUID(resume))).status == "pending"
     await _on_air(client, station, resume)
     assert (await _fresh(db_session, uuid.UUID(resume))).status == "playing"
+
+
+@pytest.mark.asyncio
+async def test_a_held_station_id_is_taken_back_when_a_break_comes_due(client, db_session, eng):
+    """Main 2026-11-19: Short 03 was handed out for after Hashomayim, the engine fetched the
+    next song at once (the ID is 1.9 s) and played that song first, keeping the ID. The :45
+    sponsorships came due during that song and the ID aired right before them. The tick
+    now takes back an ID the engine holds once the guard would refuse it."""
+    station, entries, engine, _ = eng
+    station.automation_config = {**(station.automation_config or {}), "station_ids": {"enabled": True}}
+    jingle = Asset(id=uuid.uuid4(), title="Station ID - Short - 03", duration=1.88, asset_type="jingle",
+                   category="station_id", file_path="https://cdn.example.com/audio/id.mp3")
+    db_session.add(jingle)
+    await db_session.flush()
+    for e in entries[1:]:
+        e.position += 1
+    the_id = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=jingle.id, position=2,
+                        status="pending", source="auto")
+    db_session.add(the_id)
+    await db_session.commit()
+
+    first = (await _next(client, station)).json()
+    assert first["entry_id"] == str(entries[0].id)
+    await _on_air(client, station, entries[0].id)
+    # the ID is handed out (no break near), then at once the song after it
+    assert (await _next(client, station, given=f"{entries[0].id}")).json()["entry_id"] == str(the_id.id)
+    after = (await _next(client, station, given=f"{the_id.id},{entries[0].id}")).json()["entry_id"]
+    assert after == str(entries[1].id)
+    # the engine plays the song first and keeps the ID
+    await _on_air(client, station, entries[1].id)
+    state = playout_engine.get_state(station.id)
+    assert str(the_id.id) in state.given
+    # a soft :45 group comes due 10 s before that song ends
+    sponsor = Asset(id=uuid.uuid4(), title="TEST SPONSOR", duration=28.0, asset_type="spot",
+                    file_path="https://cdn.example.com/audio/sp.mp3")
+    db_session.add(sponsor)
+    await db_session.flush()
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=sponsor.id, position=9,
+                              status="pending", source="block", timing_mode="soft",
+                              preempt_at=datetime.now(UTC) + timedelta(seconds=170)))
+    await db_session.commit()
+    sent_before = len(engine.paths())
+    await playout_engine.tick(db_session, station)
+    assert "/flush" in engine.paths()[sent_before:]
+    # asked again, the engine is not given the ID next to the break, and the ID is not
+    # closed as aired
+    nxt = (await _next(client, station, given=f"{entries[1].id},{the_id.id},{entries[0].id}")).json()
+    assert nxt["entry_id"] not in (str(the_id.id), None)
+    assert (await _fresh(db_session, the_id.id)).status == "pending"
