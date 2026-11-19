@@ -63,4 +63,17 @@ await p.getByTestId('book-sponsorship').getByLabel('Client').waitFor();
 await p.keyboard.press('Escape'); await p.waitForTimeout(300);
 ok(!(await p.getByTestId('book-sponsorship').count()), 'Esc did not close');
 ok(!p.url().includes('book='), 'url keeps book= after close');
+// Record Spots: "Book this spot" on an approved recording opens the window with that spot chosen
+await p.goto(`${BASE}/admin/spot-recordings`);
+const bookThis = p.getByRole('link', { name: 'Book this spot' }).first();
+if (await bookThis.waitFor({ timeout: 8000 }).then(() => true, () => false)) {
+  await bookThis.click();
+  const dlg = p.getByTestId('book-sponsorship'); await dlg.waitFor();
+  const chosen = dlg.getByTestId('step-spot').locator('button[aria-pressed=true]');
+  ok(await chosen.first().waitFor({ timeout: 8000 }).then(() => true, () => false), 'Book this spot: the spot is not chosen in the window');
+  await dlg.getByRole('button', { name: 'Next ›' }).click();
+  ok(await dlg.getByTestId('step-days').waitFor({ timeout: 3000 }).then(() => true, () => false), 'Book this spot: Next did not move on');
+  await dlg.getByRole('button', { name: 'Close' }).click();
+  ok(!/book=|asset=/.test(p.url()), `Book this spot: address keeps the booking after close (${p.url()})`);
+} else console.log('note: no approved recording here, Book this spot not checked');
 await b.close(); console.log(fails.length? fails : 'all ok'); process.exit(fails.length?1:0);

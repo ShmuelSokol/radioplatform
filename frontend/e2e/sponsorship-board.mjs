@@ -18,6 +18,13 @@ for (const s of stations) {
   const n = room.cells.reduce((a, c) => a + c.booked, 0);
   if (n > most) { most = n; station = s; }
 }
+// A client with a spot ready to air, for the booking window
+let withSpot = null;
+for (const c of (await (await fetch(`${API}/sponsors/clients`, { headers: H })).json())) {
+  const acc = await (await fetch(`${API}/sponsors/${c.id}/account`, { headers: H })).json();
+  if ((acc.spots ?? []).some((x) => x.asset_id && x.stage !== 'rejected' && !/stand-?in/i.test(x.title))) { withSpot = c; break; }
+}
+if (!withSpot) { console.log('no client with a spot ready to air'); process.exit(1); }
 const fails = []; const ok = (c, m) => { if (!c) { fails.push(m); console.log('FAIL', m); } };
 const b = await chromium.launch();
 for (const [name, dev] of [['desktop', { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 }], ['iphone', devices['iPhone 13']]]) {
@@ -45,7 +52,25 @@ for (const [name, dev] of [['desktop', { viewport: { width: 1440, height: 900 },
   if (await book.count()) {
     await book.click();
     const dlg = p.getByTestId('book-sponsorship'); await dlg.waitFor();
+    // through to the time slots: the tapped slot is ticked and the usual week (Sunday to Friday) is chosen
+    const slotKey = (await target.getAttribute('data-cell')).split('|')[1];
+    await dlg.getByLabel('Client').selectOption(withSpot.id);
+    const spot = dlg.getByTestId('step-spot').locator('button[aria-pressed]').first();
+    await spot.waitFor(); await spot.click();
+    await dlg.getByRole('button', { name: 'Next ›' }).click();
+    await dlg.getByTestId('step-days').waitFor();
+    const days = await dlg.getByTestId('step-days').locator('button[aria-pressed=true]').allTextContents();
+    ok(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sun'].every((d) => days.includes(d)), `${name}: days chosen are ${days}`);
+    ok(await dlg.getByLabel('Station').inputValue() === String(station.id), `${name}: the board's station is not chosen`);
+    await dlg.getByRole('button', { name: 'Next ›' }).click();
+    await dlg.getByTestId('step-slots').waitFor();
+    const ticked = await dlg.locator('[data-slot][aria-pressed=true]').evaluateAll((els) => els.map((e) => e.dataset.slot));
+    ok(ticked.length === 1 && ticked[0] === slotKey, `${name}: slots ticked ${ticked}, tapped ${slotKey}`);
+    // a click beside the window keeps the half-made booking; Esc closes it
+    await p.mouse.click(2, 2);
+    ok(await dlg.isVisible(), `${name}: a click beside the window closed a half-made booking`);
     await p.keyboard.press('Escape');
+    ok(await dlg.waitFor({ state: 'hidden', timeout: 3000 }).then(() => true, () => false), `${name}: Esc did not close the window`);
   }
   await p.getByRole('button', { name: 'Break settings' }).click();
   ok(await p.getByTestId('break-settings').waitFor({ timeout: 5000 }).then(() => true, () => false), `${name}: break settings did not open`);
@@ -54,6 +79,15 @@ for (const [name, dev] of [['desktop', { viewport: { width: 1440, height: 900 },
     await p.getByRole('button', { name: 'Next day' }).click();
     ok(await p.getByTestId('board-day').locator('[data-cell]').count() >= 6, 'iphone: next day empty');
   }
+  // Arriving from the menu on another page, the Back line names that page
+  await p.goto(`${BASE}/admin/alerts`);
+  await p.getByRole('heading', { level: 1 }).first().waitFor();
+  if (name === 'iphone') await p.getByRole('button', { name: /menu/i }).first().click();
+  else await p.getByRole('button', { name: /^Sponsors/ }).first().click();
+  await p.getByRole('link', { name: 'Sponsorship board' }).first().click();
+  await p.getByTestId(name === 'desktop' ? 'board-grid' : 'board-day').waitFor();
+  const backLine = (await p.getByRole('link', { name: /Back to/ }).or(p.getByRole('button', { name: /Back to/ })).first().textContent()).trim();
+  ok(/Alerts/.test(backLine), `${name}: Back line after coming from Alerts says "${backLine}"`);
   ok(!errs.length, `${name}: page errors ${errs}`);
   await ctx.close();
 }
