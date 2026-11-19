@@ -57,6 +57,8 @@ PUBLIC_WRITES = {
     ("POST", "/song-requests"),
     ("POST", "/playout/{station_id}/started"),
     ("POST", "/playout/{station_id}/started-batch"),  # playout token: a local FM box's kept reports
+    ("POST", "/playout/{station_id}/box-upload"),  # playout token: a recording loaded at the FM box
+    ("POST", "/playout/{station_id}/box-changes"),  # playout token: the FM box control room's changes
     ("POST", "/playout/{station_id}/hello"),
     ("POST", "/playout/{station_id}/commands/poll"),
     ("POST", "/playout/{station_id}/alert"),  # playout token
