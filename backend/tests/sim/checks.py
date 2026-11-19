@@ -487,6 +487,11 @@ def _sunset(tz_name: str, day):
     return sun(loc.observer, date=day, tzinfo=ZoneInfo(tz_name))["sunset"]
 
 
+CUT = "Shabbos/Yom Tov: no spoken item cut by candle lighting"
+SPOKEN_KINDS = {"spot", "jingle", "sweeper", "station_id", "time", "weather", "psa", "announcement",
+                "zmanim", "sponsorship", "promo"}
+
+
 def shabbos_silence(res: Result, ctx: Context):
     """Shabbos and Yom Tov (Shmuel 2026-11-19): the audio fades to the 5-minute silence
     item at candle lighting, only silence airs (on repeat) until 72 minutes after
@@ -496,6 +501,7 @@ def shabbos_silence(res: Result, ctx: Context):
     check = "Shabbos/Yom Tov: silence from candle lighting to 72 min after shekia"
     timing = "Shabbos/Yom Tov window matches candle lighting and shekia + 72"
     res.checks_run.setdefault(check, 0)
+    res.checks_run.setdefault(CUT, 0)
     res.checks_run.setdefault(timing, 0)
     start, end = ctx.window()
     for w in ctx.sim.blackouts:
@@ -542,6 +548,16 @@ def shabbos_silence(res: Result, ctx: Context):
                      and not (after_id and r.asset_id == str(after_id) and abs(r.start - ws) <= ON_TIME_SECONDS)]
             for r in leaks[:5]:
                 _add(res, check, sid, r.local_start, f"{r.label()} on air during {w['reason']}")
+            if start < ws < end - 60:
+                # A spoken item (sponsorship, ID, time, weather) is never cut mid-sentence
+                # by candle lighting: it is not started when it would not finish (music just
+                # fades). Sim 2026-11-19: TEST SPONSOR 29 cut 19 s into 22 s on Main.
+                _count(res, CUT)
+                for r in rows:
+                    if (r.kind in SPOKEN_KINDS and r.start < ws - 0.5 and abs(r.end - ws) <= 1.0
+                            and r.cut and not (after_id and r.asset_id == str(after_id))):
+                        _add(res, CUT, r, r.local_start,
+                             f"{r.title!r} cut by candle lighting after {r.seconds:.0f} s")
             emerg = [r for r in rows if r.lane == "emergency" and max(r.start, ws) + 1 < min(r.end, we)]
             for r in emerg[:3]:
                 _add(res, check, sid, r.local_start, f"emergency music during {w['reason']}")

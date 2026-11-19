@@ -190,3 +190,97 @@ async def test_sponsorships_wait_for_stories_on_all_day_stories(tmp_path):
     assert not sponsor_cuts, sponsor_cuts
     assert not result.failed("same sponsor never twice within 20 min"), _failing(result, "same sponsor never twice within 20 min")
     assert any(r.source == "ad_slot" for r in result.rows), "no sponsorship aired at all"
+
+
+SPOKEN_CUT = "Shabbos/Yom Tov: no spoken item cut by candle lighting"
+SHABBOS_IDS = {"main": "95358e09-1260-48d5-85b5-f851000773c0",
+               "jerusalem": "d0740efe-3f25-4067-96f8-d8bc84c64dc3",
+               "stories": "13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e"}
+
+
+def _short_shabbos(tmp_path, station: str, minutes: int):
+    """The export with this station's Shabbos shortened to `minutes` (the edges are what
+    is tested; a whole Shabbos takes an hour or more to run)."""
+    import json
+    from datetime import timedelta
+
+    data = json.loads(EXPORT.read_text())
+    for w in data["holiday_windows"]:
+        if SHABBOS_IDS[station] in ((w.get("affected_stations") or {}).get("station_ids") or []):
+            ws = datetime.fromisoformat(w["start_datetime"])
+            w["end_datetime"] = (ws + timedelta(minutes=minutes)).isoformat()
+            path = tmp_path / "export.json"
+            path.write_text(json.dumps(data))
+            return path, ws, ws + timedelta(minutes=minutes)
+    raise AssertionError(f"no Shabbos window for {station}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("station", ["main", "jerusalem", "stories"])
+async def test_nothing_from_erev_shabbos_airs_on_motzei_shabbos(tmp_path, station):
+    """Production queue read 2026-11-19 21:22Z: rows drawn for Friday afternoon (songs, a
+    shiur, a sponsorship) still waited ahead of the Shabbos silences, which are hard timed
+    and jump ahead of them at candle lighting; they would have aired first on Motzei
+    Shabbos (Main: TEST SPONSOR 50 and Erev Shabbos songs; Jerusalem: Yoma 9, 51 min).
+
+    Three minutes before candle lighting a song, a sponsorship and a shiur are put ahead of
+    the silences, as the queue had them. Through Shabbos (shortened to an hour) into the
+    first hour after it: none of what waited ahead of the silences airs after candle
+    lighting, programming is back within seconds of the window's end with something new,
+    and no spoken item is cut by candle lighting."""
+    from datetime import timedelta
+
+    from sqlalchemy import func, select, update
+
+    from app.models.asset import Asset
+    from app.models.queue_entry import QueueEntry
+
+    export, ws, we = _short_shabbos(tmp_path, station, 60)
+    sid = SHABBOS_IDS[station]
+    before: set[str] = set()
+
+    async def leftovers(sim):
+        async with sim.Session() as db:
+            silence = (await db.execute(select(Asset.id).where(Asset.asset_type == "silence").limit(1))).scalar()
+            first = (await db.execute(select(func.min(QueueEntry.position)).where(
+                QueueEntry.station_id == sid, QueueEntry.status == "pending",
+                QueueEntry.asset_id == silence))).scalar()
+            assert first is not None, "no silence queued three minutes before candle lighting"
+            picks = []
+            for kind, like in (("music", None), ("spot", "TEST SPONSOR%"), ("shiur", None)):
+                q = select(Asset.id).where(Asset.asset_type == kind)
+                if like:
+                    q = q.where(Asset.title.like(like))
+                aid = (await db.execute(q.order_by(Asset.title).limit(1))).scalar()
+                if aid is not None:
+                    picks.append(aid)
+            await db.execute(update(QueueEntry).where(
+                QueueEntry.station_id == sid, QueueEntry.status == "pending",
+                QueueEntry.position >= first).values(position=QueueEntry.position + len(picks)))
+            for i, aid in enumerate(picks):
+                db.add(QueueEntry(station_id=sid, asset_id=aid, position=first + i, status="pending",
+                                  source="auto"))
+            await db.commit()
+            rows = (await db.execute(select(QueueEntry.id).where(
+                QueueEntry.station_id == sid, QueueEntry.status == "pending",
+                QueueEntry.position < first + len(picks), QueueEntry.asset_id != silence,
+                # (rows timed for after the window, e.g. its time checks, are not leftovers)
+                (QueueEntry.preempt_at.is_(None)) | (QueueEntry.preempt_at < ws)))).scalars().all()
+            before.update(str(r) for r in rows)
+
+    start = ws - timedelta(minutes=25)
+    hours = (we - start).total_seconds() / 3600 + 1.0
+    _, result = await simulate(export, start, hours, [station], tmp_path,
+                               events=[(ws - timedelta(minutes=3), leftovers)])
+    print(result.report())
+    assert before, "nothing was waiting ahead of the silences"
+    rows = [r for r in result.rows if r.station == sid]
+    late = [r.label() for r in rows if r.entry_id in before and r.start > ws.timestamp() + 1]
+    assert not late, f"queued for before candle lighting, aired after it: {late}"
+    back = next((r for r in rows if r.kind != "silence" and r.lane != "emergency"
+                 and r.start > we.timestamp() - 1), None)
+    assert back is not None, "nothing aired after Shabbos"
+    assert back.start - we.timestamp() <= 5, f"back {back.start - we.timestamp():.0f} s late: {back.label()}"
+    for check in ("Shabbos/Yom Tov: silence from candle lighting to 72 min after shekia", SPOKEN_CUT):
+        assert result.checks_run[check] >= 1, check
+        assert not result.failed(check), _failing(result, check)
