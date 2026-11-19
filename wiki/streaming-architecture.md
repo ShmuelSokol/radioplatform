@@ -180,6 +180,7 @@ Not tested: real Icecast listeners at scale, real iPhone Safari on the stream.
 - Emergency copies are named after the asset (`<asset id>.mp3`), so the folder holds one copy per item.
 - A shiur or story that starts after the time check was handed to the engine (in the last 45 s before it) is still paused and resumed: the pause rule looks at what is on air until the item's second, not only at hand-over (simulator, Stories 11:00, cut with 33 min left).
 - Engine restart during a shiur: the first `/next` after a fresh start queues a resume entry at the point it reached (`_resume_after_restart`), so the shiur carries on instead of being lost. Timed items the engine missed raise one alert per pass, not one each.
+- Two timed groups close together (the 8:30 time check, then sponsorships 36 s later) each paused the Daf Yomi and each queued a resume entry; only one aired and the other sat in the queue. The pause rule now skips a shiur that already has a waiting resume entry (simulator, Motzaei Shabbos Oct 9 2027, Main and Jerusalem).
 
 ## One station first (2026-11-19)
 `KBR_RESTART_ONLY=<station id> bash setup.sh <both ids>` checks and installs the new script but restarts only the named engine; the other keeps the old script in memory until a later run without the setting (or its own restart). Always name every station in the first argument: one left out has its engine removed.
