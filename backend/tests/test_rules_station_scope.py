@@ -176,3 +176,53 @@ async def test_every_way_of_moving_gives_the_same_reminder(client, auth_headers,
     res = await client.post(_url(stories, "/move-up"), headers=auth_headers,
                             json={"entry_id": first, "new_position": 0})
     assert res.status_code == 200 and res.json()["warnings"] == []
+
+
+@pytest.mark.asyncio
+async def test_program_clock_says_what_really_fills_the_station(client, auth_headers, db_session):
+    """Program Clock, 2026-11-19: on Kol B'ramah Main it listed global rules ("News
+    Break", "Daf Yomi Slot") that Main never reads, while Main's music comes from its
+    schedule. /rules/station-use names the rules in use and where the fill comes from."""
+    own, _, _ = await _station_with_queue(db_session, name="Own rules")
+    bare, _, _ = await _station_with_queue(db_session, name="No rules")
+    g = _rule("Global shiurim", None)
+    mine = _rule("Music here", own, asset_type="music")
+    db_session.add_all([g, mine])
+    await db_session.commit()
+
+    res = await client.get(f"/api/v1/rules/station-use?station_id={own.id}", headers=auth_headers)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["fills_from"] == "rules" and body["rule_ids"] == [str(mine.id)]
+    assert body["sponsor_breaks"] is False
+    body = (await client.get(f"/api/v1/rules/station-use?station_id={bare.id}", headers=auth_headers)).json()
+    assert body["rule_ids"] == [str(g.id)]
+
+    own.automation_config = {"requests_only": True}
+    await db_session.commit()
+    body = (await client.get(f"/api/v1/rules/station-use?station_id={own.id}", headers=auth_headers)).json()
+    assert body["fills_from"] == "requests"
+
+    res = await client.get(f"/api/v1/rules/station-use?station_id={uuid.uuid4()}", headers=auth_headers)
+    assert res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_program_clock_station_with_schedule_playlists_fills_from_them(client, auth_headers, db_session):
+    from datetime import time
+
+    from app.models.playlist_template import PlaylistTemplate
+    from app.models.schedule import Schedule
+    from app.models.schedule_block import ScheduleBlock
+
+    station, _, _ = await _station_with_queue(db_session, name="Main")
+    tpl = PlaylistTemplate(id=uuid.uuid4(), name="Top 500 Hits", is_active=True)
+    sched = Schedule(id=uuid.uuid4(), station_id=station.id, name="Main Schedule", is_active=True)
+    db_session.add_all([tpl, sched])
+    await db_session.flush()
+    db_session.add(ScheduleBlock(id=uuid.uuid4(), schedule_id=sched.id, name="Morning Drive",
+                                 start_time=time(6), end_time=time(12), playlist_template_id=tpl.id))
+    db_session.add(_rule("Music here", station, asset_type="music"))
+    await db_session.commit()
+    body = (await client.get(f"/api/v1/rules/station-use?station_id={station.id}", headers=auth_headers)).json()
+    assert body["fills_from"] == "schedules"

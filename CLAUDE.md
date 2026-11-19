@@ -148,7 +148,7 @@ radioplatform/
 | controls | controls.py | /controls |
 | users | users.py | /users |
 | queue | queue.py | /stations/{id}/queue (operator actions in one call each: `skip?fade=hard\|fade\|soft`, `{entry_id}/skip-sponsorship` (skip or put back one coming sponsorship play; the row stays as `cancelled`), `fire-now`, `insert`, `loop`, `mix-over`, `panic`, `modes` (HS / Spots mode); see `wiki/operator-actions.md`, `wiki/station-modes.md`) |
-| rules | rules.py | /rules |
+| rules | rules.py | /rules (`GET /station-use?station_id=`: what really fills a station, schedules/requests/rules/any music, and whether its sponsorships use program-block sponsor places; for the Program Clock) |
 | schedules | schedules.py | /schedules |
 | now_playing | now_playing.py | /now-playing |
 | websocket | websocket.py | /ws |

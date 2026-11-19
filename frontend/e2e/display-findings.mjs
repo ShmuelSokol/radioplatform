@@ -129,9 +129,9 @@ try {
     const open = async (path, ready) => { await page.goto(`${BASE}${path}`); await page.getByText(ready).first().waitFor({ timeout: 15000 }); await sleep(250); };
 
     // 1 Program Clock
-    await open('/admin/program-clock', 'Ad Asset Title');
-    const adTitle = await page.locator('label:has-text("Ad Asset Title") + input').inputValue();
-    check(`${size}: 1 Program Clock "Ad Asset Title" has no placeholder sponsor as its default`, adTitle === '', `value "${adTitle}"`);
+    await open('/admin/program-clock', 'Sponsorship Minutes');
+    // The old "Ad Asset Title" box (a placeholder test sponsor, off on every station) is gone
+    check(`${size}: 1 Program Clock offers no placeholder sponsor title`, !(await page.getByText('Ad Asset Title').count()));
     check(`${size}: 1 no old spelling of the station on Program Clock`, !/Kol Bramah|Kol Berama/i.test(await bodyText(page)));
 
     // 2 Sponsors

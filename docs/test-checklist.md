@@ -56,7 +56,7 @@ action worked **and** the screen, console and network showed nothing a person wo
 - [x] L-18 The public station list shows Kol B'ramah Main first, the others after it in order | n.a. | covered: e2e/listener-pages.mjs::stations "Kol B'ramah Main is the first station in the list"
 - [x] L-19 On phones the staff skin never makes a control smaller than the size it sets for itself (it pulled 44 px tap targets down to 36 px) | n.a. | covered: e2e/modes-match.mjs "each result is a 44 px tap target"
 - [ ] L-20 Tables on the phone stay readable: no cell wrapping one word per line, action buttons in reach (Blackouts, Show Archives, Users, Rules, Manage Stations) | n.a. | covered: NOT COVERED (seen on contact sheets 2026-11-18)
-- [ ] L-21 No screen offers a placeholder or an old spelling as its default (Program Clock "Ad Asset Title" shows KOL BRAMAH TEST SPONSOR) | n.a. | covered: NOT COVERED
+- [x] L-21 No screen offers a placeholder or an old spelling as its default (Program Clock "Ad Asset Title" shows KOL BRAMAH TEST SPONSOR) | n.a. | covered: e2e/display-findings.mjs (2026-11-19: the Ad Asset Title box is gone from Program Clock)
 - [ ] L-22 The browser tests run somewhere on every change, so a failing check is seen (two had been failing on main unseen because these tests are not in CI) | n.a. | covered: NOT COVERED (decision: cost of running them in CI)
 - [x] L-23 control-room.mjs under the guard: its fake backend answers Panic as the server does (it answered nothing, which showed "Panic: undefined"), and the down station, Loop, Panic and the unplayable file are listed as provoked; the control room never shows "undefined" for a Panic answer without a message | covered: e2e/control-room.mjs, Dashboard.tsx doPanic
 - [x] L-24 admin-flows.mjs always prints the guard's findings, also when checks failed (it printed them only on an otherwise clean run); the weekly-block validation message is listed as provoked | covered: e2e/admin-flows.mjs
@@ -1634,6 +1634,9 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 - [x] F-CLOCK-2 Config: ad minutes toggles; station config save | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-CLOCK-2 ⚙ Automation: an ad minute toggles and is saved to the station
 - [x] F-CLOCK-3 New/Edit rule: name, type, asset type, genres, days, numbers, active; Save; Delete (confirm); Back | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-CLOCK-3 desktop: New Rule (name, type, asset type, hours, days, priority) creates; Edit updates; Delete (... (+1 more)
 - [x] F-CLOCK-4 dj/viewer view only | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-CLOCK-4 manager: no New Rule (rules are admin-only); the clock still shows (+2 more)
+- [ ] F-CLOCK-5 Day buttons use the station's day numbers (0 = Monday): a rule saved for Thu airs Thu and shows under Thu (was one day off: Sunday-first numbering) | sizes: both | n.a. | covered: NOT COVERED (fixed 2026-11-19 in ProgramClock.tsx DAYS)
+- [x] F-CLOCK-6 The hour list shows only the rules the station reads (its own, or the global ones when it has none), and a notice says when the station fills from its schedule, requests or any music instead (Main listed "News Break" and "Daf Yomi Slot" it never plays) | sizes: both | n.a. | covered: backend/tests/test_rules_station_scope.py::test_program_clock_says_what_really_fills_the_station, ::test_program_clock_station_with_schedule_playlists_fills_from_them
+- [ ] F-CLOCK-7 Requests Only Mode and Oldies Only Mode ask before switching on (one tap used to change what the whole station plays) | sizes: both | n.a. | covered: NOT COVERED
 
 ## Sponsor login (/sponsor/login)
 

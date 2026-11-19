@@ -37,6 +37,48 @@ async def list_rules(
     return RuleListResponse(rules=rules, total=total)
 
 
+@router.get("/station-use")
+async def station_use(
+    station_id: uuid.UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_staff),
+):
+    """What really fills one station, for the Program Clock.
+
+    fills_from: "requests" (Requests Only Mode), "schedules" (its schedule blocks have
+    playlists or songs: the rules are not read at all), "rules", or "any_music" (no
+    rule and no schedule playlist). rule_ids: the rules the fill would read (the
+    station's own, or the global ones when it has none). sponsor_breaks: sponsorships
+    go into program blocks' sponsor places, so the station's clock minutes are unused.
+    """
+    from app.models.station import Station
+    from app.services.playlist_generator_service import settings_for
+    from app.services.program_block_service import load_breaks
+    from app.services.queue_replenish_service import rules_for_station
+    from app.services.schedule_refresh_service import uses_block_playlists
+
+    station = await db.get(Station, station_id)
+    if station is None:
+        raise NotFoundError("Station not found")
+    config = station.automation_config or {}
+    rules = await rules_for_station(db, station_id)
+    if config.get("requests_only"):
+        fills_from = "requests"
+    elif await uses_block_playlists(db, station_id):
+        fills_from = "schedules"
+    elif settings_for(config).enabled or not rules:
+        fills_from = "any_music"
+    else:
+        fills_from = "rules"
+    now = datetime.now(timezone.utc)
+    breaks = await load_breaks(db, station, now, now + timedelta(days=1))
+    return {
+        "fills_from": fills_from,
+        "rule_ids": [str(r.id) for r in rules],
+        "sponsor_breaks": breaks is not None,
+    }
+
+
 @router.post("", response_model=RuleOut, status_code=201)
 async def create_rule(
     body: RuleCreate,

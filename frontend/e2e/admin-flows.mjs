@@ -3459,8 +3459,8 @@ section('program-clock', async () => {
       await page.goto(`${BASE}/admin/program-clock`);
       await page.locator('select', { has: page.locator(`option[value="${FX.station.id}"]`) }).first().selectOption(FX.station.id);
       await page.getByRole('button', { name: 'Tue', exact: true }).click();
-      await until(async () => (await page.getByText(/No rule — default fill|· p\d+/).count()) >= 24, '24 hour rows');
-      await page.getByText(/No rule — default fill|· p\d+/).nth(9).click();
+      await until(async () => (await page.getByText(/^No rule|· priority \d+/).count()) >= 24, '24 hour rows');
+      await page.getByText(/^No rule|· priority \d+/).nth(9).click();
       await page.getByRole('heading', { name: /New Rule|Edit Rule/ }).waitFor();
     }, page);
     await step(`F-CLOCK-3 ${view}: New Rule (name, type, asset type, hours, days, priority) creates; Edit updates; Delete (confirm); Cancel`, async () => {

@@ -1,4 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
+import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import apiClient from '../../api/client';
 import { rememberStation, stationToShow } from '../../lib/lastStation';
 import { useStations, useUpdateStation } from '../../hooks/useStations';
 import { useStationRules, useCreateRule, useUpdateRule, useDeleteRule } from '../../hooks/useRules';
@@ -6,7 +9,20 @@ import type { ScheduleRule, Station } from '../../types';
 import { useMayChange } from '../../hooks/useMayChange';
 import { useAuth } from '../../hooks/useAuth';
 
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+// Shown Sunday first; `code` is the day as the station stores it (0 = Monday ... 6 = Sunday,
+// Python's weekday()). Until 2026-11-19 this page used 0 = Sunday, so every rule showed one
+// day early and a day picked here saved the next day.
+const DAYS = [
+  { label: 'Sun', code: 6 }, { label: 'Mon', code: 0 }, { label: 'Tue', code: 1 }, { label: 'Wed', code: 2 },
+  { label: 'Thu', code: 3 }, { label: 'Fri', code: 4 }, { label: 'Sat', code: 5 },
+] as const;
+const todayCode = () => (new Date().getDay() + 6) % 7;
+
+interface StationUse {
+  fills_from: 'requests' | 'schedules' | 'rules' | 'any_music';
+  rule_ids: string[];
+  sponsor_breaks: boolean;
+}
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const ALL_MINUTES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
 const RULE_TYPES = ['daypart', 'rotation', 'interval', 'fixed_time'];
@@ -92,7 +108,7 @@ export default function ProgramClock() {
   const { data: stationData } = useStations();
   const stations = stationData?.stations ?? [];
   const [stationId, setStationId] = useState<string | null>(null);
-  const [selectedDay, setSelectedDay] = useState(() => new Date().getDay());
+  const [selectedDay, setSelectedDay] = useState(todayCode);
   const [panelMode, setPanelMode] = useState<PanelMode>('config');
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
   const [form, setForm] = useState<RuleFormData>(emptyForm());
@@ -106,7 +122,14 @@ export default function ProgramClock() {
     setStationId(stationToShow(stations));
   }
 
-  const { data: rulesData, isLoading: rulesLoading } = useStationRules(stationId);
+  const { data: rulesData, isLoading: rulesLoading, dataUpdatedAt: rulesAt } = useStationRules(stationId);
+  // What really fills this station: the rules shown here, or its schedule, or requests
+  const { data: use } = useQuery({
+    queryKey: ['rules-station-use', stationId, autoConfig.requests_only ?? false, rulesAt],
+    queryFn: async () => (await apiClient.get<StationUse>('/rules/station-use', { params: { station_id: stationId } })).data,
+    enabled: !!stationId,
+  });
+  const rulesUsed = use?.fills_from === 'rules';
   const createRule = useCreateRule();
   const updateRule = useUpdateRule();
   const deleteRule = useDeleteRule();
@@ -115,11 +138,17 @@ export default function ProgramClock() {
   // Filter rules by selected day
   const dayRules = useMemo(() => {
     if (!rulesData?.rules) return [];
+    // Only the rules the station reads: its own, or the global ones when it has none
+    // (the list API also returns the global ones for a station that has its own)
+    // (the same choice as the server's rules_for_station)
+    const own = rulesData.rules.filter((r: ScheduleRule) => r.station_id && String(r.station_id) === stationId);
+    const ownActive = own.some((r: ScheduleRule) => r.is_active);
     return rulesData.rules.filter((r: ScheduleRule) => {
+      if (ownActive && !own.includes(r)) return false;
       const days = r.days_of_week.split(',').map(Number);
       return days.includes(selectedDay);
     });
-  }, [rulesData, selectedDay]);
+  }, [rulesData, selectedDay, stationId]);
 
   // Build hour map: for each hour, find highest-priority rule
   const hourMap = useMemo(() => {
@@ -231,10 +260,11 @@ export default function ProgramClock() {
           </select>
           {/* Day tabs */}
           <div className="flex flex-wrap gap-1">
-            {DAYS.map((d, i) => (
+            {DAYS.map(({ label: d, code: i }) => (
               <button
                 key={d}
                 onClick={() => setSelectedDay(i)}
+                aria-pressed={i === selectedDay}
                 className={`px-2.5 py-1 text-xs rounded font-medium transition ${
                   i === selectedDay
                     ? 'bg-cyan-600 text-white'
@@ -248,6 +278,8 @@ export default function ProgramClock() {
         </div>
       </div>
 
+      <FillNotice use={use} stationName={station?.name ?? 'This station'} />
+
       {/* Legend */}
       <div className="flex flex-wrap gap-3 mb-4 text-[11px]">
         {ASSET_TYPES.map(t => (
@@ -255,8 +287,8 @@ export default function ProgramClock() {
             {t}
           </span>
         ))}
-        <span className="text-orange-400">◆ ad slot</span>
-        <span className="text-blue-400">⏰ announcement</span>
+        <span className="text-orange-400">◆ sponsorship minute</span>
+        <span className="text-blue-400">⏰ time check / weather</span>
       </div>
 
       {/* Main layout */}
@@ -266,7 +298,7 @@ export default function ProgramClock() {
           {rulesLoading ? (
             <div className="text-gray-500 text-center py-10">Loading rules...</div>
           ) : (
-            <div className="space-y-1">
+            <div className={`space-y-1 ${use && !rulesUsed ? 'opacity-60' : ''}`} data-testid="clock-hours">
               {HOURS.map(h => {
                 const rule = hourMap[h];
                 const at = rule?.asset_type ?? 'none';
@@ -287,25 +319,25 @@ export default function ProgramClock() {
 
                     {/* Content */}
                     <span className={`flex-1 text-sm font-medium truncate ${textClass}`}>
-                      {rule ? `${rule.name}` : 'No rule — default fill'}
+                      {rule ? `${rule.name}` : rulesUsed ? 'No rule: any song' : 'No rule'}
                     </span>
 
                     {/* Rule metadata */}
                     {rule && (
                       <span className="text-[10px] text-gray-500 flex-shrink-0">
-                        {rule.asset_type} · p{rule.priority}
+                        {rule.asset_type} · priority {rule.priority}
                       </span>
                     )}
 
                     {/* Markers */}
                     <div className="flex items-center gap-1 flex-shrink-0">
-                      {adMinutes.length > 0 && (
-                        <span className="text-orange-400 text-[10px]" title={`Ads at :${adMinutes.join(', :')}`}>
+                      {adMinutes.length > 0 && !use?.sponsor_breaks && (
+                        <span className="text-orange-400 text-[10px]" title={`Sponsorships at :${adMinutes.join(', :')}`}>
                           {adMinutes.map((_, i) => <span key={i}>◆</span>)}
                         </span>
                       )}
                       {(hourlyAnnouncement || weatherEnabled) && (
-                        <span className="text-blue-400 text-xs" title="Hourly announcement">⏰</span>
+                        <span className="text-blue-400 text-xs" title="Time check and weather on the hour">⏰</span>
                       )}
                     </div>
                   </button>
@@ -356,7 +388,16 @@ export default function ProgramClock() {
                       <input
                         type="checkbox"
                         checked={!!autoConfig[key]}
-                        onChange={e => handleSaveAutoConfig({ [key]: e.target.checked })}
+                        onChange={e => {
+                          const on = e.target.checked;
+                          if (on && key === 'requests_only' && !confirm(
+                            `Requests Only Mode: ${station?.name ?? 'the station'} will stop playing its schedule and play only listeners' song requests. Switch it on?`,
+                          )) return;
+                          if (on && key === 'oldies_only' && !confirm(
+                            `Oldies Only Mode: ${station?.name ?? 'the station'} will play only songs with a release date at least ${autoConfig.oldies_min_years ?? 10} years ago. Songs without a release date are left out. Switch it on?`,
+                          )) return;
+                          handleSaveAutoConfig({ [key]: on });
+                        }}
                         className="accent-cyan-500"
                       />
                       <span className="text-sm text-gray-300">{label}</span>
@@ -369,7 +410,7 @@ export default function ProgramClock() {
                     <label className="block text-xs text-gray-400 mb-1">Oldies Min Years</label>
                     <input
                       type="number"
-                      value={autoConfig.oldies_min_years ?? 5}
+                      value={autoConfig.oldies_min_years ?? 10}
                       onChange={e => handleSaveAutoConfig({ oldies_min_years: Number(e.target.value) })}
                       className="w-20 bg-[#0a0a1a] border border-[#2a2a5e] rounded px-2 py-1 text-sm text-white"
                     />
@@ -378,7 +419,12 @@ export default function ProgramClock() {
 
                 {/* Ad Slot Minutes */}
                 <div>
-                  <h4 className="text-xs font-bold text-orange-300 mb-2">Ad Slot Minutes</h4>
+                  <h4 className="text-xs font-bold text-orange-300 mb-1">Sponsorship Minutes</h4>
+                  <p className="text-xs text-gray-400 mb-2" data-testid="sponsor-minutes-note">
+                    {use?.sponsor_breaks
+                      ? <>Not used on this station: its sponsorships go into the sponsor places of its <Link to="/admin/program-blocks" className="underline">Program Blocks</Link>. Times are set in <Link to="/admin/spot-schedule" className="underline">Break settings</Link>.</>
+                      : 'Minutes of each hour where booked sponsorships air.'}
+                  </p>
                   <div className="flex flex-wrap gap-1.5">
                     {ALL_MINUTES.map(m => (
                       <button
@@ -396,17 +442,6 @@ export default function ProgramClock() {
                   </div>
                 </div>
 
-                {/* Ad Asset Title */}
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Ad Asset Title</label>
-                  <input
-                    type="text"
-                    value={autoConfig.ad_slot_asset_title ?? ''}
-                    onChange={e => handleSaveAutoConfig({ ad_slot_asset_title: e.target.value })}
-                    className="w-full bg-[#0a0a1a] border border-[#2a2a5e] rounded px-2 py-1 text-sm text-white"
-                    placeholder="Title of the sponsorship item (none chosen)"
-                  />
-                </div>
               </fieldset>
             )}
 
@@ -513,7 +548,7 @@ export default function ProgramClock() {
                 <div>
                   <label className="block text-xs text-gray-400 mb-1">Days of Week</label>
                   <div className="flex gap-1">
-                    {DAYS.map((d, i) => {
+                    {DAYS.map(({ label: d, code: i }) => {
                       const active = form.days_of_week.split(',').map(Number).includes(i);
                       return (
                         <button
@@ -617,6 +652,29 @@ export default function ProgramClock() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** One plain line on what really decides what plays on the chosen station. */
+function FillNotice({ use, stationName }: { use?: StationUse; stationName: string }) {
+  if (!use) return null;
+  const text: Record<StationUse['fills_from'], React.ReactNode> = {
+    schedules: <>
+      <b>{stationName} does not use these rules.</b> Its music comes from its schedule: change it in{' '}
+      <Link to="/admin/schedules" className="underline">Schedules</Link> (which playlist plays when) and{' '}
+      <Link to="/admin/playlists" className="underline">Playlists</Link>. Timed items at :00, :15, :30 and :45 are in{' '}
+      <Link to="/admin/program-blocks" className="underline">Program Blocks</Link>, sponsorships in{' '}
+      <Link to="/admin/spot-schedule" className="underline">Break settings</Link>. Only the Automation settings on the right still apply here.
+    </>,
+    requests: <><b>Requests Only Mode is on:</b> {stationName} plays only listeners' song requests, not these rules or its schedule.</>,
+    any_music: <><b>{stationName} has no rule and no schedule playlist</b>, so it plays any song from the library.</>,
+    rules: <>{stationName} fills its music from the rules below. The rule with the highest priority wins each hour. Tap an hour to see or change its rule.</>,
+  };
+  const warn = use.fills_from !== 'rules';
+  return (
+    <div role="note" data-testid="fill-notice" className={`mb-4 rounded border px-3 py-2 text-sm ${warn ? 'border-yellow-500 bg-yellow-900/40 text-yellow-100' : 'border-[#2a2a5e] bg-[#12123a] text-gray-300'}`}>
+      {text[use.fills_from]}
     </div>
   );
 }
