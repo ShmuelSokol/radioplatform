@@ -511,7 +511,10 @@ def schedule_timed(~uri, ~at) =
 end
 
 # ── Emergency lane: local files, then silence as the very last resort ────────
-emergency = playlist(id="emergency", mode="randomize", reload_mode="watch", emergency_dir)
+# Re-read every 10 minutes, not on every change to the folder: a song is copied into it
+# at each start (keep_for_emergency) and watching reloaded the playlist 4 times per song
+# on a 1 vCPU box, each reload showing as a new emergency track for an instant.
+emergency = playlist(id="emergency", mode="randomize", reload_mode="seconds", reload=600, emergency_dir)
 emergency = mksafe(emergency)
 
 # ── Hold lane: a moment of quiet just before a hard timed item ───────────────
@@ -790,29 +793,116 @@ def go_live() =
   end)
 end
 
-# ── Broadcast sound: gentle compression and a limiter on the whole output ────
-radio = compress(threshold=-14., ratio=3., attack=20., release=200., radio)
-# Brickwall limiter with look-ahead (FFmpeg alimiter): no peak gets past -3 dBFS, so
-# with the up to ~1 dB the MP3 encoder adds between samples, true peaks stay under
-# -2 dBFS. Liquidsoap's own limit() is a compressor with a 50 ms attack: peaks got
-# through it (true peaks of -0.6 dBFS on Jerusalem with threshold -2, 2026-11-17).
-def true_peak_limit(s) =
+# ── Broadcast sound: leveler, three-band compressor, limiter ────────────────
+# Shmuel 2026-11-19: "the best audio possible". Before this the output had only a gentle
+# compressor and a limiter that never touched it: Main measured -19.5 LUFS, items 6 LU
+# apart (songs -17.6, the spoken run after the 8 PM time check -24), peaks at -5.7 dBFS.
+# Now, the way a broadcast processor does it (measured on that same recording: -15.4
+# LUFS, items within 2 LU, true peaks under -1 dBFS; CPU about 1.5% of a core more):
+#   1. Leveler (AGC): rides the level slowly towards one loudness, so a quiet song, a
+#      soft-spoken sponsorship and a loud one come out alike. It stands still below
+#      -45 dB (pauses between words, the quiet before a timed item, fade-outs), so it
+#      never pumps up silence or hiss, and it never moves more than 10 dB down / 15 up.
+#   2. Three bands (below 150 Hz, 150 Hz to 4 kHz, above 4 kHz), each compressed on its
+#      own: the bass stays firm without pushing the voice down, the voice stays clear,
+#      the highs do not hiss or bite.
+#   3. Brickwall limiter with look-ahead (FFmpeg alimiter): no peak past -1.5 dBFS, so
+#      with what the MP3 encoder adds, true peaks stay around -1 dBFS. Liquidsoap's own
+#      limit() is a compressor with a 50 ms attack: peaks got through it (true peaks of
+#      -0.6 dBFS on Jerusalem with threshold -2, 2026-11-17).
+# Everything on air goes through it: songs, spoken items, the live host, alerts.
+# Per engine: KBR_PROCESSING=broadcast for this chain, light (the default, and the sound
+# before 2026-11-19: compressor -14 dB 3:1, limiter -3 dBFS) otherwise. setup.sh sets it
+# per station (KBR_BROADCAST_SOUND), so one station can go first; a change takes that
+# engine's restart.
+processing = environment.get(default="light", "KBR_PROCESSING")
+processing_target = float_of_string(environment.get(default="-14.", "KBR_PROCESSING_TARGET"))
+
+# Runs `build` (FFmpeg filters) over the whole output. An FFmpeg filter source counts as
+# fallible (it never stops while radio plays), and it stays that way: the outputs below
+# take a fallible source. It used to be wrapped in mksafe(), and with that the engine
+# could spin at 100% CPU at start and never play, depending on nothing more than the
+# number of definitions in this file: mksafe's switch asked the filter whether it was
+# ready before its input was set up, and the filter ran its inner clock forever (gdb,
+# 2026-11-18).
+def ffmpeg_chain(s, build) =
   def graph_of(graph) =
     let {audio = a} = source.tracks(ffmpeg.raw.encode.audio(%ffmpeg(%audio.raw), s))
     a = ffmpeg.filter.audio.input(graph, pass_metadata=true, a)
-    a = ffmpeg.filter.alimiter(graph, limit=0.708, attack=5., release=50., level=false, a)
+    a = build(graph, a)
     a = ffmpeg.filter.audio.output(graph, pass_metadata=true, a)
     source({audio = a, metadata = track.metadata(a), track_marks = track.track_marks(a)})
   end
   ffmpeg.raw.decode.audio(ffmpeg.filter.create(graph_of))
 end
-# An FFmpeg filter source counts as fallible (it never stops while radio plays), and it
-# stays that way: the outputs below take a fallible source. It used to be wrapped in
-# mksafe(), and with that the engine could spin at 100% CPU at start and never play,
-# depending on nothing more than the number of definitions in this file: mksafe's switch
-# asked the filter whether it was ready before its input was set up, and the filter
-# ran its inner clock forever (gdb, 2026-11-18).
-radio = true_peak_limit(radio)
+
+def band_compress(graph, band, threshold, ratio, attack, release, makeup) =
+  ffmpeg.filter.acompressor(graph, threshold=lin_of_dB(threshold), ratio=ratio,
+                            attack=attack, release=release, knee=4.,
+                            makeup=lin_of_dB(makeup), band)
+end
+
+# The leveler: Liquidsoap's normalize() (2.2), with one change. normalize() ends in a
+# plain amplify(), and amplify takes each track's liq_amplify over its own gain: the
+# leveler stood still and every item's level was applied twice (harness
+# broadcast_processing, 2026-11-19; the same trap as main_gain above). Here the gain is
+# only ever the leveler's (override=null()).
+def leveler(~target, ~up, ~down, ~window, ~gain_min, ~gain_max, ~threshold, s) =
+  s = rms.smooth(id="leveler_rms", duration=window, s)
+  level = s.rms
+  v = ref(1.)
+  frame = frame.duration()
+  gain_min = lin_of_dB(gain_min)
+  gain_max = lin_of_dB(gain_max)
+  target = lin_of_dB(target)
+  threshold = lin_of_dB(threshold)
+  def update() =
+    now = level()
+    # Below the threshold (a pause, the quiet before a timed item) the gain stands still
+    if now >= threshold then
+      speed = if v() * now <= target then up else down end
+      v := v() + (1. - exp(0. - frame / speed)) * ((target / now) - v())
+      v := max(gain_min, min(gain_max, v()))
+    end
+  end
+  s = source.on_frame(s, update)
+  amplify(id="leveler", override=null(), {v()}, s)
+end
+
+def broadcast_filters(graph, a) =
+  begin
+    # Rumble and DC out first: they eat headroom nobody hears
+    a = ffmpeg.filter.highpass(graph, f=35., poles=2, a)
+    # Linkwitz-Riley (4th order) bands add back up flat
+    let (bands, _) = ffmpeg.filter.acrossover(graph, split="150 4000", order=1, a)
+    low = band_compress(graph, list.nth(bands, 0), -24., 3., 40., 350., 3.)
+    mid = band_compress(graph, list.nth(bands, 1), -22., 2.5, 12., 220., 2.)
+    high = band_compress(graph, list.nth(bands, 2), -26., 2.5, 5., 150., 3.)
+    a = ffmpeg.filter.amix(graph, inputs=3, normalize=false, [low, mid, high], [])
+    ffmpeg.filter.alimiter(graph, limit=lin_of_dB(-1.5), attack=5., release=60., level=false, a)
+  end
+end
+
+def broadcast_sound(s) =
+  s = leveler(target=processing_target, up=2., down=1., window=1.,
+              gain_min=-10., gain_max=15., threshold=-45., s)
+  # amix makes new frames, so the titles do not pass the bands: Icecast showed no title
+  # (harness broadcast_processing, 2026-11-19). They are put back on the far side as
+  # they go in. (The start reports to the backend are taken before all this, from
+  # `program`.)
+  processed = insert_metadata(id="processed", ffmpeg_chain(s, broadcast_filters))
+  s.on_metadata(fun (m) -> processed.insert_metadata(m))
+  processed
+end
+
+def light_sound(s) =
+  s = compress(threshold=-14., ratio=3., attack=20., release=200., s)
+  ffmpeg_chain(s, fun (graph, a) ->
+    ffmpeg.filter.alimiter(graph, limit=0.708, attack=5., release=50., level=false, a))
+end
+
+log.important("sound: #{processing} processing" ^ (if processing == "light" then "" else ", leveler target #{processing_target} dB" end))
+radio = if processing == "light" then light_sound(radio) else broadcast_sound(radio) end
 
 # ── Tell the backend what really went on air ─────────────────────────────────
 def report_to_backend(entry, lane, title) =
@@ -846,6 +936,9 @@ def keep_for_emergency(played, asset) =
 end
 
 
+# An emergency-lane start waits this long before it is reported (see send_started)
+emergency_confirm = 1.5
+emergency_seq = ref(0)
 def send_started(m) =
   entry = m["kbr_entry"]
   # No entry: an emergency file, or the quiet held just before a hard timed item
@@ -938,7 +1031,28 @@ def send_started(m) =
       live_release := 0.
       start_quiet_until := 0.
     end
-    report_to_backend(entry, lane, m["title"])
+    if lane == "emergency" then
+      # Reported only if the emergency music is still on air a moment later, with the
+      # music and timed lanes still empty. The emergency playlist reloading (a song
+      # copied into its folder at each start) showed as an emergency track for an
+      # instant right after a song started: the backend was told "emergency", the song
+      # came back as "not a new start", and the site showed nothing on air for the whole
+      # song with false alerts (Main 10:30:37Z and 16:30Z 2026-11-19).
+      seq = emergency_seq() + 1
+      emergency_seq := seq
+      title = m["title"]
+      def confirm() =
+        if emergency_seq() == seq and on_air_lane() == "emergency" and not main.is_ready() and not timed.is_ready() then
+          report_to_backend("", "emergency", title)
+        else
+          log.important("started: a moment of the emergency lane, the music is back; not reported")
+        end
+      end
+      thread.run(delay=emergency_confirm, confirm)
+    else
+      emergency_seq := emergency_seq() + 1
+      report_to_backend(entry, lane, m["title"])
+    end
     if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"], m["kbr_asset"]) end
   end
 end
@@ -1226,6 +1340,42 @@ if alsa_device != "" then
     end)
   end
 end
+
+# ── Level meters for the control room ────────────────────────────────────────
+# The control room's LEFT/RIGHT meters show what is really on air, on every screen,
+# whether or not that screen plays the sound (Shmuel, 2026-11-19: "It should always be
+# showing the levels, even if you didn't hit listen"). The level of the finished signal
+# (after all the sound processing, exactly as Icecast and HLS get it) is taken every 0.1 s and sent
+# to the backend once a second, ten values per side (RMS, 0 to 1); the backend passes
+# them to the station's pages (POST /playout/{station}/levels). Dead air shows as flat
+# meters, which is the point. A lost post is simply skipped: the next second follows.
+radio = rms.stereo(duration=0.1, radio)
+meter_l = ref([])
+meter_r = ref([])
+def meter_round(x) = float_of_int(int_of_float(x * 10000.)) / 10000. end
+thread.run.recurrent(delay=0.1, fun () -> begin
+  let (l, r) = radio.rms()
+  if list.length(meter_l()) < 30 then
+    meter_l := list.append(meter_l(), [meter_round(l)])
+    meter_r := list.append(meter_r(), [meter_round(r)])
+  end
+  0.1
+end)
+thread.run.recurrent(fast=false, delay=1., fun () -> begin
+  ls = meter_l()
+  rs = meter_r()
+  meter_l := []
+  meter_r := []
+  if ls != [] then
+    try
+      ignore(http.post(headers=auth_headers, timeout=2., data=json.stringify({l=ls, r=rs, step=0.1, at=time()}),
+                       "#{backend_url}/playout/#{station_id}/levels"))
+    catch _ do
+      ()
+    end
+  end
+  1.
+end)
 
 # ── One MP3 encode for both outputs ──────────────────────────────────────────
 # Best MP3 quality: 320 kbps, 44.1 kHz stereo, slowest and best encoder setting

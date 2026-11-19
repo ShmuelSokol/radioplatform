@@ -40,6 +40,10 @@
 .qn-btn:focus-visible { outline: 1px dotted #000; outline-offset: -4px; }
 /* The Listen button (sound on this device): the one control to find first */
 .qn-btn.cr-listen, .qn-btn.cr-listen:hover:not(:disabled) { background: #ffff80; }
+/* The station is on air and this device is silent (or the browser stopped the sound) */
+.qn-btn.cr-listen.cr-listen-alert, .qn-btn.cr-listen.cr-listen-alert:hover:not(:disabled) { background: #ffb0a0; animation: cr-listen-pulse 1.6s ease-in-out infinite; }
+@keyframes cr-listen-pulse { 50% { background: #ffff80; } }
+@media (prefers-reduced-motion: reduce) { .qn-btn.cr-listen.cr-listen-alert { animation: none; } }
 
 /* Sunken field (inputs, selects, panels) */
 .qn-field {

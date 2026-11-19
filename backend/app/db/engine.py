@@ -22,6 +22,18 @@ PING_AFTER_IDLE_SECONDS = 15.0
 CONNECT_RETRY_WAITS = (0.3, 0.6, 1.2, 2.4, 3.5)
 SLOW_CONNECT_SECONDS = 1.0
 
+# A pooled connection whose link died without a word (no reset, packets simply
+# lost) left every call on it waiting until the kernel gave up on the socket: about
+# 15.6 minutes. On 2026-11-19 08:23-09:22Z engine start reports, queue reads and
+# even GET /asset-types hung 939 s each, and both engine stations showed the wrong
+# item with false "engine did not move on" alerts meanwhile. Nothing the app sends
+# legitimately takes a minute (VACUUM and index builds use their own connections),
+# so a call gets COMMAND_TIMEOUT_SECONDS and the idle-check ping PING_TIMEOUT_SECONDS;
+# a connection that ran out of time is thrown away, never handed out again.
+# Client-side timers, not server settings, so the pooler is not involved.
+COMMAND_TIMEOUT_SECONDS = 60.0
+PING_TIMEOUT_SECONDS = 5.0
+
 _POSTGRES = settings.DATABASE_URL.startswith("postgresql")
 
 
@@ -71,6 +83,13 @@ async def _connect(*args, **kwargs):
 POOL_SIZE = 10
 MAX_OVERFLOW = 4
 
+def connect_args(postgres: bool) -> dict:
+    args = {"statement_cache_size": 0, "prepared_statement_cache_size": 0}
+    if postgres:
+        args |= {"async_creator_fn": _connect, "command_timeout": COMMAND_TIMEOUT_SECONDS}
+    return args
+
+
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.APP_DEBUG,
@@ -81,11 +100,7 @@ engine = create_async_engine(
     # Reuse the most recently used connection so it stays warm and the rest age out.
     pool_use_lifo=True,
     **({"pool_size": POOL_SIZE, "max_overflow": MAX_OVERFLOW} if _POSTGRES else {}),
-    connect_args={
-        "statement_cache_size": 0,
-        "prepared_statement_cache_size": 0,
-        **({"async_creator_fn": _connect} if _POSTGRES else {}),
-    },
+    connect_args=connect_args(_POSTGRES),
 )
 
 
@@ -118,10 +133,35 @@ def _ping_if_idle(dbapi_conn, connection_record, connection_proxy):
     if idle_since is None or time.monotonic() - idle_since < PING_AFTER_IDLE_SECONDS:
         return
     try:
-        dbapi_conn.ping()
+        _ping(dbapi_conn)
     except Exception as e:
         # Tells the pool to throw this connection away and hand out a fresh one.
+        logger.warning("Stale pooled database connection thrown away (%s); %s", type(e).__name__, pool_state())
         raise DisconnectionError("stale pooled connection") from e
+
+
+def _ping(dbapi_conn) -> None:
+    """One round trip, PING_TIMEOUT_SECONDS at most. The driver's own ping has no
+    time limit of its own: on a link that died silently it waited 15.6 minutes."""
+    driver = getattr(dbapi_conn, "driver_connection", None)
+    if driver is None or not hasattr(driver, "fetchval"):
+        dbapi_conn.ping()  # SQLite in tests
+        return
+    from sqlalchemy.util import await_only
+
+    await_only(driver.fetchval("SELECT 1", timeout=PING_TIMEOUT_SECONDS))
+
+
+@event.listens_for(engine.sync_engine, "handle_error")
+def _discard_timed_out(context):
+    """A call that ran out of time leaves its connection in an unknown state (its
+    link is most likely dead): count it as a disconnect so the pool drops it."""
+    if isinstance(context.original_exception, TimeoutError):
+        logger.warning(
+            "Database call ran out of time (%.0f s); its connection is thrown away | for %s | %s",
+            COMMAND_TIMEOUT_SECONDS, _asked_by(), pool_state(),
+        )
+        context.is_disconnect = True
 
 async_session_factory = async_sessionmaker(
     engine,

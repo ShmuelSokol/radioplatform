@@ -1,4 +1,5 @@
-import { startLiveStream, type LiveStream } from './liveStream';
+import { holdUpdates } from './appUpdate';
+import { startLiveStream, STREAM_STATE_EVENT, streamStateOf, type LiveStream } from './liveStream';
 
 /**
  * One player for a station's server stream, shared by the whole tab (the Listen page
@@ -28,6 +29,17 @@ let element: HTMLAudioElement | null = null;
 let current: Running | null = null;
 let releaseTimer: ReturnType<typeof setTimeout> | null = null;
 
+// A new site release never reloads the tab while its stream is switched on, even while
+// it reconnects after a drop (no audio element is playing then, so the "audio playing"
+// rule alone let a reload in and the tab came back silent). Not held while the stream
+// waits for a tap: the browser needs one after a reload anyway.
+let releaseHold: (() => void) | null = null;
+function syncHold() {
+  const want = !!current && !!element && streamStateOf(element) !== 'blocked' && streamStateOf(element) !== 'stopped';
+  if (want && !releaseHold) releaseHold = holdUpdates();
+  if (!want && releaseHold) { releaseHold(); releaseHold = null; }
+}
+
 /** The tab's stream element (made once, kept in the page body). */
 export function stationStreamElement(): HTMLAudioElement {
   if (!element) {
@@ -36,6 +48,7 @@ export function stationStreamElement(): HTMLAudioElement {
     element.setAttribute('aria-hidden', 'true');
     element.dataset.testid = 'station-stream';
     element.style.display = 'none';
+    element.addEventListener(STREAM_STATE_EVENT, syncHold);
     document.body.appendChild(element);
   }
   return element;
@@ -54,6 +67,7 @@ export function playStationStream(stationId: string, url: string, onFail: () => 
   const holder: { stream: LiveStream | null } = { stream: null };
   const inner = startLiveStream(stationStreamElement(), url, () => {
     if (current && current.stream === holder.stream) current = null;
+    syncHold();
     onFail();
   });
   const stream: LiveStream = {
@@ -64,10 +78,12 @@ export function playStationStream(stationId: string, url: string, onFail: () => 
       cancelRelease();
       current = null;
       inner.stop();
+      syncHold();
     },
   };
   holder.stream = stream;
   current = { stationId, url, stream };
+  syncHold();
   return stream;
 }
 
@@ -100,6 +116,7 @@ export function stopStationStream() {
   cancelRelease();
   current?.stream.stop();
   current = null;
+  syncHold();
 }
 
 /** The stream element really gives sound now. */
