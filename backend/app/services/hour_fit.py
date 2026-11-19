@@ -121,6 +121,20 @@ def _seconds(entry, engine: bool = False) -> float | None:
     return max(1.0, float(value) - handover_seconds(entry))
 
 
+def on_air_until(playing, engine: bool):
+    """When the item on air hands over, by the same length the queue is counted with.
+    The engine's length runs from the cue-in (or a shiur's resume point), so it counts
+    from the moment the item came on air; started_at lies that offset earlier
+    (mark_started). The browser's length is from the top of the file."""
+    from app.models.queue_entry import aired_from
+
+    length = _seconds(playing, engine)
+    if length is None or playing.started_at is None:
+        return None
+    start = aired_from(playing) if engine else playing.started_at
+    return _aware(start) + timedelta(seconds=length)
+
+
 # With less than this before the last song starts, the fit goes ahead on the figures
 # it has instead of waiting for an analysis
 WAIT_FOR_ANALYSIS = 90.0
@@ -238,10 +252,10 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
 
     at = now
     if playing is not None and playing.started_at is not None:
-        length = secs(playing)
-        if length is None:
+        until = on_air_until(playing, engine)
+        if until is None:
             return False  # its end is unknown: nothing can be planned around it
-        at = max(now, _aware(playing.started_at) + timedelta(seconds=length))
+        at = max(now, until)
     last_start = hard_at - timedelta(seconds=EARLY_START)
     if at >= last_start:
         return False  # the item on air runs to the hard item

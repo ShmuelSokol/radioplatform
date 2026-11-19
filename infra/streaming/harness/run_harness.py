@@ -842,7 +842,10 @@ class Harness:
         while time.time() < end:
             e = await self.on_air()
             if e and e.asset_id == aid and e.started_at:
-                return e.started_at.timestamp()
+                # when it came on air: started_at lies its cue-in earlier (mark_started)
+                from app.models.queue_entry import aired_from
+
+                return aired_from(e).timestamp()
             await asyncio.sleep(0.25)
         return None
 
@@ -2458,7 +2461,9 @@ async def sc_rapid_next(h: Harness) -> None:
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
     st = await h.on_air()
     tl = timeline(h.heard(time.time() - 4, time.time() - 1))
-    h.check(name, bool(st) and tl and tone_name(TONES[[k for k, v in h.assets.items() if v == st.asset_id][0]][0])
+    # an extra asset that reuses a song's file (song3quiet) sounds as that song
+    key = [k for k, v in h.assets.items() if v == st.asset_id][0].removesuffix("quiet") if st else None
+    h.check(name, bool(st) and tl and key in TONES and tone_name(TONES[key][0])
             == tl[-1][1], f"what the site says is on air ({st.asset.title if st else None}) is what is heard ({tl[-1][1] if tl else None})")
 
 
