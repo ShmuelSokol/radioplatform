@@ -317,6 +317,24 @@ minute of a blackout it gets `liq_cue_out` at the blackout's end (the 7-day run 
 **Week-old reports:** `STARTED_AT_MAX_LATE` is 15 days (was 7: the first plays of a
 7-day outage were logged at the return).
 
+**Blackout silence offline:** the site's own silence (hard at candle lighting) runs to its
+stored length; online the playout tick cuts it when the window ends. Offline the relay's
+`end_blackout_silence` does the same (drop the silence still in the timed lane, flush,
+skip): the 7-day run was back 37 s late after Shabbos.
+
+**Return after days:** kept reports go up 200 a call to `POST /playout/{id}/started-batch`
+(`handle_started_batch`; one call each was thousands of round trips, and in the
+simulator the site's view lagged for the whole two hours after the return, missing
+three time checks). An older backend answers 404 and gets them one by one. The batch
+then sets aside (`skipped`) the site's own timed rows from before the newest kept
+report: the box aired its own copies, and left pending they all went out as "due"
+(Saturday's weather and a ":30" time check at 6:14 on Thursday).
+
+**Station ID guard detail:** the hard items already in the engine's timed lane count as
+breaks; a soft item already due counts as airing right after the song; a hard item due
+before the song ends counts (it cuts the song, the ID would follow the break); distance
+is from the end of each item.
+
 `/relay/status` and the health report add `offline_days_ahead`, `songs_for_rotation`,
 `songs_on_disk`, `timed_until`.
 

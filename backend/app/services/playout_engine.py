@@ -1213,6 +1213,42 @@ async def _handle_started_locked(
         return result
 
 
+async def handle_started_batch(db: AsyncSession, station_id, reports: list[dict]) -> int:
+    """A local FM box back on line: its kept start reports in order (POST /started-batch),
+    all but the newest quiet. Then the site's timed rows for the hours the box ran alone
+    are set aside: the box aired its own copies, and left pending they all went out at
+    once as "due" on return (a week offline: Saturday's weather and a ":30" time check
+    at 6:14 on Thursday). Returns how many reports were taken."""
+    for i, r in enumerate(reports):
+        kept = bool(r.get("kept"))
+        await handle_started(
+            db, station_id, r.get("entry_id"), r.get("lane"), at=r.get("at"), kept=kept,
+            quiet=kept and (bool(r.get("more")) or i < len(reports) - 1),
+            asset_id=r.get("asset_id") if kept else None,
+        )
+    kept_at = []
+    for r in reports:
+        try:
+            if r.get("kept") and r.get("at"):
+                kept_at.append(float(r["at"]))
+        except (TypeError, ValueError):
+            pass
+    if kept_at:
+        upto = datetime.fromtimestamp(min(max(kept_at), datetime.now(UTC).timestamp()), UTC)
+        gone = await db.execute(
+            update(QueueEntry)
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending",
+                   QueueEntry.preempt_at.isnot(None), QueueEntry.preempt_at < upto)
+            .values(status="skipped")
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
+        if gone.rowcount:
+            logger.info("Station %s: %d timed rows of the box's offline hours set aside",
+                        station_id, gone.rowcount)
+    return len(reports)
+
+
 async def _handle_started(
     db: AsyncSession, station_id, entry_id: str | None, lane: str | None, at: float | None = None,
     quiet: bool = False, kept: bool = False, asset_id: str | None = None,

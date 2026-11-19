@@ -183,6 +183,31 @@ async def started(
     return result
 
 
+# Kept start reports sent in one call (a local FM box's catch-up)
+STARTED_BATCH_MAX = 500
+
+
+class StartedBatch(BaseModel):
+    reports: list[StartedReport]
+
+
+@router.post("/{station_id}/started-batch")
+async def started_batch(
+    body: StartedBatch,
+    station_id: uuid.UUID = Depends(_one_engine),
+    db: AsyncSession = Depends(get_db),
+):
+    """A local FM box back on line sends what it aired offline, many reports a call, in
+    order (one call each was minutes of round trips after a week offline, while the
+    site's view of the station lagged behind). All but the newest are recorded quietly."""
+    reports = body.reports[:STARTED_BATCH_MAX]
+    t0 = time.monotonic()
+    done = await playout_engine.handle_started_batch(db, station_id, [r.model_dump() for r in reports])
+    logger.info("Start report batch station=%s: %d reports in %d ms", station_id, done,
+                (time.monotonic() - t0) * 1000)
+    return {"ok": True, "taken": done}
+
+
 class AlertReport(BaseModel):
     phase: str  # "started" or "ended"
     alert_id: str | None = None  # "" for the alert line

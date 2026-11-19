@@ -105,6 +105,9 @@ class Fake:
         self.plan = {"entries": [], "blackouts": []}
         self.extension = None
         self.flushes = 0
+        self.skips = 0
+        self.dropped = []
+        self.batch = False  # the backend has POST /started-batch
         self.timed = []
         self.instances = []
         self.refuse_instance = None
@@ -125,6 +128,12 @@ class Fake:
                 if path == "/flush":
                     fake.flushes += 1
                     return self._out(200, b'{"ok":true}')
+                if path == "/skip":
+                    fake.skips += 1
+                    return self._out(200, b'{"ok":true}')
+                if path == "/timed_drop":
+                    fake.dropped += json.loads(body)["ids"]
+                    return self._out(200, b'{"ok":true}')
                 if not fake.up:
                     return self._out(503, b"down")
                 fake.calls.append((self.command, path.split("/playout/sid", 1)[-1], body))
@@ -143,6 +152,8 @@ class Fake:
                         self.wfile.write(chunk)
                         self.wfile.flush()
                     return None
+                if path.endswith("/started-batch") and not fake.batch:
+                    return self._out(404, b'{"detail":"Not Found"}')
                 if "/plan" in path:
                     if "days=" in path and fake.extension is not None:
                         return self._out(200, json.dumps({**fake.plan, "extension": fake.extension}).encode())
@@ -542,7 +553,8 @@ def test_start_reports_are_kept_and_sent_in_order_when_the_line_returns(rig):
     assert [c for c in fake.calls if "/started" in c[1]] == []
     assert relay.sync_plan()
     relay.catch_up()
-    posts = [(c[1], json.loads(c[2])) for c in fake.calls if c[0] == "POST"]
+    # (this backend has no batch route: one by one after its 404)
+    posts = [(c[1], json.loads(c[2])) for c in fake.calls if c[0] == "POST" and c[1] != "/started-batch"]
     assert posts[0][0] == "/hello"
     assert [p[1]["entry_id"] for p in posts[1:]] == ["a", "b", "c"]
     assert all(p[1]["at"] == clock["now"] for p in posts[1:])
@@ -1246,3 +1258,75 @@ def test_offline_past_the_queue_station_ids_come_between_songs(rig):
     relay.extension["timed"].append(fake.entry("tc", None, at=clock["now"] + 60, mode="hard", kind="time"))
     relay.last_id_at = clock["now"] - 3600
     assert relay.draw_id(relay.now(), relay.timed_entries()) is None
+    # nor before a soft sponsorship that is already due (it airs after this song)
+    relay.extension["timed"][:] = [fake.entry("sp", None, at=clock["now"] - 120, mode="soft", kind="spot")]
+    assert relay.draw_id(relay.now(), relay.timed_entries()) is None
+    relay.extension["timed"][:] = []
+    relay.on_air = {**(relay.on_air or {}), "kind": "music", "at": clock["now"], "duration": 0.0, "uri": ""}
+    assert relay.draw_id(relay.now(), relay.timed_entries()) is not None
+
+
+def test_back_online_kept_reports_go_up_many_at_a_time(rig):
+    """A week offline is thousands of start reports: they go up 200 a call, in order, the
+    newest last and the rest quiet; an older backend without the route gets them one by
+    one."""
+    fake, relay, clock = rig
+    fake.plan = {"blackouts": [], "entries": [fake.entry(f"e{i}", i + 1) for i in range(450)]}
+    relay.sync_plan()
+    fake.up = False
+    relay.online = False
+    for i in range(450):
+        clock["now"] += 10
+        relay.started(json.dumps({"entry_id": f"e{i}", "lane": "main"}).encode())
+    fake.up = True
+    fake.batch = True
+    relay.catch_up()
+    batches = [json.loads(c[2])["reports"] for c in fake.calls if c[1] == "/started-batch"]
+    assert [len(b) for b in batches] == [200, 200, 50]
+    flat = [r for b in batches for r in b]
+    assert [r["entry_id"] for r in flat] == [f"e{i}" for i in range(450)]
+    assert all(r["kept"] for r in flat) and all(r.get("more") for r in flat[:-1]) and not flat[-1].get("more")
+    assert not [c for c in fake.calls if c[1] == "/started"]
+    assert not relay.spool_path.read_text().strip()
+
+
+def test_back_online_older_backend_gets_reports_one_by_one(rig):
+    fake, relay, clock = rig
+    fake.plan = {"blackouts": [], "entries": [fake.entry("a", 1), fake.entry("b", 2)]}
+    relay.sync_plan()
+    fake.up = False
+    relay.online = False
+    for eid in ("a", "b"):
+        clock["now"] += 10
+        relay.started(json.dumps({"entry_id": eid, "lane": "main"}).encode())
+    fake.up = True
+    relay.catch_up()
+    assert [json.loads(c[2])["entry_id"] for c in fake.calls if c[1] == "/started"] == ["a", "b"]
+    assert not relay.spool_path.read_text().strip()
+
+
+def test_offline_shabbos_silence_ends_with_the_blackout(rig):
+    """Offline, the site's blackout silence (hard at candle lighting) runs to its own
+    length; when the window ends the box drops what is left and skips to the music, as
+    the site's playout tick does online (a week offline: back 37 s late)."""
+    fake, relay, clock = rig
+    now = clock["now"]
+    s1 = fake.entry("sil1", 1, at=now + 10, mode="hard", kind="silence")
+    s2 = fake.entry("sil2", 2, at=now + 10, mode="hard", kind="silence")
+    fake.plan = {"blackouts": [{"start": now + 10, "end": now + 400, "name": "Shabbos"}],
+                 "entries": [s1, s2, fake.entry("song", 3)]}
+    relay.sync_plan()
+    relay.fetch_plan_audio()
+    fake.up = False
+    relay.online = False
+    clock["now"] = now + 5
+    assert relay.hand_over_timed() == 2
+    clock["now"] = now + 10
+    relay.started(json.dumps({"entry_id": "sil1", "lane": "timed"}).encode())
+    clock["now"] = now + 300
+    assert relay.end_blackout_silence() is False  # still Shabbos
+    clock["now"] = now + 401
+    assert relay.end_blackout_silence() is True
+    assert fake.dropped == ["sil2"] and fake.skips == 1 and fake.flushes >= 1
+    assert relay.end_blackout_silence() is False  # once
+    assert _next(relay)[1]["entry_id"] == "song"

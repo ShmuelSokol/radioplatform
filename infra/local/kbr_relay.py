@@ -62,6 +62,8 @@ CLOCK_BEHIND_SECONDS = 120.0
 # the engine's live lane goes quiet and opens it again.
 LIVE_STALL_SECONDS = 10.0
 DONE_KEEP = 8000  # a week offline hands out about 3,500 items
+# Kept start reports sent per call on return (POST /started-batch)
+SPOOL_BATCH = 200
 # Days past the end of the queue the box keeps (GET /plan?days=): its timed items worked
 # out ahead, the songs it plays at each hour of the day, a month of Shabbos and Yom Tov
 OFFLINE_DAYS = 8.0
@@ -124,6 +126,7 @@ class Relay:
         self.mirror_library = mirror_library
         self.clock = clock
         self.lock = threading.RLock()
+        self.batch_reports = True  # the backend takes kept reports many at a time
         self.plan: dict = self._read_json("plan.json", {"entries": [], "blackouts": []})
         # The days after the queue (see sync_extension); {} until the first fetch
         self.offline_days = offline_days
@@ -419,7 +422,16 @@ class Relay:
             return True
         ends = cur["at"] + float(cur.get("duration") or 0.0) - cue_in_of(cur.get("uri") or "")
         airs = max(now, ends)
-        return any(abs(e["at"] - airs) < ID_CLEAR_SECONDS for e in timed_waiting)
+        # A soft item already due airs right after the song, so it counts as at `airs`
+        # and a hard item due before the song ends cuts it: the ID would follow the break
+        # (measured from the end of each item: a group runs a minute or more)
+        def near(e: dict) -> bool:
+            if e.get("mode") != "hard":
+                return max(e["at"], airs) - airs < ID_CLEAR_SECONDS
+            ends_at = e["at"] + float(e.get("duration") or 0.0)
+            return (e["at"] - ID_CLEAR_SECONDS < airs < ends_at + ID_CLEAR_SECONDS + 10.0
+                    or now <= e["at"] <= airs)
+        return any(near(e) for e in timed_waiting)
 
     def draw_song(self, now: float) -> dict | None:
         """Past the end of the queue: a song the station plays at this hour of its day,
@@ -516,6 +528,9 @@ class Relay:
                 e for e in self.timed_entries()
                 if e["entry_id"] not in done and e["entry_id"] not in self.timed_sent
             ]
+            # For a station ID's distance from a break, the hard items already in the
+            # engine's timed lane count too: they air between this song and the ID
+            breaks = [e for e in self.timed_entries() if e["entry_id"] not in done]
             chosen = None
             # Timed items whose time has come go first, by time then position (as /next)
             due = sorted((e for e in timed_waiting if clock_ok and e["at"] <= now),
@@ -540,7 +555,7 @@ class Relay:
                             if held_id is not None:
                                 # Two IDs would end up together: the earlier one goes
                                 self.mark_done(held_id["entry_id"])
-                            if self._id_must_wait(now, timed_waiting):
+                            if self._id_must_wait(now, breaks):
                                 held_id = e
                                 continue  # stays in the queue for after the next song
                         chosen = e
@@ -548,7 +563,7 @@ class Relay:
             if chosen is None:
                 # The queue is used up (days offline): the box draws the station's songs,
                 # with a station ID between them now and then
-                chosen = self.draw_id(now, timed_waiting) or self.draw_song(now)
+                chosen = self.draw_id(now, breaks) or self.draw_song(now)
             if chosen is None:
                 # Nothing left that is on this disk: the engine plays its emergency folder
                 return 204, b""
@@ -769,7 +784,35 @@ class Relay:
         with self.lock:
             lines = [ln for ln in self.spool_path.read_text().splitlines() if ln.strip()]
         sent = 0
-        for i, line in enumerate(lines):
+        # Many at a time (a week offline is thousands of reports); one by one with an
+        # older backend that has no batch route
+        while sent < len(lines) and self.batch_reports:
+            chunk = lines[sent:sent + SPOOL_BATCH]
+            reports = []
+            for j, line in enumerate(chunk):
+                try:
+                    rep = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if sent + j < len(lines) - 1:
+                    rep["more"] = True
+                reports.append(rep)
+            try:
+                status, _ = self._call("POST", "/started-batch", json.dumps({"reports": reports}).encode(),
+                                       timeout=120.0)
+            except Offline:
+                break
+            if status >= 300:
+                # An older backend (404) or a report it refuses: one by one from here
+                self.batch_reports = False
+                break
+            sent += len(chunk)
+            self._drop_sent(sent)
+        if self.batch_reports or sent >= len(lines):
+            if sent:
+                log.info("sent %d kept start reports", sent)
+            return
+        for i, line in enumerate(lines[sent:], start=sent):
             if i < len(lines) - 1:
                 # Not the newest: recorded without a now-playing change on the pages
                 try:
@@ -782,13 +825,18 @@ class Relay:
                 break
             sent += 1
         if sent:
-            with self.lock:
-                now_lines = [ln for ln in self.spool_path.read_text().splitlines() if ln.strip()]
-                rest = now_lines[sent:]
-                part = self.dir / "spool.jsonl.part"
-                part.write_text("".join(ln + "\n" for ln in rest))
-                os.replace(part, self.spool_path)
+            self._drop_sent(sent)
             log.info("sent %d kept start reports", sent)
+
+    def _drop_sent(self, sent: int) -> None:
+        """The first `sent` lines of the spool went up: keep the rest (and anything the
+        engine reported meanwhile, appended at the end)."""
+        with self.lock:
+            now_lines = [ln for ln in self.spool_path.read_text().splitlines() if ln.strip()]
+            rest = now_lines[sent:]
+            part = self.dir / "spool.jsonl.part"
+            part.write_text("".join(ln + "\n" for ln in rest))
+            os.replace(part, self.spool_path)
 
     def download(self, url: str) -> bool:
         if self.have(url):
@@ -987,6 +1035,35 @@ class Relay:
                     log.info("timed: handed %s to the engine for %.0f", e["title"], at)
         return sent
 
+    def end_blackout_silence(self) -> bool:
+        """Offline, a blackout over while its silence still plays: drop the silence still
+        waiting in the timed lane, flush, skip (the site's playout tick does this online;
+        a week offline came back 37 s late after Shabbos, at the silence's own end)."""
+        if self.online or not self.clock_ok():
+            return False
+        now = self.clock()
+        with self.lock:
+            cur = self.on_air
+            if cur is None or (cur.get("kind") or "") != "silence" or self.in_blackout(now):
+                return False
+            if cur.get("ended_silence"):
+                return False
+            cur["ended_silence"] = True
+            waiting = [
+                e["entry_id"] for e in self.timed_entries()
+                if e.get("kind") == "silence" and e["entry_id"] in self.timed_sent
+                and e["entry_id"] not in self.done and e["entry_id"] != cur.get("entry_id")
+            ]
+            for eid in waiting:
+                self.mark_done(eid)
+            self._save_state()
+        if waiting:
+            self._post_engine("/timed_drop", {"ids": waiting})
+        self._post_engine("/flush", {})
+        self._post_engine("/skip", {})
+        log.info("offline: blackout over, silence ended (%d waiting dropped)", len(waiting))
+        return True
+
     def hard_item_soon(self, within: float = 60.0) -> bool:
         now = self.clock()
         with self.lock:
@@ -1004,6 +1081,7 @@ class Relay:
                     if self.hard_item_soon() and self.clock() - self.last_plan_at > 20.0:
                         self.sync_plan()
                     self.hand_over_timed()
+                    self.end_blackout_silence()
                 except Exception:
                     log.exception("timed loop")
 

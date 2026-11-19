@@ -103,6 +103,9 @@ class Box:
                     kept=bool(data.get("kept")), quiet=bool(data.get("kept") and data.get("more")),
                     asset_id=data.get("asset_id") if data.get("kept") else None)
                 return 200, json.dumps(got).encode()
+            if route == "/started-batch":
+                taken = await playout_engine.handle_started_batch(db, self.station_id, data.get("reports") or [])
+                return 200, json.dumps({"ok": True, "taken": taken}).encode()
             if route == "/hello":
                 await playout_engine.handle_hello(self.station_id, data.get("proto"), "sim-box")
                 return 200, b'{"ok":true}'
@@ -163,6 +166,7 @@ class Box:
             if synced or await asyncio.to_thread(r.sync_plan):
                 await asyncio.to_thread(r.catch_up)
         await asyncio.to_thread(r.hand_over_timed)
+        await asyncio.to_thread(r.end_blackout_silence)
         try:
             self.kept_max = max(self.kept_max, sum(1 for _ in r.spool_path.open()))
         except OSError:
