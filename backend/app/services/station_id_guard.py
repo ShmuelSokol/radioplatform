@@ -157,3 +157,73 @@ async def take_passed(db: AsyncSession, station_id) -> int:
         .execution_options(synchronize_session=False)
     )
     return res.rowcount or 0
+
+
+# Waiting IDs this close to air are left to the air-time check: the engine may have
+# loaded the next one already, and the estimate is good enough only further out
+_TIDY_FROM = timedelta(minutes=5)
+
+
+async def drop_misplaced(db: AsyncSession, station_id, now: datetime | None = None) -> int:
+    """Remove waiting automatic IDs that the queue's own timeline now puts where they
+    would be passed over at air time: right after a break, sponsorship or other spoken
+    item, or within `clear_minutes` of a timed item. The fill placed them clear, but
+    sponsorships planned afterwards, cut songs and soft breaks move things, and the
+    queue page then showed an ID right after TEST SPONSOR 14 (2026-11-19). Walks the
+    queue the same way as the fill (`Clock`, on-air lengths). Does not commit."""
+    from app.models.asset import Asset
+    from app.models.queue_entry import is_soft_timed
+    from app.models.station import Station
+    from app.services.playlist_generator_service import (
+        NOT_BEFORE_AN_ID,
+        Clock,
+        TimedItem,
+        id_settings_for,
+        on_air_seconds,
+    )
+
+    now = now or datetime.now(UTC)
+    station = await db.get(Station, station_id)
+    if station is None:
+        return 0
+    settings = id_settings_for(station.automation_config)
+    rows = (await db.execute(
+        select(QueueEntry).options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
+        .order_by(QueueEntry.position)
+    )).unique().scalars().all()
+
+    start = now
+    timed: list[TimedItem] = []
+    waiting: list[tuple[QueueEntry, float]] = []
+    for entry in rows:
+        asset: Asset | None = entry.asset
+        seconds = on_air_seconds(getattr(asset, "duration", None), getattr(asset, "metadata_extra", None)
+                                 if isinstance(getattr(asset, "metadata_extra", None), dict) else None)
+        if entry.status == "playing":
+            if entry.started_at is not None:
+                start = max(start, _aware(entry.started_at) + timedelta(seconds=seconds))
+        elif entry.preempt_at is not None:
+            timed.append(TimedItem(max(_aware(entry.preempt_at), now), seconds, not is_soft_timed(entry)))
+        else:
+            waiting.append((entry, seconds))
+
+    clock = Clock(start, timed)
+    margin = timedelta(minutes=settings.clear_minutes)
+    previous_kind = None
+    dropped = 0
+    for entry, seconds in waiting:
+        at = clock.start()
+        before = clock.last_timed_end
+        if is_auto_station_id(entry) and at - now >= _TIDY_FROM:
+            after_spoken = (previous_kind or "") in NOT_BEFORE_AN_ID and previous_kind is not None
+            right_after_timed = before is not None and at - before < margin
+            if after_spoken or right_after_timed or not clock.clear_of_timed(at, seconds, margin):
+                await db.delete(entry)
+                dropped += 1
+                continue  # gone: it takes no air time
+        clock.play(seconds)
+        previous_kind = (getattr(entry.asset, "asset_type", None) or "").lower() or None
+    if dropped:
+        await db.flush()
+    return dropped

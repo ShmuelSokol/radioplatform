@@ -180,3 +180,60 @@ async def test_no_id_after_a_sponsorship_that_waited_for_a_story(db_session: Asy
     await db_session.commit()
     assert picked.id == song_entry
     assert await _status(db_session, id_entry) == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_queue_tidy_drops_ids_next_to_breaks_and_keeps_clear_ones(db_session: AsyncSession):
+    """Main 2026-11-19: the queue showed an ID at 08:15:34 right after TEST SPONSOR 14
+    and one at 07:57:45, 2.2 min before the 08:00 break. A waiting ID the queue's own
+    timeline puts beside a break is taken out; one well clear stays."""
+    now = datetime.now(UTC)
+    station = Station(id=uuid.uuid4(), name=f"S {uuid.uuid4().hex[:6]}", timezone="America/New_York",
+                      automation_config={"station_ids": {"enabled": True}})
+    db_session.add(station)
+    await db_session.flush()
+
+    def asset(kind, category, seconds):
+        a = Asset(id=uuid.uuid4(), title=f"{kind} {category}", file_path=f"{uuid.uuid4().hex}.mp3",
+                  asset_type=kind, category=category, duration=seconds)
+        db_session.add(a)
+        return a
+
+    song = asset("music", "lively", 243.0)  # 240 s on air (3 s crossfade)
+    sponsor = asset("spot", "sponsorship", 30.0)
+    jingle = asset("jingle", "station_id", 8.0)
+    await db_session.flush()
+    pos = 0
+
+    def add(a, **kw):
+        nonlocal pos
+        pos += 1
+        e = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=a.id, position=pos,
+                       status=kw.pop("status", "pending"), source=kw.pop("source", "auto"), **kw)
+        db_session.add(e)
+        return e
+
+    add(song, status="playing", started_at=now)          # on air until +4 min
+    songs = [add(song) for _ in range(2)]                 # +4, +8
+    clear = add(jingle)                                   # +12: 8 min from the break, stays
+    songs += [add(song) for _ in range(2)]                # +12:08, +16:08
+    add(sponsor, source="ad_slot", timing_mode="soft",    # due +20, waits for the song: +20:08
+        preempt_at=now + timedelta(minutes=20))
+    after_break = add(jingle)                             # +20:38 right after the sponsorship
+    songs += [add(song) for _ in range(2)]
+    near = add(jingle)                                    # 2 min before the next break
+    add(song)
+    add(sponsor, source="ad_slot", timing_mode="soft",
+        preempt_at=now + timedelta(minutes=30, seconds=50))
+    also_after = add(jingle)                              # after the song, so right after that break too
+    await db_session.commit()
+
+    dropped = await station_id_guard.drop_misplaced(db_session, station.id, now)
+    await db_session.commit()
+    left = {e for (e,) in (await db_session.execute(
+        select(QueueEntry.id).where(QueueEntry.station_id == station.id))).all()}
+    assert clear.id in left
+    assert after_break.id not in left
+    assert near.id not in left
+    assert also_after.id not in left
+    assert dropped == 3

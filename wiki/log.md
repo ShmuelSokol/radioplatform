@@ -440,5 +440,6 @@ UPDATE 2026-11-19 spot-schedules.md block_talk_windows: a block's own shiur coun
 INGEST 2026-11-19 spot-schedules.md contract totals (plays a day, days and plays over the dates, spot length) in Edit contract, client contract rows and Spot Schedule: components/sponsors/contractTotals.ts
 INGEST 2026-11-19 back-navigation.md Back line on staff pages (BackNav.tsx), per-tab history notes keyed by history.state.idx (lib/navMemory.ts), useNavState for page state, tapped row lit on return, deleted pages skipped via api/client.ts DELETE hook
 UPDATE 2026-11-19 playlist-generation.md station IDs: air-time guard (station_id_guard.py) passes over an ID after a break/spoken item or near a break; soft breaks move at air time
+UPDATE 2026-11-19 playlist-generation.md station IDs: drop_misplaced tidies waiting IDs beside breaks after each top-up; queue page estimates use on-air lengths
 INGEST 2026-11-19 blackout-window-generation.md regenerate now corrects a stored window whose computed times changed (future, this station only, never edited); SQLite returns zone-less clock times
 UPDATE 2026-11-19 control-room.md Sponsors list rows always open the Sponsor panel (SongTarget.sponsorship); station-day sends asset.sponsor_id: a block-placed sponsor recording with no spots category opened the song options on Main

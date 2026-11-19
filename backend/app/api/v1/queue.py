@@ -1493,6 +1493,19 @@ async def _get_queue_impl(station_id, limit, db):
     # - Regular songs play sequentially by position
     # - Hard preempts (hourly time/weather) interrupt at their exact preempt_at
     # - Soft preempts (ad_slots) play after current song finishes when their time arrives
+    # Each item holds the air up to where the next one crossfades in (on_air_seconds),
+    # as the players and the fill count it; full lengths put everything about 3 s
+    # later per song, and an hour on the station IDs showed up beside breaks the
+    # fill had kept them clear of (2026-11-19)
+    from app.services.playlist_generator_service import on_air_seconds as _on_air
+
+    def _air(asset) -> float:
+        if asset is None:
+            return float(DEFAULT_DURATION)
+        meta = getattr(asset, "metadata_extra", None)
+        meta = meta if isinstance(meta, dict) else None
+        return _on_air(getattr(asset, "duration", None) or DEFAULT_DURATION, meta)
+
     try:
         now_utc_sort = datetime.now(timezone.utc)
         _np_sa = now_playing_entry.started_at if now_playing_entry and now_playing_entry.started_at else None
@@ -1500,7 +1513,7 @@ async def _get_queue_impl(station_id, limit, db):
             _np_sa = _np_sa.replace(tzinfo=timezone.utc)
 
         if _np_sa:
-            _ad = (now_playing_entry.asset.duration if now_playing_entry.asset else None) or DEFAULT_DURATION
+            _ad = _air(now_playing_entry.asset)
             _el = (now_utc_sort - _np_sa).total_seconds()
             _cursor = now_utc_sort + timedelta(seconds=max(0, (_ad or DEFAULT_DURATION) - _el))
         else:
@@ -1551,7 +1564,7 @@ async def _get_queue_impl(station_id, limit, db):
                 due = max(_tz(soft_preempts[si].preempt_at), start)
                 if due >= end or (end - due).total_seconds() <= _long.SOFT_PAUSE_MIN_LEFT_SECONDS:
                     break
-                _d = (soft_preempts[si].asset.duration if soft_preempts[si].asset else None) or DEFAULT_DURATION
+                _d = _air(soft_preempts[si].asset)
                 _est_map[soft_preempts[si].id] = due
                 # paused: it carries on afterwards; cut: the air is free after the item
                 end = end + timedelta(seconds=_d) if _long_policy == "pause" else due + timedelta(seconds=_d)
@@ -1571,7 +1584,7 @@ async def _get_queue_impl(station_id, limit, db):
                 if hp_pa <= _cursor:
                     _cursor = hp_pa
                     _est_map[hard_preempts[hi].id] = _cursor
-                    _dur = (hard_preempts[hi].asset.duration if hard_preempts[hi].asset else None) or DEFAULT_DURATION
+                    _dur = _air(hard_preempts[hi].asset)
                     _cursor = _soft_into_long(
                         hard_preempts[hi].asset, _cursor, _cursor + timedelta(seconds=_dur or DEFAULT_DURATION)
                     )
@@ -1583,7 +1596,7 @@ async def _get_queue_impl(station_id, limit, db):
                 sp_pa = _tz(soft_preempts[si].preempt_at)
                 if sp_pa <= _cursor:
                     _est_map[soft_preempts[si].id] = _cursor
-                    _dur = (soft_preempts[si].asset.duration if soft_preempts[si].asset else None) or DEFAULT_DURATION
+                    _dur = _air(soft_preempts[si].asset)
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     si += 1
                     continue
@@ -1591,7 +1604,7 @@ async def _get_queue_impl(station_id, limit, db):
             # 3. Play next regular song
             if ri < len(regulars):
                 song = regulars[ri]
-                song_dur = song.asset.duration if song.asset and song.asset.duration else DEFAULT_DURATION
+                song_dur = _air(song.asset)
                 song_dur = max(1.0, song_dur - resume_offset(song))  # a paused shiur's remainder
                 song_end = _cursor + timedelta(seconds=song_dur)
 
@@ -1614,13 +1627,13 @@ async def _get_queue_impl(station_id, limit, db):
                 if next_hp and (not next_sp or next_hp <= next_sp):
                     _cursor = max(_cursor, next_hp)
                     _est_map[hard_preempts[hi].id] = _cursor
-                    _dur = (hard_preempts[hi].asset.duration if hard_preempts[hi].asset else None) or DEFAULT_DURATION
+                    _dur = _air(hard_preempts[hi].asset)
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     hi += 1
                 elif next_sp:
                     _cursor = max(_cursor, next_sp)
                     _est_map[soft_preempts[si].id] = _cursor
-                    _dur = (soft_preempts[si].asset.duration if soft_preempts[si].asset else None) or DEFAULT_DURATION
+                    _dur = _air(soft_preempts[si].asset)
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     si += 1
                 else:
