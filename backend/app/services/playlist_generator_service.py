@@ -114,7 +114,7 @@ def id_settings_for(automation_config: dict | None) -> IdSettings:
 # A station ID never follows one of these (two short or spoken breaks back to back)
 NOT_BEFORE_AN_ID = {
     "jingle", "spot", "sweeper", "station_id", "time", "weather", "silence",
-    "time_announcement", "weather_spot", "zmanim", "announcement", "psa",
+    "time_announcement", "weather_spot", "omer_count", "zmanim", "announcement", "psa",
 }
 
 
@@ -756,6 +756,16 @@ async def generate(
             continue
 
         key = str(block.id)
+        # Each run of a block starts its playlist from the first step (Shmuel 2026-11-19:
+        # "start off with Motzei Shabbos songs"): the cursor used to carry on from where
+        # the block's last run, a day or a week before, left off. A redraw inside the same
+        # run keeps its place (`cursor_back` moves the count, the run stays the same).
+        run_key = f"{key}@run"
+        run = _run_start(svc, block, at, station).isoformat()
+        if cursor.get(run_key) != run:
+            if run_key in cursor or key not in cursor:
+                cursor[key] = 0  # a new run (a cursor saved before runs were kept carries on)
+            cursor[run_key] = run
         index = int(cursor.get(key, 0)) % len(slots)
         slot = slots[index]
         cursor[key] = (index + 1) % len(slots)

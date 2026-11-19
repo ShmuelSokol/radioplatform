@@ -30,6 +30,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [sponsor-accounts](sponsor-accounts.md) — Sponsors page as a client database: status and dates, spots by stage, contracts, as-run log, missed plays
 - [spot-recordings](spot-recordings.md) — Record Spots page: script, wording check, audio (Shprach stub makes placeholder tones), listen, approve into the library
 - [program-blocks](program-blocks.md) — Named blocks ("Weather Sponsors"): one event that queues a run of items at clock times, hard or soft; replaces the built-in hourly time and weather
+- [song-categories](song-categories.md) — A song in several categories (main + "Also in"), mix-only categories (shabbos, motzei_shabbos), how holiday lists relate, Erev/Motzei Shabbos playlists, sun times without coordinates
 - [holiday-music](holiday-music.md) — Holiday lists of songs and shiurim mixed in before and during each holiday at a rising rate, per station settings, Holiday Music page
 - [daf-yomi-intro](daf-yomi-intro.md) — "Up next, today's daf" clip before each Daf Yomi shiur: calendar and words in infra/daf-yomi, clips made and placed by the PC job
 - [operator-actions](operator-actions.md) — Next with a fade choice, fire-now, insert at a point, intro length, hard/soft timed items (`timing_mode`)
@@ -46,6 +47,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [local-fm-box](local-fm-box.md) — Feeding FM from the transmitter room: the engine on a local box with a relay that keeps it on air with no internet (plan + library on disk); stages and gaps
 - [look-at-the-screen-tests](look-at-the-screen-tests.md) — the browser guard, the walk of every page and control on three stations, the station isolation sweep
 - [blackout-window-generation](blackout-window-generation.md) — Shabbos/Yom Tov windows: the rule, and how regenerate corrects stored ones without touching hand edits
+- [omer-count](omer-count.md) — Sefiras HaOmer on the hour after the time check, next day from shekia per station (days only, as the siddur), 49 clips, per-station setting
 - [shabbos-ending](shabbos-ending.md) — last song before Shabbos back-timed to end at candle lighting, the shofar, then the silence (per-station setting)
 - [station-simulator](station-simulator.md) — the real scheduling/playout decisions on a virtual clock with a fake engine: whole broadcast days in minutes, rules checked over the play log
 - [engine-harness](engine-harness.md) — run the real Liquidsoap engine locally with tones and check what was heard and when

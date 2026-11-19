@@ -143,7 +143,7 @@ radioplatform/
 |--------|------|--------|
 | auth | auth.py | /auth |
 | stations | stations.py | /stations |
-| assets | assets.py | /assets (`DELETE /{id}` answers 503 with Retry-After when the queue holds the item's rows, see `wiki/library-delete.md`; `POST /{id}/remove-silence`: cut out every silent region the scan found (start and end completely; each middle gap shortened to `keep_gap` s, 0 = cut out; original kept for Restore Original); `POST /bulk-auto-trim` also shortens middle gaps longer than `middle_gap_over` to `keep_gap`; `GET /progress/{progress_id}`: how far a long edit sent with `?progress_id=` (auto-enhance, remove-silence) has got, for the progress bar; `POST /{id}/do-not-play`: the control room's quick "do not play" / "allow again" on every station; `POST` and `GET /{id}/station-block`: "not on this station", one station only; see `wiki/control-room.md`) |
+| assets | assets.py | /assets (`DELETE /{id}` answers 503 with Retry-After when the queue holds the item's rows, see `wiki/library-delete.md`; `POST /{id}/remove-silence`: cut out every silent region the scan found (start and end completely; each middle gap shortened to `keep_gap` s, 0 = cut out; original kept for Restore Original); `POST /bulk-auto-trim` also shortens middle gaps longer than `middle_gap_over` to `keep_gap`; `GET /progress/{progress_id}`: how far a long edit sent with `?progress_id=` (auto-enhance, remove-silence) has got, for the progress bar; `GET`/`PUT /{id}/categories`, `POST /bulk-extra-category`: a song in several categories ("Also in"; see `wiki/song-categories.md`); `POST /{id}/do-not-play`: the control room's quick "do not play" / "allow again" on every station; `POST` and `GET /{id}/station-block`: "not on this station", one station only; see `wiki/control-room.md`) |
 | streams | streams.py | /streams |
 | controls | controls.py | /controls |
 | users | users.py | /users |
@@ -184,6 +184,7 @@ radioplatform/
 | activity | activity.py | /activity (admin): who did what with filters and `after` for live updates, /activity/people (one line per person: counts for the period), /activity/filters, /activity/listeners (listening sessions); POST /activity/page-view (any signed-in user) |
 | air_watch | air_watch.py | /air-watch (staff): recent on-air self-check findings |
 | bug_reports | bug_reports.py | /bug-reports (POST open to all, rate-limited; GET staff; PATCH/resend admin) |
+| omer_count | omer_count.py | /omer-count: the 49 Omer clips and which are recorded (staff), `/station/{id}?on=`: what a station says each hour of a day, `PUT /{day}`: upload a recording (manager; see `wiki/omer-count.md`) |
 | weather_spots | weather_spots.py | /weather-spots/{date} and /time-announcements/{hour}: upload ready-made recordings (Shprach voice) for the daily weather spot and the reusable hourly time clips, both per region (`?region=jerusalem`); `?minute=30` for the half-hour clip ("The time is 10:30", played when the station has `half_hour_time_check`); ElevenLabs is only the fallback |
 
 ### Services (`backend/app/services/`)
@@ -245,6 +246,8 @@ radioplatform/
 | sponsor_accounts.py | Sponsors as clients: status from contract dates, spots by stage of the flow, plays per contract, the as-run log (see `wiki/sponsor-accounts.md`) |
 | sponsor_delivery.py | What a sponsor was promised against what aired: missed plays of the last 14 days and coming plays with no room or moved, for `GET /sponsor-portal/missed-plays` (see `wiki/spot-schedules.md`) |
 | shabbos_ending.py | Last song before Shabbos: the station's chosen song back-timed to end exactly at candle lighting (the blackout's start), the item after it (the shofar) first in the silence group, timed items cleared out of its way; `automation_config.shabbos_ending` (see `wiki/shabbos-ending.md`) |
+| asset_categories.py | A song in several categories: main + extra ("Also in", `asset_categories` table), read by `models.asset.in_category`; holiday lists shown beside them (see `wiki/song-categories.md`) |
+| omer_count.py | Sefiras HaOmer on the hour: the count each station says (the next day from shekia at its place, days only as the siddur), the 49 clips (category `omer_count`), wording; queued after each hh:00 time check by `QueueReplenishService._schedule_omer_counts`; `automation_config.omer_count` (see `wiki/omer-count.md`) |
 | holiday_music.py | Holiday lists mixed in before and during each holiday: Hebrew calendar per station (Israel or diaspora), rising 1-in-N share, `HolidayMix.pick` used by both fills, rest and carried count, queue tags (see `wiki/holiday-music.md`) |
 | station_blocks.py | "Not on this station": the per-station list of items a station does not play, the subquery every pick uses (`blocked_asset_ids`) and block/undo with removal of that station's waiting copies |
 | emergency_alerts.py | The emergency override: sends an alert to each station (engine `/alert`, or WS `emergency_alert` to browser players), takes the engine's start/end reports into the log, drops hard items due during it, alert + ntfy on each (see `wiki/emergency-alerts.md`) |
@@ -256,8 +259,8 @@ radioplatform/
 
 ### Pages
 **Admin** (`frontend/src/pages/admin/`):
-- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, not on this station, do not play on any station, details), Sponsors tab (today's sponsorships on the station; rows carry a SPONSOR tag) and a Sponsor panel instead for a sponsorship spot (sponsor, contracts, today's and coming plays with Skip, missed plays, Pause contract, links). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
-- Stations.tsx — Station management
+- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, not on this station, do not play on any station, details), queue and library columns the operator drags or double-clicks to fit, a "Playing from" column with a Why panel (playlist, block and step a song was drawn for, or what else queued it), Sponsors tab (today's sponsorships on the station; rows carry a SPONSOR tag) and a Sponsor panel instead for a sponsorship spot (sponsor, contracts, today's and coming plays with Skip, missed plays, Pause contract, links). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
+- Stations.tsx — Station management (incl. "Omer count on the hour")
 - Assets.tsx — Audio asset management
 - AssetUpload.tsx — File upload
 - Schedules.tsx — Schedule management (create/edit/delete)
@@ -547,6 +550,9 @@ cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMI
 # Stations page: "Last song before Shabbos" (song and item at candle lighting from a library search, saves and keeps other settings), desktop and iPhone
 cd frontend && BASE_URL=http://localhost:4313 node e2e/shabbos-ending-setting.mjs
 
+# Stations page: "Omer count on the hour" (setting, recordings uploaded, what each hour says), fake backend, desktop and iPhone
+cd frontend && BASE_URL=http://localhost:4313 node e2e/omer-count-setting.mjs
+
 # Holiday Music page and the queue's holiday tag against a real backend (seed in wiki/holiday-music.md), desktop and iPhone
 cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMIN_PASSWORD=... node e2e/holiday-music.mjs
 
@@ -555,6 +561,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/program-block-season.mjs
 
 # Played list and RDS log: start times to the second on each station's clock, three stations, desktop and iPhone (fake backend)
 cd frontend && BASE_URL=http://localhost:4173 node e2e/played-seconds.mjs
+
+# Queue and library columns (drag, double-click to fit, kept, lined up with a 17 px scrollbar) and "Why it is in the queue" (playlist, block, step, links), three stations, desktop, car screen, iPhone
+cd frontend && BASE_URL=http://localhost:4173 node e2e/queue-columns.mjs
 
 # The control room's Song panel (category, not on this station, do not play, details) on desktop and phone sizes
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs
@@ -594,6 +603,9 @@ cd frontend && for s in bug-screenshot-faithful bug-over-dialogs bug-everywhere;
 
 # Leaving pages in real WebKit logs no version.json console error (reads WebKit's own console via MiniBrowser)
 cd frontend && xvfb-run -a python3 e2e/webkit/version-check-webkit.py
+
+# Every staff page, the control room's lower tabs and the main dialogs on desktop and iPhone, failing on leftover dark navy (real backend + e2e/walkthrough-seed.py)
+cd frontend && E2E_ADMIN_EMAIL=... E2E_ADMIN_PASS=... BASE_URL=http://localhost:4173 API_URL=http://localhost:8000/api/v1 SHOTS_DIR=/tmp/shots node e2e/qnet-look-shots.mjs
 
 # Check every admin page at desktop and iPhone size (needs the site and a backend running; see wiki/admin-page-layout.md)
 cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs

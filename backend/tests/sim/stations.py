@@ -208,8 +208,16 @@ async def seed(db, export: dict, start: datetime, days: int = 2, stations: set[s
     return {k: NAMES[k] for k in keep}
 
 
+OMER_CLIP_SECONDS = 6.0
+
+
 def _add_announcements(db, start: datetime, days: int) -> None:
-    """The uploaded Shprach clips: time of day per hour and half hour, weather per day."""
+    """The uploaded Shprach clips: time of day per hour and half hour, weather per day,
+    and the 49 Omer counts (they air only during the Omer)."""
+    for n in range(1, 50):
+        db.add(Asset(id=uuid.uuid4(), title=f"Omer day {n}", asset_type="jingle", category="omer_count",
+                     duration=OMER_CLIP_SECONDS, metadata_extra={"omer_day": f"{n:02d}", "source": "upload"},
+                     file_path=f"https://cdn.example.com/omer/{n:02d}.mp3"))
     for region in ("lakewood", "jerusalem"):
         for hour in range(24):
             for minute in (0, 30):

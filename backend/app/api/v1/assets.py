@@ -840,6 +840,52 @@ async def do_not_play(
     return await set_do_not_play(db, asset_id, on)
 
 
+class ExtraCategoriesIn(BaseModel):
+    extra_categories: list[str] = Field(default_factory=list, max_length=12)
+
+
+class BulkExtraCategoryIn(BaseModel):
+    asset_ids: list[uuid.UUID] = Field(..., min_length=1, max_length=5000)
+    category: str
+    remove: bool = False
+
+
+@router.post("/bulk-extra-category")
+async def bulk_extra_category(
+    body: BulkExtraCategoryIn,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Put many items also in one category (or take it off with `remove`); their main
+    category stays (services/asset_categories.py)."""
+    from app.services.asset_categories import bulk_add
+    return {"changed": await bulk_add(db, body.asset_ids, body.category, body.remove)}
+
+
+@router.get("/{asset_id}/categories")
+async def get_categories(
+    asset_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_staff),
+):
+    """Where an item can play: its main category, the extra ones ("Also in") and the
+    holiday lists it is on."""
+    from app.services.asset_categories import describe
+    return await describe(db, asset_id)
+
+
+@router.put("/{asset_id}/categories")
+async def put_categories(
+    asset_id: uuid.UUID,
+    body: ExtraCategoriesIn,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Replace an item's extra categories (its main one is set as before)."""
+    from app.services.asset_categories import set_extra
+    return await set_extra(db, asset_id, body.extra_categories)
+
+
 @router.get("/{asset_id}/station-block")
 async def get_station_block(
     asset_id: uuid.UUID,

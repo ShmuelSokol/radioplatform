@@ -70,6 +70,8 @@ engine at random moments, half of them within seconds of a quarter-hour mark.
 The site writes a play-log row when the *next* item starts. The item on air at the end of
 a run, and an item a restart cut at 0 s, have no row; the play-log check leaves them out.
 
+Omer count: the 49 clips are seeded with the time clips, and the check "Omer count after each hour's time check, the right day" runs on every simulation (during the Omer). Scenarios in `tests/test_omer_sim.py`, see [omer-count](omer-count.md).
+
 Holiday lists: `simulate(..., holiday_items=[{holiday, asset_id, station_id}])` (with the items' assets in `extra_assets`); `regenerate_windows=True` makes Shabbos and Yom Tov windows. Scenarios in `tests/test_holiday_sim.py`, see [holiday-music](holiday-music.md).
 
 ## Every Yom Tov of the year as broadcast days
@@ -109,3 +111,7 @@ The "paused shiur" check counts resume entries against pauses, not per item: the
 airs every night and is paused at the same second each night, so a run over several days
 has one `resume@N` entry per night for the same shiur. Counting them per item reported
 "2 resume entries" on Main's Shabbos/Yom Kippur run (2026-11-19) where each night had one.
+
+Check "queue page times hold" (2026-11-19): every 30 simulated minutes the run reads the queue as the control room does (`_get_queue_impl`) and keeps each waiting item's `estimated_start` for the next hour. Items that air more than 3 min from that time are findings. Automatic station IDs are left out, because they move on purpose. With the stand-in fixed (below), estimates held within about 30 s over an hour on Main.
+
+The stand-in engine now drops a flushed entry from its `given` list as radio.liq does (`/flush`: unless it is on air). Before, the backend took every flushed song for "aired without a start report" and marked it played. That emptied places in the queue: about a quarter of items aired 4 to 7 min off their estimate. The hold rule also counted the flushed song as pre-loaded, which caused the rare 4 to 6 s of emergency music between songs in the Yom Tov runs. Neither happens with the real engine.

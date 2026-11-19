@@ -1,0 +1,33 @@
+name: Outside watch
+
+# A backstop from outside every Kol B'ramah machine: backend health and the server
+# streams, every 5 minutes, ntfy on failure (once, then at most every 30 min) and once
+# on recovery. State is an open issue; see .github/scripts/outside_watch.py.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: outside-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - name: Check the station
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          GITHUB_TOKEN: ${{ github.token }}
+        # A failing station is reported by the push and the issue; the run itself
+        # stays green so GitHub does not email a failed-run notice every 5 minutes
+        run: python3 .github/scripts/outside_watch.py || true

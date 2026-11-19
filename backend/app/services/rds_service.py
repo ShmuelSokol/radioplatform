@@ -33,7 +33,7 @@ PS_MAX = 8
 PLACEHOLDERS = ("time", "date", "day", "temp", "weather", "station")
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
 # Items that are station furniture, not something to name on the radio display.
-UNNAMED_TYPES = {"jingle", "station_id", "time_announcement", "weather", "weather_spot", "silence", "blank"}
+UNNAMED_TYPES = {"jingle", "station_id", "time_announcement", "weather", "weather_spot", "omer_count", "silence", "blank"}
 
 DEFAULTS = {
     "ps_text": None,

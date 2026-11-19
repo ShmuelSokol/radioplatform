@@ -77,7 +77,7 @@ class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 # Clips made for one moment (a dated weather report, an hour's time check). They air
 # only through the timed weather/time paths, never as random filler of their type.
-ONE_MOMENT_CATEGORIES = ("weather_spot", "time_announcement")
+ONE_MOMENT_CATEGORIES = ("weather_spot", "time_announcement", "omer_count")
 
 
 # Items that must never be drawn at random: marked do-not-play, or made for tests
@@ -97,6 +97,13 @@ NEVER_RANDOM_CATEGORIES = (
     # only the station's Shabbos ending plays them (services/shabbos_ending.py)
     "shabbos_ending",
 )
+
+
+# Song mixes a song can belong to that play only where a playlist step names them
+# (Shmuel 2026-11-19: "Eliyahu Hanavi songs only on the Havdalah mix"). A song whose
+# main category is one of these never comes up in an "any song" step; a song that is
+# only also in one (extra categories, `asset_categories`) still does.
+MIX_ONLY_CATEGORIES = ("shabbos", "motzei_shabbos")
 
 
 # Placeholder items that must never be drawn by any automatic pick, even by a
@@ -150,7 +157,22 @@ def in_category(category):
     (and its place in that rotation) as well."""
     from sqlalchemy import or_
 
+    from sqlalchemy import and_, func, select
+
+    from app.models.category import Category
+
     condition = Asset.category == category
+    if category:
+        # A song can be in several categories: its main one (`category`) and extra ones
+        # (`asset_categories`, Library > Also in). An item whose main category keeps it
+        # off the air (do not play, tests, Carlebach, block only...) stays off.
+        extra = select(asset_categories.c.asset_id).join(
+            Category, Category.id == asset_categories.c.category_id
+        ).where(func.lower(Category.name) == category.lower())
+        condition = or_(condition, and_(
+            Asset.id.in_(extra),
+            or_(Asset.category.is_(None), func.lower(Asset.category).notin_(NEVER_RANDOM_CATEGORIES)),
+        ))
     if category == REQUESTED_CATEGORY:
         condition = or_(condition, Asset.metadata_extra[REQUESTED_TAG].astext == REQUESTED_TAG_VALUE)
     return condition
@@ -220,7 +242,7 @@ def fit_for_random_pick():
     return and_(
         or_(
             Asset.category.is_(None),
-            func.lower(Asset.category).notin_((*NEVER_RANDOM_CATEGORIES, *ONE_MOMENT_CATEGORIES)),
+            func.lower(Asset.category).notin_((*NEVER_RANDOM_CATEGORIES, *ONE_MOMENT_CATEGORIES, *MIX_ONLY_CATEGORIES)),
         ),
         not_placeholder(),
         not_contract_audio(),

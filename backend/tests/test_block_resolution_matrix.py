@@ -276,15 +276,24 @@ async def test_v1_69_recurrence_types(db_session):
 @pytest.mark.asyncio
 async def test_v1_70_station_without_coordinates_does_not_get_jerusalem_sunset(db_session):
     """V1-70: a New York station with no latitude/longitude used to get Jerusalem's sunset
-    (09:38 New York time). It now uses the block's own clock time."""
+    (09:38 New York time). It now uses Lakewood's, where its Shabbos silence is worked out
+    (about 16:35 on 17 Nov 2026); a station elsewhere with none uses the block's clock time."""
     station = await _station(db_session)  # no latitude/longitude
     await _blocks(db_session, station, [{
         "name": "After sunset", "start_time": time(17), "end_time": time(23),
         "start_sun_event": SunEvent.SUNSET,
     }])
     assert await _on(db_session, station, 2026, 11, 17, 10, 0) is None
-    assert await _on(db_session, station, 2026, 11, 17, 16, 50) is None
-    assert await _on(db_session, station, 2026, 11, 17, 17, 0) == "After sunset"
+    assert await _on(db_session, station, 2026, 11, 17, 16, 25) is None
+    assert await _on(db_session, station, 2026, 11, 17, 16, 45) == "After sunset"
+    chicago = await _station(db_session, timezone="America/Chicago")
+    await _blocks(db_session, chicago, [{
+        "name": "After sunset", "start_time": time(17), "end_time": time(23),
+        "start_sun_event": SunEvent.SUNSET,
+    }])
+    chi = ZoneInfo("America/Chicago")
+    assert await _on(db_session, chicago, 2026, 11, 17, 16, 50, tz=chi) is None
+    assert await _on(db_session, chicago, 2026, 11, 17, 17, 0, tz=chi) == "After sunset"
 
 
 @pytest.mark.asyncio
@@ -470,3 +479,36 @@ async def test_v1_72_rotation_on_air_is_not_shifted_by_other_plays(db_session):
     plan = await generate(db_session, station, start, 0.4, artist_distance=0,
                           cursor={str(block.id): 1})
     assert [p.category for p in plan.picks[:3]] == ["B", "C", "A"]
+
+
+@pytest.mark.asyncio
+async def test_each_run_of_a_block_starts_its_playlist_from_the_first_step(db_session):
+    """Shmuel 2026-11-19, Motzei Shabbos: "start off with Motzei Shabbos songs". The cursor
+    carried on from where the block's last run (yesterday, last week) left off, so a run
+    could open on step 2. Each run now starts at step 1; inside a run it carries on."""
+    from app.services.playlist_generator_service import generate
+
+    station = await _station(db_session)
+    template = PlaylistTemplate(id=uuid.uuid4(), name="Mix", station_id=station.id, is_active=True)
+    db_session.add(template)
+    await db_session.flush()
+    for i, cat in enumerate(["A", "B", "C"]):
+        db_session.add(TemplateSlot(id=uuid.uuid4(), template_id=template.id, position=i,
+                                    asset_type="music", category=cat))
+    await _blocks(db_session, station, [{
+        "name": "Evening", "start_time": time(18), "end_time": time(19),
+        "playlist_template_id": template.id}])
+    db_session.add_all([Asset(id=uuid.uuid4(), title=f"{cat}{n}", artist=f"Artist {cat}{n}", duration=240.0,
+                              file_path=f"{uuid.uuid4().hex}.mp3", asset_type="music", category=cat)
+                        for cat in "ABC" for n in range(20)])
+    await db_session.commit()
+    plan = await generate(db_session, station, datetime(2026, 11, 17, 18, 0, tzinfo=NY), 0.9, artist_distance=0)
+    first = [p.category for p in plan.picks if p.block_name == "Evening"]
+    assert first[:3] == ["A", "B", "C"] and len(first) % 3 != 0  # it stopped mid-sequence
+    plan = await generate(db_session, station, datetime(2026, 11, 18, 18, 0, tzinfo=NY), 0.3,
+                          artist_distance=0, cursor=plan.cursor)
+    assert [p.category for p in plan.picks][:3] == ["A", "B", "C"]
+    # inside one run, a later fill carries on
+    mid = await generate(db_session, station, datetime(2026, 11, 18, 18, 30, tzinfo=NY), 0.2,
+                         artist_distance=0, cursor=plan.cursor)
+    assert mid.picks[0].category == ["A", "B", "C"][len(plan.picks) % 3]

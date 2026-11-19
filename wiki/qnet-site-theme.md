@@ -20,6 +20,13 @@ Write ordinary Tailwind; the skin does the rest. Things worth knowing:
 - Specificity is `.qn-site` + one attribute (0,2,0), above Tailwind utilities, with no `!important`. Inline styles still win.
 - Do not change page markup for the look; fix it in the skin. Layout rules stay in [admin-page-layout](admin-page-layout.md).
 
+- Text chips (`rounded-full` with side padding on a span/div/p: SCHEDULED, counts) are square tags; dots, bars and switches (no `px-`) stay round. A light text colour (`text-*-50..300`) on a strong badge of its own (`bg-blue-700 text-blue-200`) is drawn white, like `text-white`.
+- A `textarea` is always sunken white, whatever dark `bg-*` class it carries.
+- The bug reporter (`BugReporter.tsx`) is outside the page wrapper; on `/admin` and `/sponsor` its root gets `qn-site qn-bug` (`display: contents`), so the floating button is a raised grey button and the dialog a grey window. Listener pages keep the round button.
+- Control room panes keep `.qn` (classic.css), not this skin. Lists there are the black log in bold yellow (`qn-log`, `qn-row`); forms and cards are the grey face with `qn-title` bars, `qn-field` boxes, `qn-btn` buttons and black `qn-sunken` LCD boxes. The Go live, Played, Sponsors, Schedule and Errors tabs were still the old dark navy until 2026-11-19 (Shmuel: "the go live view looks weird").
+
 ## Checking it
 
 `e2e/admin-layout-audit.mjs` (sideways scroll at 1920, 390 and 320 px) and `e2e/admin-flows.mjs` both run against the skinned pages. Look at screenshots too (`SHOTS_DIR`); the checks do not catch ugly. The first pass found two 320 px overflows caused by the wider bold buttons and select arrows (Schedules card header now wraps; `select` and `label` may shrink).
+
+`e2e/qnet-look-shots.mjs` (real backend, the walkthrough seed) screenshots every staff page, the control room's lower-pane tabs and the dialogs a walk does not open, at desktop and iPhone size, and fails when more than 8% of a screen is still the old dark navy.
