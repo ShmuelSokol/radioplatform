@@ -23,13 +23,6 @@ interface EpgResponse {
   blocks: EpgBlock[];
 }
 
-const playbackModeColors: Record<string, string> = {
-  sequential: 'bg-blue-600/20 text-blue-300 border-blue-500/30',
-  shuffle: 'bg-purple-600/20 text-purple-300 border-purple-500/30',
-  weighted: 'bg-amber-600/20 text-amber-300 border-amber-500/30',
-  rotation: 'bg-green-600/20 text-green-300 border-green-500/30',
-  off_air: 'bg-gray-700/30 text-gray-400 border-gray-500/30',
-};
 
 function formatTime12h(time24: string): string {
   const [h, m] = time24.split(':').map(Number);
@@ -141,12 +134,13 @@ export default function ProgramGuide() {
   const dateLabel = isToday ? 'Today' : new Date(selectedDate + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
 
   return (
-    <div className="min-h-screen bg-[#0a0a28] text-white">
-      <div className="max-w-3xl mx-auto px-4 py-8">
+    // Edge to edge under the menu: the page's own margin left a white frame round the dark guide
+    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mt-6 -mb-36 sm:-mb-6 min-h-[calc(100dvh-3rem)] bg-[#0a0a28] text-white">
+      <div className="max-w-3xl mx-auto px-4 pt-8 pb-36 sm:pb-10">
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-cyan-300 mb-1">Schedule</h1>
-          <p className="text-gray-500 text-sm">Browse the daily schedule for any station</p>
+          <p className="text-gray-400 text-sm">Browse the daily schedule for any station</p>
         </div>
 
         {/* Controls */}
@@ -217,15 +211,12 @@ export default function ProgramGuide() {
             <div className="space-y-1">
               {blocks.map((block) => {
                 const isCurrent = isCurrentBlock(block, selectedDate, now);
-                const modeClass = playbackModeColors[block.playback_mode] || 'bg-gray-600/20 text-gray-400 border-gray-500/30';
 
                 return (
                   <div
                     key={`${block.id}-${block.start_time}`}
                     data-testid="guide-block"
-                    className={`relative flex gap-4 group ${
-                      isCurrent ? '' : ''
-                    }`}
+                    className="relative flex gap-4 group"
                   >
                     {/* Timeline dot */}
                     <div className="flex-shrink-0 w-[47px] flex items-start justify-center pt-4 relative z-10">
@@ -248,7 +239,7 @@ export default function ProgramGuide() {
                     >
                       <div className="flex flex-wrap items-center gap-2 mb-1">
                         {/* Time range */}
-                        <span className={`text-sm font-mono ${isCurrent ? 'text-cyan-300' : 'text-gray-400'}`}>
+                        <span data-testid="guide-time" className={`text-sm font-semibold tabular-nums ${isCurrent ? 'text-cyan-300' : 'text-gray-300'}`}>
                           {block.start_time ? formatTime12h(block.start_time) : '??:??'}
                           {' - '}
                           {block.end_time ? formatTime12h(block.end_time) : '??:??'}
@@ -261,10 +252,12 @@ export default function ProgramGuide() {
                           </span>
                         )}
 
-                        {/* Playback mode badge */}
-                        <span className={`text-[10px] uppercase font-medium px-2 py-0.5 rounded-full border ${modeClass}`}>
-                          {block.off_air ? 'off air' : block.playback_mode}
-                        </span>
+                        {/* Off the air (Shabbos, Yom Tov); how the station picks songs is staff business */}
+                        {block.off_air && (
+                          <span className="text-[10px] uppercase font-bold tracking-wider text-red-300 bg-red-400/10 px-2 py-0.5 rounded-full">
+                            Off air
+                          </span>
+                        )}
                       </div>
 
                       {/* Block name */}
@@ -274,15 +267,9 @@ export default function ProgramGuide() {
 
                       {/* Description */}
                       {block.description && (
-                        <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">{block.description}</p>
+                        <p className="text-sm text-gray-400 mt-0.5 line-clamp-2">{block.description}</p>
                       )}
 
-                      {/* Schedule name */}
-                      {block.schedule_name && (
-                        <p className="text-[11px] text-gray-600 mt-1">
-                          Schedule: {block.schedule_name}
-                        </p>
-                      )}
                     </div>
                   </div>
                 );

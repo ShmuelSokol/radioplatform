@@ -603,6 +603,9 @@ cd frontend && for s in bug-screenshot-faithful bug-over-dialogs bug-everywhere;
 # Leaving pages in real WebKit logs no version.json console error (reads WebKit's own console via MiniBrowser)
 cd frontend && xvfb-run -a python3 e2e/webkit/version-check-webkit.py
 
+# Every staff page, the control room's lower tabs and the main dialogs on desktop and iPhone, failing on leftover dark navy (real backend + e2e/walkthrough-seed.py)
+cd frontend && E2E_ADMIN_EMAIL=... E2E_ADMIN_PASS=... BASE_URL=http://localhost:4173 API_URL=http://localhost:8000/api/v1 SHOTS_DIR=/tmp/shots node e2e/qnet-look-shots.mjs
+
 # Check every admin page at desktop and iPhone size (needs the site and a backend running; see wiki/admin-page-layout.md)
 cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs
 

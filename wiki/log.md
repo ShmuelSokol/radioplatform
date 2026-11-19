@@ -174,6 +174,7 @@ UPDATE 2026-11-16 hourly-slots.md automatic time/weather entries now get timing_
 UPDATE 2026-11-16 audio-engine.md Listen mid-item in Safari: decks started inside the click, graph built before resume()
 INGEST 2026-11-16 control-room.md KBR Studio look (classic.css, desktop layout, row heights tied to ROW_*); jingle cart hides dated time/weather recordings via hide_generated
 INGEST 2026-11-18 qnet-site-theme.md every admin and sponsor page wears the KBR Studio look through one skin (.qn-site: styles/qnet-site.css + generated qnet-site-colors.css from scripts/gen-qnet-colors.mjs, run by build, checked by lint); listener pages untouched; coloured button = default-button frame, also the 'selected' look
+UPDATE 2026-11-19 qnet-site-theme.md control room Go live/Played/Sponsors/Schedule/Errors tabs moved from dark navy to the .qn look; square text chips, light text white on strong badges, textareas always white, bug reporter skinned on staff pages; e2e/qnet-look-shots.mjs measures leftover dark navy
 UPDATE 2026-11-16 audio-engine.md hard timed items preloaded on the idle deck 60 s ahead
 UPDATE 2026-11-17 deploys.md the unused Vercel project studio-kolbramah-api reports its production address as backend-gamma-six-68.vercel.app, so the ignore script now also skips backend-*
 INGEST 2026-11-16 control-room.md queue polls only the first 150 rows; whole queue on scroll-to-end or day pick, back to 150 at the top

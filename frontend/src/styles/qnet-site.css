@@ -28,6 +28,9 @@
 
 /* Square corners and no soft shadows; round dots, pills and switches stay round. */
 .qn-site [class*="rounded"]:not([class~="rounded-full"]) { border-radius: 0; }
+/* Text chips (status tags like SCHEDULED, counts, labels) are square tags like the rest;
+   only dots, bars and switches, which have no side padding, stay round. */
+.qn-site :is(span, div, p)[class~="rounded-full"]:is([class*="px-"], [class*=" px-"]) { border-radius: 0; }
 .qn-site [class*="shadow"] { box-shadow: none; }
 .qn-site [class*="backdrop-blur"] { -webkit-backdrop-filter: none; backdrop-filter: none; }
 
@@ -98,7 +101,7 @@
 
 /* ── Boxes you type in: sunken white ── */
 .qn-site input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="submit"]):not([type="button"]),
-.qn-site textarea {
+.qn-site textarea, .qn-site textarea[class] {
   background: #fff;
   color: #000;
   border: 0;
@@ -218,4 +221,16 @@ nav.qn-site .qn-brand:hover { background: transparent; color: #000080; }
     font-size: 14px !important; border: 1px solid #808080; border-radius: 2px; background: #d4d0c8; color: #000 !important;
   }
   table.phone-cards > tbody > tr > td:last-child:not(:first-child) [data-danger] { order: 99; margin-left: 28px; color: #a00000 !important; border-color: #a00000; }
+}
+
+/* ── The bug reporter on staff pages (BugReporter.tsx puts .qn-site.qn-bug on its root) ──
+   Its root has no box of its own; the floating button is a raised grey button and the
+   dialog a grey window like every other staff dialog. Listener pages keep the round one. */
+.qn-site.qn-bug { display: contents; }
+.qn-site.qn-bug [data-bug-trigger], .qn-site.qn-bug [data-bug-trigger]:hover {
+  border-radius: 0; background: var(--qn-face); color: #000; box-shadow: var(--qn-raised);
+}
+.qn-site.qn-bug [data-bug-trigger]:active { box-shadow: var(--qn-sunk); }
+.qn-site.qn-bug [role="dialog"][aria-label="Report a bug"] {
+  background: var(--qn-face); color: #000; border-radius: 0; box-shadow: var(--qn-raised), 0 0 0 1px #000;
 }
