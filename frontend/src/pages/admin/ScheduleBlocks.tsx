@@ -9,6 +9,8 @@ import { usePlaylistTemplates } from '../../hooks/usePlaylists';
 import AssetCategoryBadge from '../../components/AssetCategoryBadge';
 import { useAuth } from '../../hooks/useAuth';
 import { isManager } from '../../auth/access';
+import { useStations } from '../../hooks/useStations';
+import HolidayMixNote from '../../components/holiday/HolidayMixNote';
 
 export default function ScheduleBlocks() {
   const { scheduleId } = useParams<{ scheduleId: string }>();
@@ -30,6 +32,9 @@ export default function ScheduleBlocks() {
     queryFn: async () => { const r = await apiClient.get('/schedules/blocks', { params: { schedule_id: scheduleId } }); return r.data; },
     enabled: !!scheduleId,
   });
+
+  const { data: stationsData } = useStations();
+  const scheduleStation = (stationsData?.stations ?? []).find((s: any) => s.id === schedule?.station_id);
 
   const { data: assetsData } = useAssets();
   const assets = assetsData?.assets || [];
@@ -221,6 +226,7 @@ export default function ScheduleBlocks() {
         (a repeating order of song types, made on the Playlists page) and the station keeps playing
         it until the block ends, or until the next block starts.
       </p>
+      {scheduleStation && <HolidayMixNote stations={[scheduleStation]} />}
 
       {showBlockForm && (
         <form onSubmit={handleCreateBlock} className="bg-white p-6 rounded-lg shadow-md mb-6 space-y-4">

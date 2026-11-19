@@ -326,7 +326,14 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
     if not movable(last.entry, last.start):
         return False
     block = last.entry.block_id
-    spare = [e for e in songs if movable(e) and e.block_id == block and secs(e) is not None]
+    # Holiday songs stay where the fill spaced them (about every fourth song): pulled
+    # forward into the last place they sat beside another holiday song (simulator,
+    # Erev Chanukah 2026-11-19). One already in the last place may still move out.
+    from app.models.holiday_music import HolidayItem
+
+    holiday_ids = {str(a) for a in (await db.execute(select(HolidayItem.asset_id))).scalars().all()}
+    spare = [e for e in songs if movable(e) and e.block_id == block and secs(e) is not None
+             and str(e.asset_id) not in holiday_ids]
     if _analysis_on():
         # A candidate whose end point is not measured yet is asked for and left out
         # of this look; it can be chosen ten seconds later

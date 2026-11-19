@@ -66,8 +66,10 @@ DEFAULTS = {
 }
 LIMITS = {"lead_days": (0, 90), "start_every": (1, 200), "peak_every": (1, 200), "during_every": (1, 200)}
 
-# The least time between two plays of the same holiday item on a station
-REST = {"music": timedelta(hours=2), "long": timedelta(hours=6)}
+# The least time between two plays of the same holiday item on a station. A story
+# or shiur at most once a day: with 6 hours, All Day Stories' two Chanukah stories
+# each aired four times a day already at the starting rate (2026-11-19).
+REST = {"music": timedelta(hours=3), "long": timedelta(hours=24)}
 
 MUSIC_TYPES = {"music"}
 LONG_TYPES = {"shiur", "stories", "story", "daf_yomi", "lecture"}
@@ -235,6 +237,10 @@ class HolidayMix:
     seasons: list[Season] = field(default_factory=list)
     # holiday key -> how many items it put in (for notes and tests)
     used: dict[str, int] = field(default_factory=dict)
+    # The last song/shiur/story before the next pick was a holiday item: never two
+    # in a row, whatever the credit (simulator heard two around a station ID on
+    # Erev Chanukah 2026-11-19)
+    prev_holiday: bool = False
 
     @classmethod
     async def for_station(cls, db: AsyncSession, station, start: datetime, last_used_loader=None):
@@ -305,8 +311,10 @@ class HolidayMix:
         for asset_id, asset_type in sequence:
             if str(asset_id) in holiday_ids:
                 count, seen_holiday = 0, True
+                self.prev_holiday = True
             elif kind_of(asset_type):
                 count += 1
+                self.prev_holiday = False
         if not seen_holiday and count < 1 / share:
             return self.credit  # nothing to go by yet: a random start
         return min(count * share, 0.999)
@@ -341,7 +349,8 @@ class HolidayMix:
             if not rows:
                 continue
             self.credit += share
-            if self.credit < 1.0:
+            if self.credit < 1.0 or self.prev_holiday:
+                self.prev_holiday = False
                 return None
             # The longest rested first; equal ones at random. An item that played
             # within its rest time is not used again: a short list then airs less
@@ -351,12 +360,15 @@ class HolidayMix:
             rested = [r for r in rows if as_utc(at) - self.last_used.get(str(r.id), epoch) >= rest]
             if not rested:
                 self.credit = min(self.credit, 1.0)  # no burst once one is rested again
+                self.prev_holiday = False
                 return None
             self.credit -= 1.0
             row = min(rested, key=lambda r: (self.last_used.get(str(r.id), epoch), random.random()))
             self.last_used[str(row.id)] = as_utc(at)
             self.used[season.key] = self.used.get(season.key, 0) + 1
+            self.prev_holiday = True
             return row, season.key
+        self.prev_holiday = False
         return None
 
 
@@ -395,3 +407,55 @@ async def holidays_for_assets(db: AsyncSession, station, asset_ids, when: dateti
         if key in live:
             out[str(asset_id)] = HOLIDAY_NAMES.get(key, key)
     return out
+
+
+async def space_out(db: AsyncSession, station_id) -> int:
+    """Swap apart two holiday items that wait next to each other in the queue (songs,
+    shiurim and stories counted; jingles and timed items skipped). The fill spaces
+    them, but later edits to the queue (sponsorships planned in, top-ups after
+    deletions, reordering before a hard item) put two Chanukah songs back to back in
+    the simulator (2026-11-19). The second one changes place with the next ordinary
+    automatic item of its kind. The item on air, what the engine holds and the next
+    two waiting are left alone. Returns swaps made; does not commit."""
+    from sqlalchemy.orm import joinedload
+
+    from app.models.queue_entry import QueueEntry
+    from app.services.playout_engine import held_entry_ids
+
+    holiday_ids = {str(a) for a in (await db.execute(
+        select(HolidayItem.asset_id).where(
+            or_(HolidayItem.station_id.is_(None), HolidayItem.station_id == station_id))
+    )).scalars().all()}
+    if not holiday_ids:
+        return 0
+    rows = (await db.execute(
+        select(QueueEntry).options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
+        .order_by(QueueEntry.position)
+    )).unique().scalars().all()
+    held = held_entry_ids(station_id)
+    ordinary = [e for e in rows if e.preempt_at is None and e.asset is not None and kind_of(e.asset.asset_type)]
+    frozen = {e.id for e in rows if e.status == "playing" or e.id in held}
+    frozen |= {e.id for e in [e for e in rows if e.status == "pending"][:2]}
+
+    def is_holiday(e) -> bool:
+        return str(e.asset_id) in holiday_ids
+
+    swaps = 0
+    i = 1
+    while i < len(ordinary):
+        prev, cur = ordinary[i - 1], ordinary[i]
+        if is_holiday(prev) and is_holiday(cur) and cur.id not in frozen and cur.source == "auto":
+            kind = kind_of(cur.asset.asset_type)
+            for j in range(i + 1, len(ordinary)):
+                other = ordinary[j]
+                if (other.source == "auto" and not is_holiday(other) and other.id not in frozen
+                        and kind_of(other.asset.asset_type) == kind):
+                    cur.position, other.position = other.position, cur.position
+                    ordinary[i], ordinary[j] = other, cur
+                    swaps += 1
+                    break
+        i += 1
+    if swaps:
+        await db.flush()
+    return swaps

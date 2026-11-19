@@ -461,3 +461,4 @@ INGEST 2026-11-19 sponsor-accounts.md Book a sponsorship window (4 steps) and GE
 UPDATE 2026-11-19 sponsor-accounts.md Sponsors menu renamed (Clients, All contracts, Sponsor requests, Wording rules), Sponsorship board page, client page opens on Contracts with a Requests tab
 UPDATE 2026-11-19 sponsor-accounts.md Review pass: a click beside the booking window no longer closes a half-made booking, Book into this slot keeps the usual week, board boxes say how many plays are over, Record Spots 'Book this spot' opens the window with that spot (?sponsor=&asset=)
 UPDATE 2026-11-19 holiday-music.md a holiday list or settings change in season redraws the waiting automatic songs (queue is 48 h ahead; otherwise the change aired 2 days late)
+UPDATE 2026-11-19 holiday-music.md rest per holiday item now 3 h song / 24 h story or shiur (was 2 h / 6 h; two-story list aired each 4x a day)
