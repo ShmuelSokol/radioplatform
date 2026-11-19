@@ -52,7 +52,12 @@ silence (candle lighting to shekia + 72).
   silences, where rows drawn for after the window also sit), followed by a flush. While a
   blackout lasts, `handle_next` hands the engine nothing but silence (None otherwise, as during
   a live show): a song handed then waited loaded and aired first after Shabbos (simulator,
-  Jerusalem 2026-11-20). The blackout's end flushes and skips as before. The silences are hard
+  Jerusalem 2026-11-20). The blackout's end flushes and skips as before. The item at
+  candle lighting (`shabbos_end`) is still handed (an engine restart that minute asks for it
+  with /next). Real engine: harness `shabbos_silence` (four silences, nothing heard, no
+  emergency report, the held song not first afterwards).
+- Air watch raises no `timed_skipped` during a blackout (those rows were taken out on purpose).
+  The Outside watch counts stream bytes, and silence still streams, so it stays quiet too. The silences are hard
   timed, so they jump ahead of whatever still waited; those rows used to air first after
   Shabbos (2026-11-19 read: Main's Friday-afternoon block and a 21:15 sponsorship, Jerusalem's
   Erev Shabbos daf). Rows after the silences and rows timed after the window stay; what is

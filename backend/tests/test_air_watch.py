@@ -767,3 +767,27 @@ def test_waiting_and_playing_rows_have_their_own_indexes():
     assert app_main.CONCURRENT_INDEXES["ix_qe_playing_started"] == (
         "queue_entries (station_id, started_at) WHERE status = 'playing'"
     )
+
+
+@pytest.mark.asyncio
+async def test_items_taken_out_for_shabbos_raise_nothing_during_it(db_session):
+    """Inside a blackout the time checks, weather and sponsorships due then (or queued for
+    before it) were taken out on purpose: no "was skipped" alert on Shabbos."""
+    from app.models.holiday_window import HolidayWindow
+
+    now = datetime.now(UTC)
+    st = await _station(db_session)
+    silence = await _asset(db_session, "Silence (5 min)", kind="silence", duration=300)
+    tc = await _asset(db_session, "Time", category="time_announcement", kind="jingle", duration=8)
+    sponsor = await _asset(db_session, "TEST SPONSOR 50", kind="spot", duration=30)
+    db_session.add(HolidayWindow(id=uuid.uuid4(), name="Shabbos", start_datetime=now - timedelta(minutes=6),
+                                 end_datetime=now + timedelta(hours=24), is_blackout=True, affected_stations=None))
+    db_session.add_all([
+        _entry(st, tc, status="skipped", preempt_at=now - timedelta(minutes=2), timing_mode="hard"),
+        _entry(st, sponsor, position=2, status="skipped", source="block",
+               preempt_at=now - timedelta(minutes=9), timing_mode="hard"),
+        _entry(st, silence, position=3, status="playing", started_at=now - timedelta(seconds=40)),
+    ])
+    await db_session.commit()
+    found = await AirWatch().check_station(db_session, st, now)
+    assert found == []
