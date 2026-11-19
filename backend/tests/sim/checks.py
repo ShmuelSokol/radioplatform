@@ -239,6 +239,11 @@ def hard_items_on_time(res: Result, ctx: Context):
             continue
         if not (start + 60 <= at.timestamp() <= end - 120):
             continue
+        # A local FM box offline (tests/sim/offline.py) aired its own copy of the site's
+        # row; the row is set aside when the box is back
+        box_off = getattr(ctx.sim, "box_offline", None)
+        if box_off and e.status == "skipped" and box_off[0] <= at.timestamp() < box_off[1]:
+            continue
         if str(e.id) not in aired and e.status not in ("cancelled",):
             a = ctx.assets.get(str(e.asset_id))
             tz = ZoneInfo(ctx.stations[str(e.station_id)].timezone)

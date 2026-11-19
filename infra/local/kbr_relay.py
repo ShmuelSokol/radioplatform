@@ -127,6 +127,7 @@ class Relay:
         self.clock = clock
         self.lock = threading.RLock()
         self.batch_reports = True  # the backend takes kept reports many at a time
+        self.last_break_end = 0.0  # when the last break offline ended (station IDs keep clear)
         self.plan: dict = self._read_json("plan.json", {"entries": [], "blackouts": []})
         # The days after the queue (see sync_extension); {} until the first fetch
         self.offline_days = offline_days
@@ -422,6 +423,8 @@ class Relay:
             return True
         ends = cur["at"] + float(cur.get("duration") or 0.0) - cue_in_of(cur.get("uri") or "")
         airs = max(now, ends)
+        if airs - float(self.last_break_end or 0.0) < ID_CLEAR_SECONDS:
+            return True
         # A soft item already due airs right after the song, so it counts as at `airs`
         # and a hard item due before the song ends cuts it: the ID would follow the break
         # (measured from the end of each item: a group runs a minute or more)
@@ -613,6 +616,9 @@ class Relay:
                     self.aired[item["asset_id"]] = self.on_air["at"]
                 if item.get("station_id"):
                     self.last_id_at = self.on_air["at"]
+                elif (item.get("kind") or "") not in ("music", "silence", ""):
+                    # a break (time check, weather, sponsorship): an ID keeps clear of its end
+                    self.last_break_end = self.on_air["at"] + float(item.get("duration") or 0.0)
             self._save_state()
 
     def _before_group(self, at: float, group: list[dict]) -> bool:

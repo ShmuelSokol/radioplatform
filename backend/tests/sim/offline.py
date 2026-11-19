@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import importlib.util
 import json
+import os
 import logging
 import tempfile
 import time
@@ -205,6 +206,9 @@ async def run(export_path, start, cut, back, end, changes=True, out=None, offlin
             return await inner(path, payload, station_id=station_id, **kw)
 
         playout_engine._command = command
+        # the station's engine is a local FM box (PLAYOUT_RELAY_STATION_ID)
+        from app.config import settings as _settings
+        _settings.PLAYOUT_RELAY_STATION_ID = MAIN
         await sim.run_until(cut, on_step=box.step)
         box.line_up = False
         plan_at_cut = len(box.relay.plan.get("entries", []))
@@ -221,7 +225,17 @@ async def run(export_path, start, cut, back, end, changes=True, out=None, offlin
         notes.append(f"line back {back.astimezone(NY):%a %H:%M}: {kept} start reports kept on the box")
         await sim.run_until(end, on_step=box.step)
         playout_engine._command = inner
+        if os.environ.get("SIM_DEBUG_RETURN"):
+            b0 = back.timestamp()
+            with open(os.environ["SIM_DEBUG_RETURN"], "w") as dbg:
+                for t, path, payload in eng.commands:
+                    if b0 - 60 <= t <= b0 + 900:
+                        dbg.write(f"CMD {t - b0:8.1f} {path} {json.dumps(payload)[:160]}\n")
+                for seg in sim.log:
+                    if b0 - 300 <= seg.start <= b0 + 900:
+                        dbg.write(f"AIR {seg.start - b0:8.1f} {seg.lane} {seg.entry_id} {seg.title}\n")
         sim.box_items = box.items_not_in_queue()
+        sim.box_offline = (cut.timestamp(), back.timestamp())
         result = await checks.collect(sim)
         report = await _after(sim, sid, result, cut, back, made, notes)
     finally:

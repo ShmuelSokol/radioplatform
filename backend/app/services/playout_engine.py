@@ -88,6 +88,10 @@ class EngineState:
     skip_requested: bool = False
     # Soft-timed groups (by their time) whose hard_by limit already made us fade the song
     hard_by_done: set[str] = field(default_factory=set)
+    # A local FM box is sending what it aired offline, batch after batch (monotonic):
+    # till then the "playing" row is some item of the offline days, and the tick must
+    # not act on it (it took Shabbos silence as on air and skipped the real song)
+    box_catch_up_until: float = 0.0
     # Monotonic time of the engine's last call to us
     last_contact: float = 0.0
     last_alert: float = 0.0
@@ -1213,12 +1217,26 @@ async def _handle_started_locked(
         return result
 
 
+# How long the playout tick waits for the next batch of a box's kept reports
+BOX_CATCH_UP_HOLD_SECONDS = 30.0
+
+
 async def handle_started_batch(db: AsyncSession, station_id, reports: list[dict]) -> int:
     """A local FM box back on line: its kept start reports in order (POST /started-batch),
     all but the newest quiet. Then the site's timed rows for the hours the box ran alone
     are set aside: the box aired its own copies, and left pending they all went out at
     once as "due" on return (a week offline: Saturday's weather and a ":30" time check
     at 6:14 on Thursday). Returns how many reports were taken."""
+    from app.services import playout_tunnel
+
+    state = get_state(station_id)
+    more = bool(reports) and bool(reports[-1].get("more"))
+    # Only a local FM box's station, never a droplet engine's; refreshed by each batch and
+    # short, so a lost last batch cannot keep the tick off
+    if more and playout_tunnel.allowed(station_id):
+        state.box_catch_up_until = time.monotonic() + BOX_CATCH_UP_HOLD_SECONDS
+    else:
+        state.box_catch_up_until = 0.0
     for i, r in enumerate(reports):
         kept = bool(r.get("kept"))
         await handle_started(
@@ -1235,10 +1253,21 @@ async def handle_started_batch(db: AsyncSession, station_id, reports: list[dict]
             pass
     if kept_at:
         upto = datetime.fromtimestamp(min(max(kept_at), datetime.now(UTC).timestamp()), UTC)
+        # never a row whose start report is on its way
+        in_flight = set(state.recent_started) | set(getattr(state, "starting", None) or ())
+        if state.cued_entry_id:
+            in_flight.add(state.cued_entry_id)
+        keep_ids = []
+        for x in in_flight:
+            try:
+                keep_ids.append(uuid.UUID(str(x)))
+            except ValueError:
+                pass
         gone = await db.execute(
             update(QueueEntry)
             .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending",
-                   QueueEntry.preempt_at.isnot(None), QueueEntry.preempt_at < upto)
+                   QueueEntry.preempt_at.isnot(None), QueueEntry.preempt_at < upto,
+                   QueueEntry.id.notin_(keep_ids))
             .values(status="skipped")
             .execution_options(synchronize_session=False)
         )
@@ -2181,6 +2210,8 @@ async def tick(db: AsyncSession, station) -> None:
     station_id = station.id
     state = get_state(station_id)
     now = datetime.now(UTC)
+    if state.box_catch_up_until > time.monotonic():
+        return  # a local FM box is still sending what it aired offline
 
     # During a live show the automation queue is left alone. The engine's pre-loaded next
     # track would air during the show and be used up: drop it once (/next hands it
