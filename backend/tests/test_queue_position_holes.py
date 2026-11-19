@@ -113,3 +113,22 @@ async def test_operator_actions_keep_the_order_when_positions_have_holes(client,
     r = await client.post(f"{base}/skip?fade=hard", headers=auth_headers)
     assert r.status_code == 200
     assert r.json()["now_playing"] == str(assets["C"])
+
+
+@pytest.mark.asyncio
+async def test_play_next_goes_ahead_of_everything_waiting(client, auth_headers, db_session):
+    """Jerusalem 2026-11-19: a station ID aired ahead of an operator's Play next. With the
+    item on air numbered after the waiting ones, "one after the item on air" was behind them."""
+    station_id, assets, entries = await _station_with_holes(db_session)
+    on_air = (await db_session.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.status == "playing"))).scalar_one()
+    on_air.position = 12  # A (10) waits before it in the numbering
+    await db_session.commit()
+    res = await client.post(f"/api/v1/stations/{station_id}/queue/play-next",
+                            json={"asset_id": str(assets["X"])}, headers=auth_headers)
+    assert res.status_code in (200, 201), res.text
+    db_session.expire_all()
+    first = (await db_session.execute(
+        select(QueueEntry.asset_id).where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+        .order_by(QueueEntry.position).limit(1))).scalar_one()
+    assert str(first) == str(assets["X"])

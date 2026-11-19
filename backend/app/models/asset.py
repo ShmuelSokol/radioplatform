@@ -195,6 +195,9 @@ def not_contract_audio():
 # switch-on (2026-11-19): Jerusalem's ID on Main and on All Day Stories, IDs back to
 # back and right after a sponsorship, even with the setting off.
 STATION_ID_CATEGORY_PREFIX = "station_id"
+# No automatic station ID shorter than this: after a 1.8 s ID the engine had not loaded
+# the next song and played its emergency file for 2 to 3 s (Jerusalem, 2026-11-19)
+MIN_STATION_ID_SECONDS = 4.0
 
 
 def not_station_id():

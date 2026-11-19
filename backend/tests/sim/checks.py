@@ -293,6 +293,9 @@ def no_dead_air(res: Result, ctx: Context):
             gap = cur.start - prev.end
             hold_ok = (cur.timing_mode == "hard" and cur.preempt_at is not None
                        and abs(cur.start - cur.preempt_at.timestamp()) <= 1 and gap <= HOLD_SECONDS)
+            # A few seconds of quiet before the Shabbos silence item sound the same as the
+            # silence itself: the engine holds rather than start a song seconds before it
+            hold_ok = hold_ok or (cur.kind == "silence" and gap <= HOLD_SECONDS)
             if gap > 1800 and getattr(ctx.sim, "real_log", False):
                 continue  # the log itself was off (reported on its own)
             if gap > DEAD_AIR_SECONDS and not hold_ok:

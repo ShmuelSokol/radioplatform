@@ -654,6 +654,7 @@ async def pick_next(
 ) -> QueueEntry | None:
     from app.api.v1.queue import OPERATOR_SOURCES
     from app.models.asset import not_placeholder
+    from app.services import station_id_guard as id_guard
     from app.services.station_blocks import blocked_asset_ids
 
     now = datetime.now(UTC)
@@ -725,9 +726,18 @@ async def pick_next(
             may_air,
         )
         .order_by(QueueEntry.position)
-        .limit(len(exclude) + 1)
+        .limit(len(exclude) + len(id_guard.passed(station_id)) + 3)
     )
-    return usable(regular.unique().scalars().all())
+    # A station ID that would follow a break or another spoken item, or land next to a
+    # break, is passed over for good (services/station_id_guard.py)
+    for e in regular.unique().scalars().all():
+        if str(e.id) in exclude or str(e.id) in id_guard.passed(station_id):
+            continue
+        if await id_guard.must_wait(db, station_id, e, now):
+            id_guard.pass_over(station_id, e.id)
+            continue
+        return e
+    return None
 
 
 # ── Calls from the engine ────────────────────────────────────────────────────
@@ -1208,6 +1218,11 @@ async def _handle_started(
         await _handed_asset(db, state, station_id, str(entry_id))
         if entry is None and entry_id else None
     )
+
+    # Station IDs the pick passed over (station_id_guard) leave the queue
+    from app.services.station_id_guard import take_passed
+
+    await take_passed(db, station_id)
 
     # Close whatever the database still shows as playing (with its asset: the play log
     # row starts where it was heard, after its cue-in)
