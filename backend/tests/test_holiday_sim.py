@@ -9,12 +9,13 @@ sponsorships, the silence from candle lighting, nothing overlapping, no item twi
 """
 import os
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
+from app.services.shabbos_service import generate_shabbos_windows
 from tests.sim.run import simulate
 from tests.sim.stations import STORIES
 
@@ -44,15 +45,22 @@ def _lists(holiday: str, songs: int = 12, shiurim: int = 2, stories: int = 4, st
     return assets, items
 
 
-async def _run(tmp_path, start, hours, station, holiday, **kw):
+async def _run(tmp_path, start, hours, station, holiday, also=(), **kw):
+    """`also`: stations seeded beside it. Seeded alone, KBR Jerusalem draws Main's test
+    sponsorship recordings as spots (their contracts are not loaded, so nothing marks
+    them as sponsorship audio) and fails "nothing from another station"."""
     assets, items = _lists(holiday, **kw)
-    _, result = await simulate(EXPORT, start, hours, [station], tmp_path, extra_assets=assets, holiday_items=items,
-                               quiet_pass=12.0, regenerate_windows=True)
+    _, result = await simulate(EXPORT, start, hours, [station, *also], tmp_path, extra_assets=assets,
+                               holiday_items=items, quiet_pass=12.0, regenerate_windows=True)
     print(result.report())
     for check in MUST_PASS:
         assert not result.failed(check), [f"{f.at}: {f.text}" for f in result.failed(check)]
-    holiday_rows = [r for r in result.rows if r.title.startswith("HOLIDAY")]
-    ordinary = [r for r in result.rows if r.kind in ("music", "shiur", "stories") and r.lane != "timed"]
+    from tests.sim.run import PICK
+
+    sid = PICK[station]
+    rows = [r for r in result.rows if r.station == sid]
+    holiday_rows = [r for r in rows if r.title.startswith("HOLIDAY")]
+    ordinary = [r for r in rows if r.kind in ("music", "shiur", "stories") and r.lane != "timed"]
     print(f"{len(holiday_rows)} holiday items of {len(ordinary)} songs, shiurim and stories:")
     for r in holiday_rows:
         print(f"  {r.local_start} {r.title}")
@@ -64,11 +72,13 @@ async def test_main_on_erev_chanukah_friday_peak_then_shabbos(tmp_path):
     candle lighting. Holiday songs at about every fourth song until then, none in the
     silence, and the 1, 2, 3 PM time checks, sponsorships and the Shabbos ending as always."""
     result, got, ordinary = await _run(tmp_path, datetime(2026, 12, 4, 11, 0, tzinfo=NY), 6.5, "main", "chanukah")
-    before = [r for r in ordinary if r.local_start < "2026-12-04 16:1"]
+    w = generate_shabbos_windows(40.0821, -74.2097, "America/New_York", date(2026, 12, 4), date(2026, 12, 4), ["s"])[0]
+    candles = datetime.fromisoformat(w["start_datetime"]).timestamp()
+    before = [r for r in ordinary if r.start < candles]
     assert abs(len(got) - len(before) / 4) <= 3, (len(got), len(before))
-    assert all(r.local_start < "2026-12-04 16:1" for r in got)
+    assert all(r.start < candles for r in got)
     # never two holiday items in a row
-    rows = [r for r in result.rows if r.kind in ("music", "shiur", "stories")]
+    rows = [r for r in result.rows if r.kind in ("music", "shiur", "stories") and r.lane != "timed"]
     assert not any(a.title.startswith("HOLIDAY") and b.title.startswith("HOLIDAY") for a, b in zip(rows, rows[1:]))
 
 
@@ -80,7 +90,8 @@ async def test_main_after_chanukah_ends_none(tmp_path):
 
 async def test_jerusalem_during_chanukah(tmp_path):
     """Tuesday Dec 8, 2026 in Jerusalem: a Chanukah day on the air, 1 in 4."""
-    _, got, ordinary = await _run(tmp_path, datetime(2026, 12, 8, 10, 0, tzinfo=JLM), 3, "jerusalem", "chanukah")
+    _, got, ordinary = await _run(tmp_path, datetime(2026, 12, 8, 10, 0, tzinfo=JLM), 3, "jerusalem", "chanukah",
+                              also=("main",))
     assert abs(len(got) - len(ordinary) / 4) <= 3, (len(got), len(ordinary))
 
 
