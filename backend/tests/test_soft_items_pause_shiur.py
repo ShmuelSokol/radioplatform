@@ -394,3 +394,30 @@ async def test_sponsorships_wait_for_the_story_on_a_station_that_says_so(db_sess
     assert (await _finish_current(db_session, station.id)).asset_id == spots[0].id
     assert (await _finish_current(db_session, station.id)).asset_id == spots[1].id
     assert (await _finish_current(db_session, station.id)).asset_id == song.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [None, "hard"])
+async def test_a_waiting_sponsorship_does_not_play_in_a_time_checks_pause_of_the_story(db_session, mode):
+    """All Day Stories (sponsorships wait): a 10:45 sponsorship waits behind a story,
+    the 11:00 time check pauses the story, and the story must carry on before the
+    sponsorship plays, not after it (simulator, CI run of 2026-11-19 05:00Z)."""
+    station, talk, softs, song = await _setup(
+        db_session, left=30 * 60, kind="story", soft_source="ad_slot",
+        extra_config={long_items.SPONSORSHIPS_WAIT: True}, soft_mode=mode,
+    )
+    assert (await queue_module._check_advance(db_session, station.id)).asset_id == talk.id  # it waits
+    # the 11:00 time check: hard, due now, pauses the story (resume queued after it)
+    check = _asset(db_session, "The time is 11")
+    await db_session.flush()
+    await db_session.execute(
+        update(QueueEntry).where(QueueEntry.station_id == station.id, QueueEntry.status == "pending")
+        .values(position=QueueEntry.position + 1))
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=check.id, position=2,
+                              status="pending", source="block", timing_mode="hard",
+                              preempt_at=datetime.now(UTC) - timedelta(seconds=0.5)))
+    await db_session.commit()
+    order = [(await queue_module._check_advance(db_session, station.id)).asset_id]
+    for _ in range(3):
+        order.append((await _finish_current(db_session, station.id)).asset_id)
+    assert order == [check.id, talk.id, softs[0].id, song.id], order
