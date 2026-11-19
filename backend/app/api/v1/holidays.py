@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.dependencies import get_db, may_operate_station, require_manager
-from app.services.station_service import window_covers_station
 from app.models.asset import Asset
 from app.models.holiday_window import HolidayWindow
 from app.models.station import Station
@@ -335,41 +334,14 @@ async def auto_generate_blackouts(
     )
     all_windows = merge_overlapping_windows(shabbos + yom_tov)
 
-    # Check for duplicates and bulk create
-    created = 0
-    skipped = 0
+    # No window twice; a stored one whose computed times changed is corrected
+    from app.services.station_service import store_generated_windows
 
-    for w in all_windows:
-        w_start = datetime.fromisoformat(w["start_datetime"])
-        # Skip if a window with same name that covers THIS station starts within 1 hour.
-        # Another station's window does not count: matching on name and time alone
-        # left a second station in the same area with no Shabbos at all (and two
-        # matches made scalar_one_or_none fail). Same rule as the daily extension.
-        dup_stmt = select(HolidayWindow).where(
-            HolidayWindow.name == w["name"],
-            HolidayWindow.start_datetime >= w_start - timedelta(hours=1),
-            HolidayWindow.start_datetime <= w_start + timedelta(hours=1),
-        )
-        dup_result = await db.execute(dup_stmt)
-        if any(window_covers_station(d, station.id) for d in dup_result.scalars().all()):
-            skipped += 1
-            continue
-
-        record = HolidayWindow(
-            name=w["name"],
-            start_datetime=w_start,
-            end_datetime=datetime.fromisoformat(w["end_datetime"]),
-            is_blackout=w["is_blackout"],
-            affected_stations=w.get("affected_stations"),
-            reason=w.get("reason") or _infer_reason(w["name"]),
-        )
-        db.add(record)
-        created += 1
-
-    if created > 0:
+    created, updated, skipped = await store_generated_windows(db, station, all_windows, _infer_reason)
+    if created or updated:
         await db.commit()
 
-    return AutoGenerateResponse(created=created, skipped=skipped)
+    return AutoGenerateResponse(created=created, skipped=skipped, updated=updated)
 
 
 @router.post("/ensure-silence-asset")

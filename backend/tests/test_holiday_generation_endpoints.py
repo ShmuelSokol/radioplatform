@@ -95,7 +95,7 @@ async def test_auto_generate_uses_the_stations_own_sunset(client, auth_headers, 
 
     again = await client.post("/api/v1/holidays/auto-generate", json={"station_id": str(st.id), "months_ahead": 3},
                               headers=auth_headers)
-    assert again.json() == {"created": 0, "skipped": created}
+    assert again.json() == {"created": 0, "skipped": created, "updated": 0}
     assert await _windows(db_session) == created
 
     year = await client.post("/api/v1/holidays/preview", json={"station_id": str(st.id), "months_ahead": 12},
