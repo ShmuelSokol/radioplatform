@@ -439,17 +439,30 @@ async def _pick_next_pending(
     entry = soon.scalar_one_or_none()
     if entry:
         return entry
-    result = await db.execute(
-        select(QueueEntry)
-        .where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status == "pending",
-            or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
+    from sqlalchemy.orm import joinedload
+
+    from app.services.station_id_guard import must_wait
+
+    # A station ID that would follow a break or another spoken item, or land next to a
+    # break, is skipped (services/station_id_guard.py); at most a few in a row
+    for _ in range(4):
+        result = await db.execute(
+            select(QueueEntry)
+            .options(joinedload(QueueEntry.asset))
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
+            )
+            .order_by(QueueEntry.position)
+            .limit(1)
         )
-        .order_by(QueueEntry.position)
-        .limit(1)
-    )
-    return result.scalar_one_or_none()
+        entry = result.unique().scalar_one_or_none()
+        if entry is None or not await must_wait(db, station_id, entry, now_utc):
+            return entry
+        entry.status = "skipped"
+        await db.flush()
+    return None
 
 
 # Items this short (station IDs, time checks) hand over at their end, not with a crossfade
