@@ -423,3 +423,35 @@ async def test_a_rebuild_still_steers_sponsorships_around_a_shiur_it_requeues(
         assert shiur_at and not inside, inside[:3]
         res = await client.put(f"/api/v1/program-blocks/{res.json()['id']}", json=quarter, headers=auth_headers)
         assert res.status_code == 200, res.text
+
+
+@pytest.mark.asyncio
+async def test_a_blocks_shiur_is_a_talk_before_it_is_queued(db_session: AsyncSession):
+    """Simulator 2026-11-19: when Main's Daf Yomi block is queued in the same pass as
+    the sponsor breaks around it, the queue has no shiur yet and sponsorships went in
+    at 8:15, 8:30, 8:45 and 9:00. The blocks themselves say when their shiur airs."""
+    from app.models.program_block import ProgramBlock
+    from app.services.program_block_service import block_talk_windows
+
+    station, made = await _library(db_session)
+    made["show"].duration = 3360.0
+    daf = Asset(id=uuid.uuid4(), title="TEST Daf", file_path="x/daf.mp3", asset_type="daf_yomi",
+                category="daf yomi", duration=3300.0)
+    db_session.add(daf)
+    db_session.add(ProgramBlock(
+        id=uuid.uuid4(), station_id=station.id, name="TEST Daf", times="20:00", days_of_week="0,1,2,3,4,5,6",
+        timing_mode="hard", is_active=True,
+        items=[{"kind": "time"}, {"kind": "asset", "asset_id": str(made["show"].id)}],
+    ))
+    db_session.add(ProgramBlock(
+        id=uuid.uuid4(), station_id=station.id, name="TEST rotating Daf", times="06:00", days_of_week="0,1,2,3,4,5,6",
+        timing_mode="hard", is_active=True,
+        items=[{"kind": "category", "asset_type": "shiur", "category": "program"}],
+    ))
+    await db_session.commit()
+    tz = ZoneInfo("America/New_York")
+    start = datetime(2026, 11, 18, 12, 0, tzinfo=tz).astimezone(UTC)
+    windows = await block_talk_windows(db_session, station, start, start + timedelta(hours=24))
+    assert (datetime(2026, 11, 18, 20, 0, 30, tzinfo=tz), datetime(2026, 11, 18, 20, 56, 30, tzinfo=tz)) in windows
+    # a category item counts by its longest recording
+    assert any(s == datetime(2026, 11, 19, 6, 0, tzinfo=tz) for s, _ in windows)
