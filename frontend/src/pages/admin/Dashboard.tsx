@@ -14,7 +14,8 @@ import {
 import { useLiveShows } from '../../hooks/useLiveShows';
 import { useLiveAudio } from '../../hooks/useLiveAudio';
 import { useAudioEngine, METER_SEGMENTS, SILENT_WAV } from '../../hooks/useAudioEngine';
-import type { LiveStream } from '../../lib/liveStream';
+import { useOnAirLevels } from '../../hooks/useOnAirLevels';
+import { STREAM_STATE_EVENT, streamStateOf, type LiveStream, type StreamState } from '../../lib/liveStream';
 import { adoptStationStream, playStationStream, releaseStationStream, runningStationStream, stationStreamElement, stationStreamSounding, stopStationStream } from '../../lib/stationStream';
 import { usePlayerStore } from '../../stores/playerStore';
 import { displayTitle } from '../../lib/displayTitle';
@@ -88,6 +89,8 @@ const LISTEN_KEY = 'kbr-cr-listen';
 // without sound a tap starts the stream afresh
 const STREAM_STARTING_MAX_MS = 8000;
 const STREAM_RESTART_AFTER_MS = 4000;
+// A stream that could not start at all is tried again after this long (ms)
+const STREAM_RETRY_AFTER_FAIL_MS = 30_000;
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -352,8 +355,15 @@ export default function Dashboard() {
 
   const dashStreamUrl = wsNowPlaying?.stream_url || null;
   const [streamFailed, setStreamFailed] = useState(false);
-  // A stream that failed is tried again on another station's stream
+  // A stream that failed is tried again on another station's stream, and on this one
+  // after a while: it used to stay on the built-in player for the rest of the session
+  // after one failure (2026-11-19)
   useEffect(() => { setStreamFailed(false); }, [dashStreamUrl]);
+  useEffect(() => {
+    if (!streamFailed) return;
+    const t = setTimeout(() => setStreamFailed(false), STREAM_RETRY_AFTER_FAIL_MS);
+    return () => clearTimeout(t);
+  }, [streamFailed]);
   const dashUseStream = !!dashStreamUrl && !streamFailed;
   // The tab's one stream player (lib/stationStream): it outlives this screen, so the
   // sound carries on to the next page and back without a new tap
@@ -397,13 +407,16 @@ export default function Dashboard() {
       offEvents.forEach((e) => audio.removeEventListener(e, off));
     };
   }, []);
+  // How the stream is doing (lib/liveStream reconnects a dropped stream by itself, and
+  // says 'blocked' when the browser wants a tap): shown on the Listen button. An element
+  // error no longer switches to the built-in player; the stream reconnects instead.
+  const [streamState, setStreamState] = useState<StreamState>(() => streamStateOf(dashStreamAudioRef.current));
   useEffect(() => {
     const audio = dashStreamAudioRef.current;
-    if (!audio || !dashUseStream) return;
-    const onError = () => setStreamFailed(true);
-    audio.addEventListener('error', onError);
-    return () => audio.removeEventListener('error', onError);
-  }, [dashUseStream]);
+    const on = () => setStreamState(streamStateOf(audio));
+    audio.addEventListener(STREAM_STATE_EVENT, on);
+    return () => audio.removeEventListener(STREAM_STATE_EVENT, on);
+  }, []);
   const stationIdRef = useRef(stationId);
   stationIdRef.current = stationId;
   // Sound already running for this station (from a listener page, or this screen a
@@ -545,7 +558,8 @@ export default function Dashboard() {
       // (again when it was started a while ago and still gives no sound)
       const cur = streamRef.current;
       const stuck = !!cur && !streamSoundingRef.current && Date.now() - cur.startedAt > STREAM_RESTART_AFTER_MS;
-      if (cur?.url !== url || el?.paused || stuck) startStream(url);
+      const troubled = streamStateOf(el) === 'blocked' || streamStateOf(el) === 'reconnecting';
+      if (cur?.url !== url || el?.paused || stuck || troubled) startStream(url);
     } else if (el && !streamRef.current && !el.getAttribute('src')) {
       el.src = SILENT_WAV;
       el.play().then(() => { if (!streamRef.current) el.pause(); }).catch(() => {});
@@ -622,8 +636,18 @@ export default function Dashboard() {
   const setLiveLevel = live.setLevel;
   useEffect(() => { setLiveLevel(volume, muted); }, [setLiveLevel, volume, muted]);
   useEffect(() => { setLiveEnabled(audioReady && listenHere); }, [audioReady, listenHere]);
-  const vuL = audioReady && isPlaying ? Math.round(vuLevels[0] * METER_SEGMENTS) : 0;
-  const vuR = audioReady && isPlaying ? Math.round(vuLevels[1] * METER_SEGMENTS) : 0;
+  // Meters: the engine's own measure of what is on air whenever it sends one (every
+  // engine station; no sound or tap needed here), else this page's built-in player
+  // (browser-player stations, after the first click anywhere)
+  const onAirLevels = useOnAirLevels(stationId);
+  const localMeters = audioReady && isPlaying;
+  const vuL = onAirLevels.fresh ? Math.round(onAirLevels.levels[0] * METER_SEGMENTS) : localMeters ? Math.round(vuLevels[0] * METER_SEGMENTS) : 0;
+  const vuR = onAirLevels.fresh ? Math.round(onAirLevels.levels[1] * METER_SEGMENTS) : localMeters ? Math.round(vuLevels[1] * METER_SEGMENTS) : 0;
+  const meterSource: 'air' | 'local' | 'none' = onAirLevels.fresh ? 'air' : localMeters ? 'local' : 'none';
+  // Sound on this computer is off although the operator had it on, or the station is on
+  // air and this computer plays nothing: said on the button, so a silent screen never
+  // looks like it is playing (Shmuel, 2026-11-19: "why did stream stop?")
+  const streamTrouble: 'reconnecting' | 'blocked' | null = streamWanted && (streamState === 'reconnecting' || streamState === 'blocked') ? streamState : null;
 
   // ── Queue derived data ─────────────────────────────────────
   const queueDates = useMemo(() => {
@@ -978,7 +1002,14 @@ export default function Dashboard() {
     looping: looping,
     onLoop: toggleLoop,
     loopBusy: loopBusy,
-    audio: { audioReady: listenHere && soundLive, starting: listenHere && soundRunning && !soundLive && streamStarting, initAudio: listenPressed, volume, setVolume, muted, toggleMute, vuL, vuR },
+    audio: {
+      audioReady: listenHere && soundLive && !streamTrouble,
+      starting: listenHere && soundRunning && !soundLive && streamStarting && !streamTrouble,
+      trouble: streamTrouble ?? (listenHere && isPlaying && !soundLive ? 'blocked' : null),
+      silentHere: isPlaying && !(listenHere && soundLive),
+      meterSource,
+      initAudio: listenPressed, volume, setVolume, muted, toggleMute, vuL, vuR,
+    },
     stationTz: stationTz,
     liveShow: liveShow ? { id: liveShow.id, title: liveShow.title, ...liveBadge } : null,
   };

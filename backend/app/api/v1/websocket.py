@@ -425,6 +425,38 @@ async def broadcast_now_playing_update(station_id: str, now_playing_data: dict):
     await manager.broadcast_to_station(station_id, message)
 
 
+_level_tasks: set[asyncio.Task] = set()
+
+
+def _clean_levels(values: list[float]) -> list[float]:
+    out = []
+    for v in values[:30]:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            f = 0.0
+        if f != f:  # NaN
+            f = 0.0
+        out.append(round(min(1.0, max(0.0, f)), 4))
+    return out
+
+
+def broadcast_levels(station_id: str, left: list[float], right: list[float], step: float = 0.1) -> None:
+    """The engine's on-air level for the last second, to every page open on the station:
+    {"type": "levels", "data": {"l": [...], "r": [...], "step": 0.1}}. The control room
+    plays them back on its meters, so they show what is on air without that screen
+    making sound. Sent in the background: the engine's post returns at once."""
+    if station_id not in manager.active_connections:
+        return
+    message = {
+        "type": "levels",
+        "data": {"l": _clean_levels(left), "r": _clean_levels(right), "step": min(1.0, max(0.02, float(step or 0.1)))},
+    }
+    task = asyncio.get_running_loop().create_task(manager.broadcast_to_station(station_id, message))
+    _level_tasks.add(task)
+    task.add_done_callback(_level_tasks.discard)
+
+
 async def broadcast_nothing_playing(station_id) -> None:
     """Tell listeners the station has nothing on air any more (the last item ended
     or was skipped or removed and nothing followed it, e.g. during a blackout with no
