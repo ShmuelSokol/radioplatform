@@ -198,7 +198,10 @@ async def test_station_day_lists_todays_sponsorships_only(client: AsyncClient, d
     # today's sponsorship plays on this station only (tomorrow's, the weather, the weather report, the song
     # and the other station's are left out), unless the clock is within minutes of midnight
     titles = [p["asset"]["title"] for p in plays]
-    assert titles in (["TEST SPONSOR 27 - Kesher Moving", "Kesher spot, played by hand"], []), titles
+    # (in the last 9 minutes before midnight the later ones fall on tomorrow: a prefix of the list;
+    # CI at 11:52 PM ET got only the first, 2026-11-19)
+    expected = ["TEST SPONSOR 27 - Kesher Moving", "Kesher spot, played by hand"]
+    assert titles == expected[:len(titles)], titles
     assert "Weather Report - 2026-11-18" not in titles
     # the queue tells the control room which recordings belong to a sponsor
     r = await client.get(f"{API}/stations/{station_id}/queue", headers=headers)
