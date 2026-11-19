@@ -167,6 +167,40 @@ async def test_moving_a_station_moves_its_shabbos(client, auth_headers, db_sessi
 
 
 @pytest.mark.asyncio
+async def test_moving_drops_a_yom_tov_merged_into_shabbos_when_it_is_the_last_window(db_session):
+    """B-HOLIDAYS-7 edge (wall-clock sweep 2026-11-19): when the last window made for the old
+    place is a Yom Tov merged into Shabbos (Pesach 5787: Wednesday night to Saturday night),
+    moving the station removes it too, not only the plain Shabbos windows before it."""
+    from datetime import date
+
+    from app.services.shabbos_service import (
+        generate_shabbos_windows,
+        generate_yom_tov_windows,
+        merge_overlapping_windows,
+    )
+    from app.services.station_service import drop_generated_holidays_for_location
+
+    st = await _station(db_session)
+    lat, lon, tz = LAKEWOOD
+    ids = [str(st.id)]
+    start, end = date(2027, 4, 10), date(2027, 4, 24)       # the merged Pesach + Shabbos is the last one
+    made = merge_overlapping_windows(generate_shabbos_windows(lat, lon, tz, start, end, ids)
+                                     + generate_yom_tov_windows(lat, lon, tz, start, end, ids))
+    merged = [m for m in made if "Pesach" in m["name"] and "Shabbos" in m["name"]]
+    assert merged, [m["name"] for m in made]
+    db_session.add_all([HolidayWindow(id=uuid.uuid4(), name=m["name"],
+                                      start_datetime=datetime.fromisoformat(m["start_datetime"]),
+                                      end_datetime=datetime.fromisoformat(m["end_datetime"]),
+                                      is_blackout=True, affected_stations=m.get("affected_stations"),
+                                      reason=m.get("reason", "Shabbos")) for m in made])
+    await db_session.commit()
+    dropped = await drop_generated_holidays_for_location(db_session, st, lat, lon, tz)
+    await db_session.commit()
+    left = [w.name for w in (await db_session.execute(select(HolidayWindow))).scalars().all()]
+    assert dropped == len(made) and left == [], left
+
+
+@pytest.mark.asyncio
 @needs_ffmpeg
 async def test_ensure_silence_asset_makes_it_once(client, auth_headers, db_session, monkeypatch):
     """B-HOLIDAYS-8 / B-HOLIDAYS-9: no silence item -> FFmpeg makes a 5-minute silent MP3,

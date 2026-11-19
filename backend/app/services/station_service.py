@@ -156,9 +156,13 @@ async def drop_generated_holidays_for_location(
            and [str(i) for i in w.affected_stations.get("station_ids") or []] == [str(station.id)]]
     if not own:
         return 0
-    last = max(w.start_datetime for w in own).date()
+    # Regenerate through the END of the last window: a Yom Tov that runs into Shabbos is
+    # stored merged ("Pesach (First Days) / Shabbos"), and stopping at its start day made
+    # only "Pesach (First Days)", so the old place's merged window was never matched and
+    # stayed after the move (found running the suite with the clock in March).
+    last = max(w.end_datetime for w in own).date()
     start_date = date.today() - timedelta(days=7)
-    end_date = max(last, start_date) + timedelta(days=1)
+    end_date = max(last, start_date) + timedelta(days=2)
     ids = [str(station.id)]
     made = merge_overlapping_windows(
         generate_shabbos_windows(lat, lon, tz_name, start_date, end_date, ids)
