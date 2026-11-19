@@ -35,8 +35,15 @@ Same pattern as his supplier-item-database project (`wiki/bug-autofix.md` there)
   `data-bug-trigger`; a click where a 🐞 shows is taken by the reporter in the capture phase
   even when a dialog's backdrop lies over it, and the dialog stays open, so it is in the
   picture. Known small differences of the copy: placeholder text dark, a two-line clamp
-  without "...", Chromium draws scroll bars into it. Tests: `frontend/e2e/webkit/bug-screenshot-webkit.py`
-  (`window.__kbrShotSkip = ['html2canvas']` switches one way off; compares each picture with WebKit's own screenshot), `e2e/bug-screenshot-faithful.mjs` (Chromium, capture vs real screenshot), `e2e/bug-over-dialogs.mjs` (🐞 over each kind of dialog, full-screen view), `e2e/admin-misc.mjs` V2-99.
+  without "...", Chromium draws scroll bars into it. 🐞 everywhere (2026-11-19, Shmuel's iPhone: on a client's page the Edit contract card lay
+  over the top bar's 🐞 and phones have no floating one): twice a second, while no report is
+  open, the reporter asks the browser's own hit testing whether any 🐞 can be tapped
+  (`elementFromPoint` at its middle). If none can, a "lifted" 🐞 (`data-bug-lifted`, z-[65],
+  above dialogs at z-50/60, below the report at z-70) appears on the first spot along the
+  edges where no button, link or field lies under it, and stays there while that spot stays
+  free. Dialog code needs nothing; never put a dialog above z-[64] unless it should hide the 🐞.
+  Tests: `frontend/e2e/webkit/bug-screenshot-webkit.py`
+  (`window.__kbrShotSkip = ['html2canvas']` switches one way off; compares each picture with WebKit's own screenshot), `e2e/bug-screenshot-faithful.mjs` (Chromium, capture vs real screenshot), `e2e/bug-over-dialogs.mjs` (🐞 over each kind of dialog, full-screen view), `e2e/bug-everywhere.mjs` (every page's dialogs, Edit contract on both pages, made-up dialogs of every shape), `e2e/admin-misc.mjs` V2-99.
 - **Server** (`backend/app/core/log_buffer.py`): the app keeps its last 3000 log lines
   and 2000 requests in memory; each line carries the request id. A report stores the
   last 15 minutes of both (`server_log`). Requests that fail (5xx) or take > 3 s are
