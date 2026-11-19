@@ -87,6 +87,19 @@ class QueueReplenishService:
         self.automation_config = result.scalar() or {}
 
     async def replenish(self) -> None:
+        """Fill the queue (`_replenish`), then take out waiting station IDs that now
+        sit next to a break or timed item (station_id_guard.drop_misplaced)."""
+        await self._replenish()
+        from app.services.station_id_guard import drop_misplaced
+
+        try:
+            if await drop_misplaced(self.db, self.station_id):
+                await self.db.commit()
+        except Exception:
+            logger.exception("Station %s: misplaced station IDs could not be tidied", self.station_id)
+            await self.db.rollback()
+
+    async def _replenish(self) -> None:
         """
         Auto-fill queue to ~24 hours of content using active schedule rules.
 
