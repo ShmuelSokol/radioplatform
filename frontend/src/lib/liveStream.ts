@@ -29,6 +29,9 @@ export interface LiveStream {
 
 // Give up on HLS and use the plain stream if nothing is heard after this long (ms)
 const HLS_START_TIMEOUT = 8000;
+// After it played: stuck this long (waiting or stalled, the time not moving) and the HLS
+// copy is loaded again; stuck again after that and it falls back to the plain stream (ms)
+const HLS_STALL_TIMEOUT = 6000;
 
 /** The engine's HLS copy of an Icecast mount: /live-<id> -> /hls/<id>/mp3.m3u8 */
 export function hlsUrlFor(url: string): string | null {
@@ -50,11 +53,31 @@ function hlsStream(audio: HTMLAudioElement, hls: string, url: string, onFail: ()
   let stopped = false;
   let fellBack = false;
   let plain: LiveStream | null = null;
+  let stallTimer: ReturnType<typeof setTimeout> | undefined;
+  let reloads = 0;
   const cleanup = () => {
     clearTimeout(timer);
+    clearTimeout(stallTimer);
     audio.removeEventListener('error', fallBack);
     audio.removeEventListener('playing', started);
+    audio.removeEventListener('waiting', stuck);
+    audio.removeEventListener('stalled', stuck);
   };
+  // The segments stop coming (the server restarted, the phone changed networks) with no
+  // error: the element just waits, and the listener sat in silence (F-ENGINE2-26)
+  function stuck() {
+    if (stopped || fellBack || stallTimer !== undefined) return;
+    const at = audio.currentTime;
+    stallTimer = setTimeout(() => {
+      stallTimer = undefined;
+      if (stopped || fellBack || audio.currentTime !== at) return;
+      if (reloads >= 1) { fallBack(); return; }
+      reloads += 1;
+      audio.src = hls;
+      audio.play().catch(fallBack);
+      stuck();
+    }, HLS_STALL_TIMEOUT);
+  }
   function fallBack() {
     if (stopped || fellBack) return;
     fellBack = true;
@@ -65,6 +88,8 @@ function hlsStream(audio: HTMLAudioElement, hls: string, url: string, onFail: ()
   const timer = setTimeout(() => { if (audio.paused || audio.currentTime === 0) fallBack(); }, HLS_START_TIMEOUT);
   audio.addEventListener('error', fallBack);
   audio.addEventListener('playing', started);
+  audio.addEventListener('waiting', stuck);
+  audio.addEventListener('stalled', stuck);
   audio.src = hls;
   // In the click, so iOS allows sound; a refusal here is final (no gesture later)
   audio.play().catch(() => { if (!fellBack) { stopped = true; cleanup(); onFail(); } });
