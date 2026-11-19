@@ -70,6 +70,8 @@ engine at random moments, half of them within seconds of a quarter-hour mark.
 The site writes a play-log row when the *next* item starts. The item on air at the end of
 a run, and an item a restart cut at 0 s, have no row; the play-log check leaves them out.
 
+Omer count: the 49 clips are seeded with the time clips, and the check "Omer count after each hour's time check, the right day" runs on every simulation (during the Omer). Scenarios in `tests/test_omer_sim.py`, see [omer-count](omer-count.md).
+
 Holiday lists: `simulate(..., holiday_items=[{holiday, asset_id, station_id}])` (with the items' assets in `extra_assets`); `regenerate_windows=True` makes Shabbos and Yom Tov windows. Scenarios in `tests/test_holiday_sim.py`, see [holiday-music](holiday-music.md).
 
 ## Every Yom Tov of the year as broadcast days
