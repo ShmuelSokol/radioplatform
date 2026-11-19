@@ -274,15 +274,34 @@ class Simulator:
         to_mark = 900 - (t % 900)
         if to_mark < 60 or (t % 900) < 15:
             return PASS_SECONDS
-        for e in self.engines.values():
-            nt = e.next_event_time()
+        silent = 0
+        for sid, e in self.engines.items():
+            deep = self._deep_in_blackout(sid, t)
+            # in the silence only the end of the file on air counts, not the engine's
+            # own asking for a next song
+            nt = (e.on_air.end if e.on_air is not None else None) if deep else e.next_event_time()
             if nt is not None and nt - t < 20:
                 return PASS_SECONDS
+            if deep:
+                # Hours of one silence file after another: nothing to hand over or time
+                silent += 1
+                continue
             if e.timed or e.group or (e.on_air is not None and e.on_air.lane != "main"):
                 return PASS_SECONDS
         if t - getattr(self, "last_action", -1e9) < 60:
             return PASS_SECONDS
-        return max(PASS_SECONDS, min(self.quiet_pass, to_mark - 60))
+        quiet = self.quiet_pass * 3 if silent == len(self.engines) else self.quiet_pass
+        return max(PASS_SECONDS, min(quiet, to_mark - 60))
+
+    def _deep_in_blackout(self, sid: str, t: float, edge: float = 300.0) -> bool:
+        """Is this station inside a Shabbos or Yom Tov window, more than five minutes from
+        either end of it?"""
+        for w in self.blackouts:
+            if w["stations"] and sid not in w["stations"]:
+                continue
+            if w["start"].timestamp() + edge < t < w["end"].timestamp() - edge:
+                return True
+        return False
 
     async def run_until(self, end: datetime, on_step=None):
         end_t = end.astimezone(UTC).timestamp()

@@ -592,6 +592,9 @@ cd backend && KBR_ADMIN_EMAIL=... KBR_ADMIN_PASSWORD=... uv run python loadtests
 # Simulate whole broadcast days fast (virtual clock, fake engine, real scheduling code; see wiki/station-simulator.md)
 cd backend && uv run python -m tests.sim.run --export tests/sim/fixtures/stations-2026-11-19.json --start 2026-11-19T00:00 --hours 24 --stations main
 
+# Every Yom Tov of the coming year as broadcast days in the simulator (--list shows them; see wiki/station-simulator.md)
+cd backend && uv run python -m tests.sim.yomtov --station main --index 0 --out /tmp/yomtov
+
 # Run the real playout engine locally against the backend, with timing scenarios (see wiki/engine-harness.md)
 cd backend && uv run python ../infra/streaming/harness/run_harness.py
 

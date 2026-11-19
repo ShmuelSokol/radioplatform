@@ -320,7 +320,10 @@ def nothing_inside_a_shiur(res: Result, ctx: Context):
             inside = rows[i + 1:back] if back is not None else rows[i + 1:i + 6]
             if back is None:
                 left = (ctx.assets[r.asset_id].duration or 0) - (r.cue_in + r.seconds) if r.asset_id else 0
-                if left > 120:
+                # cut by candle lighting: it does not come back after Shabbos or Yom Tov
+                at_candles = any(abs(w["start"].timestamp() - r.end) < 3 for w in getattr(ctx.sim, "blackouts", [])
+                                 if not w["stations"] or sid in w["stations"])
+                if left > 120 and not at_candles:
                     _add(res, check, r, r.local_end, f"{r.title!r} cut with {left / 60:.0f} min left and never resumed")
                 continue
             for x in inside:
@@ -371,7 +374,8 @@ def station_ids(res: Result, ctx: Context):
             gap = (b.start - a.start) / 60
             if gap < ID_MIN - 0.1:
                 _add(res, check, b, b.local_start, f"IDs only {gap:.1f} min apart")
-            if gap > ID_MAX + 8 and not any(x.is_long or x.timing_mode for x in rows if a.start < x.start < b.start):
+            if gap > ID_MAX + 8 and not any(x.is_long or x.timing_mode or x.kind == "silence"
+                                           for x in rows if a.start < x.start < b.start):
                 _add(res, check, b, b.local_start, f"IDs {gap:.1f} min apart")
         for i, r in enumerate(rows):
             if not r.is_id or r.timing_mode is not None:
@@ -540,7 +544,11 @@ def shabbos_silence(res: Result, ctx: Context):
                 elif after.cut and after.seconds < 30 and after.timing_mode is None:
                     _add(res, check, sid, after.local_start,
                          f"only a {after.seconds:.0f} s fragment of {after.title!r} after the silence")
-                silence_after = [r for r in rows if r.kind == "silence" and r.start > we + 1]
+                # (silence of the next window, e.g. Shabbos the day after Yom Tov, is its own)
+                others = [(x["start"].timestamp(), x["end"].timestamp()) for x in ctx.sim.blackouts
+                          if x is not w and (not x["stations"] or sid in x["stations"])]
+                silence_after = [r for r in rows if r.kind == "silence" and r.start > we + 1
+                                 and not any(a - 2 <= r.start <= b for a, b in others)]
                 for r in silence_after[:2]:
                     _add(res, check, sid, r.local_start, "silence item still airing after the window")
 
@@ -681,6 +689,25 @@ def one_resume_per_pause(res: Result, ctx: Context):
                 _add(res, check, sid, "", f"{len(es)} resume entries '{source}' for {a.title if a else asset_id!r}")
 
 
+def weather_is_todays(res: Result, ctx: Context):
+    """A weather report is a clip for one day: it airs only on that day, in its timed
+    place or a block, never as a spot drawn at random (the library holds months of old
+    ones, type spot with no sponsor)."""
+    check = "weather report is today's, never drawn as filler"
+    res.checks_run.setdefault(check, 0)
+    for r in res.rows:
+        a = ctx.assets.get(r.asset_id) if r.asset_id else None
+        if a is None or a.category != "weather_spot":
+            continue
+        _count(res, check)
+        meta = a.metadata_extra if isinstance(a.metadata_extra, dict) else {}
+        local = datetime.fromtimestamp(r.start + 2, UTC).astimezone(r.tz)
+        if meta.get("slot_key") and str(meta["slot_key"])[:10] != local.date().isoformat():
+            _add(res, check, r, r.local_start, f"{a.title!r} aired on {local.date()}")
+        elif r.timing_mode is None and r.source != "block":
+            _add(res, check, r, r.local_start, f"{a.title!r} aired with no timed place (source {r.source})")
+
+
 ALL_CHECKS = [site_log_matches_air, one_resume_per_pause, shabbos_silence, shabbos_ending, hard_items_on_time, time_checks_on_the_hour, no_dead_air, nothing_inside_a_shiur,
-              sponsor_spacing, station_ids, station_isolation, time_check_says_the_hour,
+              sponsor_spacing, station_ids, station_isolation, time_check_says_the_hour, weather_is_todays,
               soft_items_wait_for_the_song, nothing_twice]

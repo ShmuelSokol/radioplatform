@@ -71,3 +71,35 @@ The site writes a play-log row when the *next* item starts. The item on air at t
 a run, and an item a restart cut at 0 s, have no row; the play-log check leaves them out.
 
 Holiday lists: `simulate(..., holiday_items=[{holiday, asset_id, station_id}])` (with the items' assets in `extra_assets`); `regenerate_windows=True` makes Shabbos and Yom Tov windows. Scenarios in `tests/test_holiday_sim.py`, see [holiday-music](holiday-music.md).
+
+## Every Yom Tov of the year as broadcast days
+
+`uv run python -m tests.sim.yomtov --list` prints, per station, the stretches of the next
+12 months that hold a Yom Tov (windows from the site's own generator, Shabbos and Yom Tov
+joined where they touch; windows less than 36 h apart run as one stretch).
+`--station main --index 0 --out /tmp/yomtov` plays one from 3 h before candle lighting to 3 h
+after the station is back and writes `summary-<station>-<index>.json` (per window: last item
+before, silence start against candle lighting, silence items, anything else inside, first
+item back) and the play log. `simulate(..., regenerate_windows=True)` computes the windows
+for the run's dates (the fixture holds one Shabbos and its stations have no coordinates;
+`checks.PLACES` has them). Run 2026-11-19 for 5787/5788: 21 stretches, about 1,300
+station-hours, 10 to 20 minutes each, four at a time.
+
+What makes days of silence fast: deep inside a window (more than 5 min from either end)
+scheduler passes come every `3 x quiet_pass` s and the stand-in engine asks for a next song
+once a minute instead of every 2 s (`Simulator._deep_in_blackout`). Before that a 3-day
+window ran at about 16x.
+
+Two mistakes of the stand-in found on the first run, both fixed:
+- `/skip` ended only a music item. The real `skip_on_air` ends a timed item too, which is
+  how the silence file on air is cut when a window ends. Without it the station "came back"
+  when the 5-minute file ran out (the 36 s late return reported for Main on 2026-11-19 was
+  this, not the station).
+- A run of one station drew another station's sponsorships as filler: `seed()` loads only
+  the kept stations' contracts and the export has no `sponsor_id` on assets, so
+  `not_contract_audio()` did not know them. `seed()` now ties every contract's audio to its
+  sponsor, as the site does.
+
+Check added: "weather report is today's, never drawn as filler" (a weather clip airs only
+on its own local date, in a timed place or block).
+
