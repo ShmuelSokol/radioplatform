@@ -211,9 +211,22 @@ async def _drop_leftovers(db: AsyncSession, station_id, start, end) -> int:
             QueueEntry.asset_id != silence_id,
         )
     )).all()
+    # What the engine holds pre-loaded for after the silence it is playing: drawn for
+    # before the window, wherever it sits (simulator, Jerusalem 2026-11-20: the song cued
+    # at 13:54:18Z stayed loaded through Shabbos and aired first after it)
+    held: set[str] = set()
+    engine = settings.engine_drives(station_id)
+    if engine:
+        from app.services import playout_engine
+
+        state = playout_engine.get_state(station_id)
+        held = {str(i) for i in ({state.cued_entry_id} | set(state.given)) if i}
     ids = []
     for rid, pos, pa, src in rows:
         if _blackout_keeps(src):
+            continue
+        if str(rid) in held and (pa is None or _aware(pa) < start):
+            ids.append(rid)
             continue
         if pa is not None:
             if _aware(pa) < start:
@@ -230,14 +243,9 @@ async def _drop_leftovers(db: AsyncSession, station_id, start, end) -> int:
     await db.commit()
     logger.warning("Station %s: %d item(s) queued for before the blackout (from %s) left the queue",
                    station_id, len(ids), start)
-    if settings.engine_drives(station_id):
-        # the engine may hold one of them pre-loaded: it would play it when the silence ends
-        from app.services import playout_engine
-
-        state = playout_engine.get_state(station_id)
-        held = {str(i) for i in ids} & ({state.cued_entry_id} | set(state.given))
-        if held:
-            await playout_engine.engine_flush(station_id)
+    if engine and held & {str(i) for i in ids}:
+        # the engine would play it when the silence ends: it asks again instead
+        await playout_engine.engine_flush(station_id)
     return len(ids)
 
 

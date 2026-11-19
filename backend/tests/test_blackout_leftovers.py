@@ -134,3 +134,76 @@ async def test_a_spot_the_silence_would_cut_is_not_started(db_session):
     assert status[fits.id] == "pending"
     assert status[cut.id] == "skipped"
     assert status[music.id] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_the_track_the_engine_holds_for_after_the_silence_is_dropped(db_session, monkeypatch):
+    """Simulator, Jerusalem 2026-11-20: the engine was handed its next song at 13:54:18Z,
+    the silence started at 13:57:14Z over it, and the song stayed loaded through Shabbos
+    to air first after it. It sat after the silences, where rows drawn for after the
+    window also sit, so only the engine's own hold tells it apart."""
+    from app.config import settings
+    from app.services import playout_engine
+
+    station = Station(id=uuid.uuid4(), name="KBR Jerusalem", timezone="Asia/Jerusalem")
+    db_session.add(station)
+    silence = _asset(db_session, "Silence (5 min)", "silence", 300)
+    song = _asset(db_session, "Lecho Dodi", "music", 240)
+    opening = _asset(db_session, "Motzei Shabbos opening", "music", 200)
+    await db_session.flush()
+    now = datetime.now(UTC)
+    start, end = now - timedelta(minutes=1), now + timedelta(hours=24)
+    db_session.add(HolidayWindow(id=uuid.uuid4(), name="Shabbos", start_datetime=start,
+                                 end_datetime=end, is_blackout=True, affected_stations=None))
+    n = int((end - now).total_seconds() // 300) + 2
+    silences = [_row(station, silence, 1 + i, timing_mode="hard", preempt_at=start) for i in range(n)]
+    cued = _row(station, song, n + 5)
+    after = _row(station, opening, n + 6)
+    db_session.add_all([*silences, cued, after])
+    await db_session.commit()
+
+    monkeypatch.setattr(type(settings), "engine_drives", lambda self, sid: str(sid) == str(station.id))
+    flushed = []
+
+    async def flush(sid):
+        flushed.append(str(sid))
+        return True
+
+    monkeypatch.setattr(playout_engine, "engine_flush", flush)
+    state = playout_engine.get_state(station.id)
+    state.cued_entry_id = str(cued.id)
+    try:
+        await queue_module.fill_blackout_queue(db_session, station.id)
+    finally:
+        state.cued_entry_id = None
+
+    status = await _status(db_session, station)
+    assert status[cued.id] == "skipped"
+    assert status[after.id] == "pending"
+    assert flushed == [str(station.id)]
+
+
+@pytest.mark.asyncio
+async def test_in_a_blackout_the_engine_is_handed_no_song(db_session):
+    """Only the blackout's silence goes to the engine while it lasts; a song handed then
+    would wait loaded until the silence ends and air first after Shabbos."""
+    from app.services import playout_engine
+
+    station = Station(id=uuid.uuid4(), name="KBR Jerusalem", timezone="Asia/Jerusalem")
+    db_session.add(station)
+    song = _asset(db_session, "Lecho Dodi", "music", 240)
+    await db_session.flush()
+    now = datetime.now(UTC)
+    window = HolidayWindow(id=uuid.uuid4(), name="Shabbos", start_datetime=now - timedelta(minutes=5),
+                           end_datetime=now + timedelta(hours=24), is_blackout=True, affected_stations=None)
+    db_session.add_all([window, _row(station, song, 1)])
+    await db_session.commit()
+    playout_engine.reset_state(station.id)
+
+    assert await playout_engine.handle_next(db_session, station.id) is None
+
+    window.end_datetime = now - timedelta(minutes=1)  # Shabbos is over
+    await db_session.commit()
+    nxt = await playout_engine.handle_next(db_session, station.id)
+    assert nxt is not None and nxt["uri"]
+    playout_engine.reset_state(station.id)

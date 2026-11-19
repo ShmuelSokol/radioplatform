@@ -48,7 +48,11 @@ silence (candle lighting to shekia + 72).
   the silence would cut it mid-sentence. Songs still just fade.
 - **Once it has begun**: every waiting row other than silence that sits before the window's
   first waiting silence, and every waiting row timed before the window, is skipped
-  (`_drop_leftovers`); the engine is flushed if it holds one pre-loaded. The silences are hard
+  (`_drop_leftovers`), and so is the song the engine holds pre-loaded (it sits after the
+  silences, where rows drawn for after the window also sit), followed by a flush. While a
+  blackout lasts, `handle_next` hands the engine nothing but silence (None otherwise, as during
+  a live show): a song handed then waited loaded and aired first after Shabbos (simulator,
+  Jerusalem 2026-11-20). The blackout's end flushes and skips as before. The silences are hard
   timed, so they jump ahead of whatever still waited; those rows used to air first after
   Shabbos (2026-11-19 read: Main's Friday-afternoon block and a 21:15 sponsorship, Jerusalem's
   Erev Shabbos daf). Rows after the silences and rows timed after the window stay; what is
