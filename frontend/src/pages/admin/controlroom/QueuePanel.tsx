@@ -13,6 +13,7 @@ export interface QueueRow {
   hard_timed?: boolean;          // starts on the second: the song on air fades
   hard_by?: string | null;       // soft item's limit: the song fades if still on air then
   blackout_name?: string;
+  holiday?: string;              // a holiday item in its season (Holiday Music page)
   asset: {
     id: string; title: string; artist: string | null; duration: number | null;
     asset_type: string; category: string | null;
@@ -290,6 +291,12 @@ function QueuePanel(p: Props) {
                     ) : (
                       <span className="mr-1.5 align-middle text-[10px] bg-[#ffa64d] text-black px-1 py-px font-bold" data-testid="row-sponsor">SPONSOR</span>
                     ))}
+                    {entry.holiday && (
+                      <span className="mr-1.5 align-middle text-[10px] bg-[#c9a7ff] text-black px-1 py-px font-bold uppercase"
+                        data-testid="row-holiday" title={`From the ${entry.holiday} list (Holiday Music)`}>
+                        {entry.holiday}
+                      </span>
+                    )}
                     <span className="hidden lg:inline">{a?.artist ? `${a.artist}  ` : ''}</span>{title}
                     {a?.artist && <span className="lg:hidden font-normal opacity-75"> · {a.artist}</span>}
                     {entry.source?.startsWith('resume@') && (

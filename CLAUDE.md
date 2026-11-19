@@ -113,6 +113,7 @@ radioplatform/
 | SpotRecording | spot_recording.py | A sponsorship spot in the making: script, wording review, audio, status (draft/ready/approved/rejected) |
 | BugReport | bug_report.py | Report from the 🐞 button: words, screenshot, browser state, server log slice, GitHub issue and fix link (see `wiki/bug-reports.md`) |
 | ProgramBlock | program_block.py | A named run of items (station ID, weather, PSA, sponsor places, programme) that airs as one event at set clock times: hard, soft, or soft with a limit; optionally only part of every year (`season_start`/`season_end`, MM-DD) |
+| HolidayItem / HolidaySetting | holiday_music.py | A song or shiur on a holiday's list (every station or one; holiday-only unless all_year), and one station's settings for one holiday: on/off, days ahead, 1 in N at start / day before / holiday days, shiurim, stop (see `wiki/holiday-music.md`) |
 | AuditLog | audit_log.py | Activity log row: who, what (label, category), station, before/after, status, IP, device, place (see `wiki/activity-log.md`) |
 | HsSoftened | hs_softened.py | A timed queue item that HS off made wait, with its old timing so HS on restores it (see `wiki/station-modes.md`) |
 | StationBlockedAsset | station_blocked_asset.py | An item one station never plays by itself ("Not on this station"); do_not_play is the all-stations version (see `wiki/control-room.md`) |
@@ -162,6 +163,7 @@ radioplatform/
 | spot_schedules | spot_schedules.py | /spot-schedules (`GET /for-asset/{asset_id}?station_id=`: the control room's Sponsor panel, any staff role; `GET /station-day?station_id=`: today's sponsorship plays on one station, the control room's Sponsors tab) |
 | spot_recordings | spot_recordings.py | /spot-recordings |
 | program_blocks | program_blocks.py | /program-blocks (CRUD + /preview) |
+| holiday_music | holiday_music.py | /holiday-music: overview per station (`?station_id=`), `/{holiday}/days`, `/{holiday}/settings` (PUT, manager), `/{holiday}/items` (GET; POST manager), `/items/{id}` (PATCH/DELETE manager), `/{holiday}/suggest` (library titles naming the holiday); see `wiki/holiday-music.md` |
 | databank | databank.py | /databank: KBR Studio style tables (items sorted by any column, every type of a table, spots with schedule end dates + PATCH end-date, one day's play log); see `wiki/databank.md` |
 | copy_review | copy_review.py | /sponsorship (rules + copy review) |
 | campaigns | campaigns.py | /campaigns: sponsorship campaigns. Reads (list with `?sponsor_id=`, detail, drafts, comments) for every staff role and sponsors (own only); create/edit/drafts/comments for managers and sponsors (staff name the `sponsor_id`); status for managers |
@@ -242,6 +244,7 @@ radioplatform/
 | sponsor_accounts.py | Sponsors as clients: status from contract dates, spots by stage of the flow, plays per contract, the as-run log (see `wiki/sponsor-accounts.md`) |
 | sponsor_delivery.py | What a sponsor was promised against what aired: missed plays of the last 14 days and coming plays with no room or moved, for `GET /sponsor-portal/missed-plays` (see `wiki/spot-schedules.md`) |
 | shabbos_ending.py | Last song before Shabbos: the station's chosen song back-timed to end exactly at candle lighting (the blackout's start), the item after it (the shofar) first in the silence group, timed items cleared out of its way; `automation_config.shabbos_ending` (see `wiki/shabbos-ending.md`) |
+| holiday_music.py | Holiday lists mixed in before and during each holiday: Hebrew calendar per station (Israel or diaspora), rising 1-in-N share, `HolidayMix.pick` used by both fills, rest and carried count, queue tags (see `wiki/holiday-music.md`) |
 | station_blocks.py | "Not on this station": the per-station list of items a station does not play, the subquery every pick uses (`blocked_asset_ids`) and block/undo with removal of that station's waiting copies |
 | emergency_alerts.py | The emergency override: sends an alert to each station (engine `/alert`, or WS `emergency_alert` to browser players), takes the engine's start/end reports into the log, drops hard items due during it, alert + ntfy on each (see `wiki/emergency-alerts.md`) |
 | eas_tones.py | Finds EAS attention signal and SAME bursts in a recording, so a staff upload with them is refused |
@@ -271,6 +274,7 @@ radioplatform/
 - SpotRecordings.tsx — Record Spots: write a script, make or upload audio, listen, approve into the library
 - Databank.tsx — KBR Studio's database window: Songs / Jingles / Spots / Blocks tables, Find, Edit mode, day log to the millisecond
 - Rds.tsx — RDS: what radios show now and next 10 minutes, PS and rotation settings, rotation lines (templates, sponsor lines, days/hours/dates), encoder pickup log, feed links for Magic RDS
+- HolidayMusic.tsx — Holiday Music: each holiday's next dates, when the mix starts, today's rate, settings per station, day-by-day rates, the list with Suggest from titles and library search
 - ProgramBlocks.tsx — Named blocks ("Weather Sponsors"): items in order, clock times, hard or soft, next 24 hours
 - SponsorshipRules.tsx — Edit the sponsorship wording rules (versioned) and try the wording check
 - Playlists.tsx — Playlist template rotation management
@@ -360,6 +364,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/admin/spot-recordings` → SpotRecordings (protected)
 - `/admin/databank` → Databank (protected)
 - `/admin/program-blocks` → ProgramBlocks (protected)
+- `/admin/holiday-music` → HolidayMusic (staff; managers change)
 - `/admin/rds` → Rds (staff; managers change)
 - `/admin/sponsorship-rules` → SponsorshipRules (protected)
 - `/admin/playlists` → Playlists (protected)
@@ -532,6 +537,9 @@ cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMI
 
 # Stations page: "Last song before Shabbos" (song and item at candle lighting from a library search, saves and keeps other settings), desktop and iPhone
 cd frontend && BASE_URL=http://localhost:4313 node e2e/shabbos-ending-setting.mjs
+
+# Holiday Music page and the queue's holiday tag against a real backend (seed in wiki/holiday-music.md), desktop and iPhone
+cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMIN_PASSWORD=... node e2e/holiday-music.mjs
 
 # Program Blocks page: "Only part of the year" season pickers (fake backend, desktop and iPhone)
 cd frontend && BASE_URL=http://localhost:4173 node e2e/program-block-season.mjs
