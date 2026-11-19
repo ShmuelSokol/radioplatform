@@ -59,6 +59,7 @@ PUBLIC_WRITES = {
     ("POST", "/playout/{station_id}/hello"),
     ("POST", "/playout/{station_id}/commands/poll"),
     ("POST", "/playout/{station_id}/alert"),  # playout token
+    ("POST", "/playout/{station_id}/levels"),  # playout token
     ("POST", "/emergency/device/activate"),  # EMERGENCY_API_TOKEN (the EAS box)
     ("POST", "/emergency/device/{alert_id}/stop"),  # EMERGENCY_API_TOKEN
 }
