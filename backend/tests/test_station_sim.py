@@ -75,3 +75,25 @@ async def test_shabbos_starts_with_silence_at_candle_lighting(tmp_path):
 async def test_a_whole_day(tmp_path, station):
     result = await _run(tmp_path, datetime(2026, 11, 19, 0, 0, tzinfo=NY), 24, [station])
     assert not result.failed(), result.report()
+
+
+@pytest.mark.asyncio
+async def test_sponsorships_wait_for_stories_on_all_day_stories(tmp_path):
+    """All Day Stories, Thursday 2026-11-19 10 AM to 12:45 PM ET (coordinator 2026-11-19): with
+    sponsorships_wait_for_talks a story is never cut or paused for a sponsorship; they play
+    between stories. (Without the setting they cut in; tests/test_soft_items_pause_shiur.py
+    covers both ways quickly.)"""
+    from tests.sim.stations import STORIES
+
+    overrides = {STORIES: {"sponsorships_wait_for_talks": True}}
+    _, result = await simulate(EXPORT, datetime(2026, 11, 19, 10, 0, tzinfo=NY), 2.75, ["stories"], tmp_path,
+                               overrides=overrides)
+    print(result.report())
+    check = "no sponsorship inside a shiur or story"
+    assert result.checks_run[check] >= 1
+    # only the sponsorship findings (a story cut by the hourly time check is the
+    # engine's rule, not this one)
+    sponsor_cuts = [f for f in _failing(result, check) if "sponsorship" in f]
+    assert not sponsor_cuts, sponsor_cuts
+    assert not result.failed("same sponsor never twice within 20 min"), _failing(result, "same sponsor never twice within 20 min")
+    assert any(r.source == "ad_slot" for r in result.rows), "no sponsorship aired at all"
