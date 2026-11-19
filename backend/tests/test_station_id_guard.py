@@ -377,3 +377,48 @@ async def test_an_id_on_time_is_left_where_the_fill_put_it(db_session: AsyncSess
                               status="pending", source="auto"))   # +16: 18 min after the last
     await db_session.commit()
     assert await station_id_guard.pull_late_id(db_session, station.id, now) == 0
+
+
+@pytest.mark.asyncio
+async def test_an_id_waiting_far_too_close_after_the_one_before_is_taken_out(db_session: AsyncSession):
+    """Main 2026-11-19 22:50Z: an ID passed over since 17:49 waited at 22:54:30 and the
+    redraw's next one at 23:03:57, 9.5 min after it; the second would be passed over and
+    push the ones behind it later. The later one is taken out; the first stays."""
+    now = datetime.now(UTC)
+    station = Station(id=uuid.uuid4(), name=f"S {uuid.uuid4().hex[:6]}", timezone="America/New_York",
+                      automation_config={"station_ids": {"enabled": True, "clear_minutes": 1}})
+    db_session.add(station)
+    await db_session.flush()
+    song = Asset(id=uuid.uuid4(), title="s", file_path="s.mp3", asset_type="music", category="lively", duration=243.0)
+    jingle = Asset(id=uuid.uuid4(), title="j", file_path="j.mp3", asset_type="jingle", category="station_id",
+                   duration=8.0)
+    db_session.add_all([song, jingle])
+    await db_session.flush()
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=jingle.id, position=0,
+                              status="played", source="auto", started_at=now - timedelta(minutes=9)))
+    pos = 0
+
+    def add(a, **kw):
+        nonlocal pos
+        pos += 1
+        e = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=a.id, position=pos,
+                       status=kw.pop("status", "pending"), source="auto", **kw)
+        db_session.add(e)
+        return e
+
+    add(song, status="playing", started_at=now)   # on air until +4
+    first = add(jingle)                            # +4: 13 min after the last aired
+    add(song)
+    add(song)                                      # +4, +8
+    close = add(jingle)                            # +12: 8 min after the first
+    for _ in range(3):
+        add(song)
+    await db_session.commit()
+    station_id, first_id, close_id = station.id, first.id, close.id
+
+    changed = await station_id_guard.pull_late_id(db_session, station_id, now)
+    await db_session.commit()
+    db_session.expire_all()
+    assert changed == 1
+    assert await _status(db_session, close_id) == "skipped"
+    assert await _status(db_session, first_id) == "pending"

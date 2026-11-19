@@ -334,6 +334,9 @@ async def drop_misplaced(db: AsyncSession, station_id, now: datetime | None = No
 # Only pull an ID to a place at least this far ahead: the engine already holds the
 # next item, and nearer than this the estimate decides nothing new
 _PULL_FROM = timedelta(minutes=2)
+# A waiting ID is taken out only when it is this much closer than min_minutes after the
+# one before: one song later (the air-time check's move) usually puts it right
+_TOO_CLOSE_SLACK = timedelta(minutes=2)
 
 
 async def pull_late_id(db: AsyncSession, station_id, now: datetime | None = None) -> int:
@@ -406,6 +409,32 @@ async def pull_late_id(db: AsyncSession, station_id, now: datetime | None = None
     held = {str(x) for x in held_entry_ids(station_id)}
     zone = ZoneInfo(station.timezone or "America/New_York")
     margin = timedelta(minutes=settings.clear_minutes)
+    # An ID waiting far too close after the one before it (aired or waiting) would be
+    # passed over at air time song after song and push the ones behind it later.
+    # Main 2026-11-19 22:50Z: an ID passed over since 17:49 sat at 22:54:30 and the
+    # redraw's next one at 23:03:57, 9.5 min after it. The later one goes; the late
+    # check below then brings the next forward if the gap grew past max_minutes.
+    dropped = 0
+    previous_id = last_id
+    walk = Clock(start, list(timed))
+    for entry, seconds in list(waiting):
+        at = walk.start()
+        if at - now > _TIDY_UNTIL:
+            break
+        if is_auto_station_id(entry):
+            if (str(entry.id) not in held and at - now >= _PULL_FROM
+                    and at - previous_id < timedelta(minutes=settings.min_minutes) - _TOO_CLOSE_SLACK):
+                logger.info("Station %s: station ID %s due %s only %.1f min after the one before; taken out",
+                            station_id, entry.id, at.isoformat(timespec="seconds"),
+                            (at - previous_id).total_seconds() / 60)
+                entry.status = "skipped"
+                waiting.remove((entry, seconds))
+                dropped += 1
+                continue  # takes no air time
+            previous_id = at
+        walk.play(seconds)
+    if dropped:
+        await db.flush()
     clock = Clock(start, timed)
     previous_kind: str | None = None
     spot: int | None = None  # index in `waiting` the ID would go before
@@ -421,7 +450,7 @@ async def pull_late_id(db: AsyncSession, station_id, now: datetime | None = None
                             "engine holds it" if str(entry.id) in held else
                             ("no place before it passes the checks" if spot is None else "brought forward"))
             if at <= latest or spot is None or str(entry.id) in held:
-                return 0  # on time, or no better place before it
+                return dropped  # on time, or no better place before it
             mover = entry
             break
         if (spot is None and i > 0 and str(entry.id) not in held and at - now >= _PULL_FROM
@@ -435,7 +464,7 @@ async def pull_late_id(db: AsyncSession, station_id, now: datetime | None = None
     else:
         logger.info("Station %s: no automatic station ID waiting in the queue (last aired %s)",
                     station_id, last_id.isoformat(timespec="seconds"))
-        return 0
+        return dropped
     moved = [e for e, _ in waiting[spot:] if e is not mover and e.position <= mover.position]
     places = sorted([mover.position] + [e.position for e in moved])
     for entry, place in zip([mover] + moved, places):
@@ -445,4 +474,4 @@ async def pull_late_id(db: AsyncSession, station_id, now: datetime | None = None
         for n, entry in enumerate([mover] + moved):
             entry.position = base + n
     await db.flush()
-    return 1
+    return dropped + 1
