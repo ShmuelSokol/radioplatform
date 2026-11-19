@@ -46,7 +46,7 @@ MIN_LOGGED_PLAY_SECONDS = 1.0
 # A start report that carries its own time (a local FM box's kept report) is believed
 # when it is this far in the past
 STARTED_AT_MIN_LATE = 2.0
-STARTED_AT_MAX_LATE = 7 * 86400.0
+STARTED_AT_MAX_LATE = 15 * 86400.0  # a local FM box can be offline up to 14 days (playout_plan.MAX_EXTENSION_DAYS)
 # An ordinary start report's own time is used when it is at most this old
 STARTED_AT_LIVE_MAX_LATE = 60.0
 # Raise an alert if the engine has not contacted us for this long
@@ -88,6 +88,12 @@ class EngineState:
     skip_requested: bool = False
     # Soft-timed groups (by their time) whose hard_by limit already made us fade the song
     hard_by_done: set[str] = field(default_factory=set)
+    # A local FM box is sending what it aired offline, batch after batch (monotonic):
+    # till then the "playing" row is some item of the offline days, and the tick must
+    # not act on it (it took Shabbos silence as on air and skipped the real song)
+    box_catch_up_until: float = 0.0
+    # Assets a box's kept reports aired, by when, gathered over one return's batches
+    box_recent_assets: dict = field(default_factory=dict)
     # Monotonic time of the engine's last call to us
     last_contact: float = 0.0
     last_alert: float = 0.0
@@ -1177,7 +1183,7 @@ REPEAT_START_SECONDS = 10.0
 
 async def handle_started(
     db: AsyncSession, station_id, entry_id: str | None, lane: str | None, at: float | None = None,
-    quiet: bool = False, kept: bool = False,
+    quiet: bool = False, kept: bool = False, asset_id: str | None = None,
 ) -> dict:
     """The engine reports what just went on air (see _handle_started). Reports for one
     station are taken one at a time, and an exact repeat (same entry within
@@ -1187,7 +1193,8 @@ async def handle_started(
     if key:
         state.starting.add(key)
     try:
-        return await _handle_started_locked(db, station_id, state, entry_id, lane, at=at, quiet=quiet, kept=kept)
+        return await _handle_started_locked(db, station_id, state, entry_id, lane, at=at, quiet=quiet, kept=kept,
+                                            asset_id=asset_id)
     finally:
         if key:
             state.starting.discard(key)
@@ -1195,7 +1202,7 @@ async def handle_started(
 
 async def _handle_started_locked(
     db: AsyncSession, station_id, state: "EngineState", entry_id: str | None, lane: str | None,
-    at: float | None = None, quiet: bool = False, kept: bool = False,
+    at: float | None = None, quiet: bool = False, kept: bool = False, asset_id: str | None = None,
 ) -> dict:
     async with state.started_lock:
         mono = time.monotonic()
@@ -1206,15 +1213,120 @@ async def _handle_started_locked(
                         entry_id, mono - state.last_started[1])
             _touch(state)
             return {"ok": True, "known": True, "repeat": True}
-        result = await _handle_started(db, station_id, entry_id, lane, at=at, quiet=quiet, kept=kept)
+        result = await _handle_started(db, station_id, entry_id, lane, at=at, quiet=quiet, kept=kept,
+                                       asset_id=asset_id)
         if entry_id:
             state.last_started = (str(entry_id), time.monotonic())
         return result
 
 
+# How long the playout tick waits for the next batch of a box's kept reports
+BOX_CATCH_UP_HOLD_SECONDS = 30.0
+
+
+async def handle_started_batch(db: AsyncSession, station_id, reports: list[dict]) -> int:
+    """A local FM box back on line: its kept start reports in order (POST /started-batch),
+    all but the newest quiet. Then the site's timed rows for the hours the box ran alone
+    are set aside: the box aired its own copies, and left pending they all went out at
+    once as "due" on return (a week offline: Saturday's weather and a ":30" time check
+    at 6:14 on Thursday). Returns how many reports were taken."""
+    from app.services import playout_tunnel
+
+    state = get_state(station_id)
+    more = bool(reports) and bool(reports[-1].get("more"))
+    # Only a local FM box's station, never a droplet engine's; refreshed by each batch and
+    # short, so a lost last batch cannot keep the tick off
+    if more and playout_tunnel.allowed(station_id):
+        state.box_catch_up_until = time.monotonic() + BOX_CATCH_UP_HOLD_SECONDS
+    else:
+        state.box_catch_up_until = 0.0
+    for i, r in enumerate(reports):
+        kept = bool(r.get("kept"))
+        await handle_started(
+            db, station_id, r.get("entry_id"), r.get("lane"), at=r.get("at"), kept=kept,
+            quiet=kept and (bool(r.get("more")) or i < len(reports) - 1),
+            asset_id=r.get("asset_id") if kept else None,
+        )
+    kept_at = []
+    for r in reports:
+        try:
+            if r.get("kept") and r.get("at"):
+                kept_at.append(float(r["at"]))
+        except (TypeError, ValueError):
+            pass
+    _note_box_assets(state, reports)
+    if kept_at:
+        upto = datetime.fromtimestamp(min(max(kept_at), datetime.now(UTC).timestamp()), UTC)
+        # never a row whose start report is on its way
+        in_flight = set(state.recent_started) | set(state.starting)
+        if state.cued_entry_id:
+            in_flight.add(state.cued_entry_id)
+        keep_ids = []
+        for x in in_flight:
+            try:
+                keep_ids.append(uuid.UUID(str(x)))
+            except ValueError:
+                pass
+        gone = await db.execute(
+            update(QueueEntry)
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending",
+                   QueueEntry.preempt_at.isnot(None), QueueEntry.preempt_at < upto,
+                   QueueEntry.id.notin_(keep_ids))
+            .values(status="skipped")
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
+        if gone.rowcount:
+            logger.info("Station %s: %d timed rows of the box's offline hours set aside",
+                        station_id, gone.rowcount)
+        if not more:
+            # The site's own songs queued while the box was offline were drawn without
+            # knowing what it played: one the box aired in its last hours is not played
+            # again now (a week offline: 14 of the first 40 items after the return)
+            recent = box_recent_music(state, max(kept_at))
+            if recent:
+                again = await db.execute(
+                    update(QueueEntry)
+                    .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending",
+                           QueueEntry.preempt_at.is_(None), QueueEntry.source == "auto",
+                           QueueEntry.asset_id.in_(recent), QueueEntry.id.notin_(keep_ids))
+                    .values(status="skipped")
+                    .execution_options(synchronize_session=False)
+                )
+                await db.commit()
+                if again.rowcount:
+                    logger.info("Station %s: %d queued songs the box aired lately set aside",
+                                station_id, again.rowcount)
+    return len(reports)
+
+
+# A song the box aired this long before its return is not played again from the queue
+BOX_RECENT_SONG_SECONDS = 4 * 3600.0
+
+
+def _note_box_assets(state: "EngineState", reports: list[dict]) -> None:
+    """Remember when the box aired each asset, over the batches of one return."""
+    seen = state.box_recent_assets
+    for r in reports:
+        try:
+            aid, at = uuid.UUID(str(r.get("asset_id"))), float(r.get("at") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        seen[aid] = max(at, seen.get(aid, 0.0))
+
+
+def box_recent_music(state: "EngineState", newest: float) -> set:
+    """Assets the box aired within BOX_RECENT_SONG_SECONDS of its newest report; the
+    return's record is then cleared."""
+    seen = state.box_recent_assets
+    out = {a for a, at in seen.items() if newest - at <= BOX_RECENT_SONG_SECONDS}
+    seen.clear()
+    return out
+
+
 async def _handle_started(
     db: AsyncSession, station_id, entry_id: str | None, lane: str | None, at: float | None = None,
-    quiet: bool = False, kept: bool = False,
+    quiet: bool = False, kept: bool = False, asset_id: str | None = None,
 ) -> dict:
     """The engine reports what just went on air.
 
@@ -1266,6 +1378,11 @@ async def _handle_started(
         await _handed_asset(db, state, station_id, str(entry_id))
         if entry is None and entry_id else None
     )
+    if entry is None and entry_id and not handed_asset and kept and asset_id:
+        # A local FM box aired it while its line was down: an entry removed on the site
+        # meanwhile, or an item the box worked out itself past the end of its queue. It
+        # aired, so it is logged (the box offline 16 h: removed songs aired unlogged).
+        handed_asset = str(asset_id)
 
     # Station IDs the pick passed over (station_id_guard) leave the queue
     from app.services.station_id_guard import take_passed
@@ -1317,7 +1434,8 @@ async def _handle_started(
             db.add(entry)
             await db.flush()
             await db.refresh(entry, ["asset"])
-            logger.warning("Engine started entry %s that was deleted here; on air as %s", entry_id, entry.id)
+            logger.warning("Engine started entry %s that %s; on air as %s", entry_id,
+                           "the local FM box aired offline" if kept else "was deleted here", entry.id)
 
     if entry is None:
         await db.commit()
@@ -2138,6 +2256,8 @@ async def tick(db: AsyncSession, station) -> None:
     station_id = station.id
     state = get_state(station_id)
     now = datetime.now(UTC)
+    if state.box_catch_up_until > time.monotonic():
+        return  # a local FM box is still sending what it aired offline
 
     # During a live show the automation queue is left alone. The engine's pre-loaded next
     # track would air during the show and be used up: drop it once (/next hands it

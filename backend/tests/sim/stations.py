@@ -85,8 +85,10 @@ def load_export(path: str | Path) -> dict:
 async def seed(db, export: dict, start: datetime, days: int = 2, stations: set[str] | None = None,
                config_overrides: dict | None = None, block_overrides: dict | None = None,
                extra_assets: list[dict] | None = None, regenerate_windows: bool = False,
-               holiday_items: list[dict] | None = None) -> dict:
-    """Write the export into an empty database. Returns {station_id: name}."""
+               holiday_items: list[dict] | None = None, weather_days: int | None = None) -> dict:
+    """Write the export into an empty database. Returns {station_id: name}.
+    `weather_days`: daily weather reports exist only up to this many days after `start`
+    (the forecast's reach), instead of for every day of the run."""
     keep = set(stations or NAMES)
     for s in export["stations"]:
         if s["id"] not in keep:
@@ -140,7 +142,7 @@ async def seed(db, export: dict, start: datetime, days: int = 2, stations: set[s
                            station_id=uuid.UUID(h["station_id"]) if h.get("station_id") else None,
                            all_year=bool(h.get("all_year"))))
     await db.flush()
-    _add_announcements(db, start, days)
+    _add_announcements(db, start, days, weather_days)
     await db.flush()
 
     for t in export["playlist_templates"]:
@@ -211,7 +213,7 @@ async def seed(db, export: dict, start: datetime, days: int = 2, stations: set[s
 OMER_CLIP_SECONDS = 6.0
 
 
-def _add_announcements(db, start: datetime, days: int) -> None:
+def _add_announcements(db, start: datetime, days: int, weather_days: int | None = None) -> None:
     """The uploaded Shprach clips: time of day per hour and half hour, weather per day,
     and the 49 Omer counts (they air only during the Omer)."""
     for n in range(1, 50):
@@ -229,7 +231,7 @@ def _add_announcements(db, start: datetime, days: int) -> None:
                              duration=TIME_CLIP_SECONDS, metadata_extra=meta,
                              file_path=f"https://cdn.example.com/time/{region}-{hour:02d}{minute:02d}.mp3"))
         first = (start - timedelta(days=1)).date()
-        for n in range(days + 3):
+        for n in range(days + 3 if weather_days is None else weather_days + 2):
             day = first + timedelta(days=n)
             db.add(Asset(id=uuid.uuid4(), title=f"Weather {day} ({region})", asset_type="spot",
                          category="weather_spot", duration=WEATHER_SECONDS,

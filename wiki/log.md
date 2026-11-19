@@ -484,3 +484,7 @@ INGEST 2026-11-19 streaming-architecture.md stream player reconnects by itself (
 INGEST 2026-11-19 control-room.md meters show the engine's on-air level with no Listen or click (radio.liq rms.stereo -> POST /playout/{id}/levels -> WS levels -> useOnAirLevels); Listen button says Not playing here / Sound stopped: tap to resume / Reconnecting
 INGEST 2026-11-19 air-watch.md outside watch: GitHub Actions every 5 min checks /health, engine and server streams from outside; state in an open issue, ntfy via repo secret NTFY_TOPIC
 UPDATE 2026-11-19 control-room.md queue Playing from: timed items named Time check / Weather / Omer count (not Station rules), Why hover button, clickable-cell cue
+INGEST 2026-11-19 local-fm-box.md a week offline: GET /playout/{id}/plan?days= extension (timed items past the queue from existing recordings only, songs by hour, 30 days of blackouts), relay draws songs past the queue, kept reports carry asset_id so removed/projected plays are logged, one catch-up at a time (offline plays were logged twice), shiur pause/resume and station-ID guard offline
+INGEST 2026-11-19 local-fm-box.md 7-day offline sim: box draws station IDs past the queue, silence cut at blackout end, kept reports believed up to 15 days
+INGEST 2026-11-19 local-fm-box.md return after days: /started-batch + stale timed rows set aside; blackout silence cut offline; ID guard counts timed-lane items
+INGEST 2026-11-19 local-fm-box.md box return: last batch sets aside queued auto songs the box aired in its last 4 h; tick held 30 s between batches (box stations only)

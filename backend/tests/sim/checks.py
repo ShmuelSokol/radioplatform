@@ -135,8 +135,11 @@ async def collect(sim) -> Result:
             spot_sponsor[str(s.asset_id)] = str(s.sponsor_id)
             spot_station[str(s.asset_id)].add(str(s.station_id) if s.station_id else None)
     rows = []
+    # Items a local FM box handed out that are not queue rows (tests/sim/offline.py):
+    # timed items it worked out for the days past its queue, songs it drew, resumes
+    box_items = getattr(sim, "box_items", None) or {}
     for seg in sim.log:
-        e = entries.get(seg.entry_id or "")
+        e = entries.get(seg.entry_id or "") or box_items.get(seg.entry_id or "")
         a = assets.get(str(e.asset_id)) if e else None
         tz = ZoneInfo(stations[seg.station].timezone or "America/New_York")
         rows.append(Row(
@@ -235,6 +238,11 @@ def hard_items_on_time(res: Result, ctx: Context):
         if e.timing_mode != "hard" or at is None or str(e.station_id) not in ctx.stations:
             continue
         if not (start + 60 <= at.timestamp() <= end - 120):
+            continue
+        # A local FM box offline (tests/sim/offline.py) aired its own copy of the site's
+        # row; the row is set aside when the box is back
+        box_off = getattr(ctx.sim, "box_offline", None)
+        if box_off and e.status == "skipped" and box_off[0] <= at.timestamp() < box_off[1]:
             continue
         if str(e.id) not in aired and e.status not in ("cancelled",):
             a = ctx.assets.get(str(e.asset_id))
@@ -732,12 +740,17 @@ def estimates_hold(res: Result, ctx: Context):
     check = "queue page times hold: items air within 3 min of the time shown"
     res.checks_run.setdefault(check, 0)
     started = {(r.station, r.entry_id): r for r in res.rows if r.entry_id and r.lane != "emergency"}
+    # A local FM box offline (tests/sim/offline.py) plays from its own copy: the site's
+    # page cannot know what it does until the line is back
+    box_off = getattr(ctx.sim, "box_offline", None)
     worst: dict = {}
     for t, sid, est in getattr(ctx.sim, "snapshots", []):
         for eid, ts in est.items():
             r = started.get((sid, eid))
             # Automatic station IDs move on purpose (station_id_guard.postpone)
             if r is None or r.start < t or r.is_id:
+                continue
+            if box_off and (box_off[0] <= r.start < box_off[1] or box_off[0] <= t < box_off[1]):
                 continue
             _count(res, check)
             off = r.start - ts

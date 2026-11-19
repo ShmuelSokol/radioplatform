@@ -297,12 +297,24 @@ async def item_from_db(db, entry_id: str, lane: str, uri: str) -> Item | None:
         select(QueueEntry).options(joinedload(QueueEntry.asset)).where(QueueEntry.id == _uuid.UUID(entry_id))
     )).unique().scalar_one_or_none()
     if row is None and entry_id:
-        # deleted on the site since the box got its plan: the box still has the file
+        # deleted on the site since the box got its plan, or an item the box worked out
+        # itself (a song it drew, a shiur's resume): the box has the file
+        from app.models.asset import Asset
         f = parse_uri(uri)
-        return Item(entry_id, lane, f, float(f.get("sim_length") or 240.0))
+        asset = None
+        try:
+            asset = await db.get(Asset, _uuid.UUID(f.get("kbr_asset", "")))
+        except ValueError:
+            pass
+        length = float(asset.duration or 0.0) if asset is not None else float(f.get("sim_length") or 240.0)
+        cue_out = f.get("liq_cue_out")
+        if cue_out:
+            length = min(length, float(cue_out)) if length else float(cue_out)
+        return Item(entry_id, lane, f, max(length - float(f.get("liq_cue_in") or 0.0), 0.0))
     fields = parse_uri(uri)
     if not entry_id:
-        return Item("", lane, fields, 60.0)  # the box's own silence file during a blackout
+        # the box's own silence file during a blackout (cut where the blackout ends)
+        return Item("", lane, fields, min(60.0, float(fields.get("liq_cue_out") or 60.0)))
     if row is None or row.asset is None:
         return None
     length = float(row.asset.duration or 0.0)

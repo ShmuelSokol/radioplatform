@@ -103,6 +103,11 @@ class Fake:
         self.calls = []
         self.next_answer = None
         self.plan = {"entries": [], "blackouts": []}
+        self.extension = None
+        self.flushes = 0
+        self.skips = 0
+        self.dropped = []
+        self.batch = False  # the backend has POST /started-batch
         self.timed = []
         self.instances = []
         self.refuse_instance = None
@@ -119,6 +124,15 @@ class Fake:
                     return self._out(200, b"AUDIO" + path.encode())
                 if path == "/timed":
                     fake.timed.append(json.loads(body))
+                    return self._out(200, b'{"ok":true}')
+                if path == "/flush":
+                    fake.flushes += 1
+                    return self._out(200, b'{"ok":true}')
+                if path == "/skip":
+                    fake.skips += 1
+                    return self._out(200, b'{"ok":true}')
+                if path == "/timed_drop":
+                    fake.dropped += json.loads(body)["ids"]
                     return self._out(200, b'{"ok":true}')
                 if not fake.up:
                     return self._out(503, b"down")
@@ -138,7 +152,11 @@ class Fake:
                         self.wfile.write(chunk)
                         self.wfile.flush()
                     return None
+                if path.endswith("/started-batch") and not fake.batch:
+                    return self._out(404, b'{"detail":"Not Found"}')
                 if "/plan" in path:
+                    if "days=" in path and fake.extension is not None:
+                        return self._out(200, json.dumps({**fake.plan, "extension": fake.extension}).encode())
                     return self._out(200, json.dumps(fake.plan).encode())
                 if "/next" in path:
                     if fake.next_answer is None:
@@ -366,6 +384,10 @@ def test_offline_blackout_is_silence_and_music_returns_after(rig):
     assert status == 200 and item["entry_id"] == "" and item["uri"].endswith("silence-60s.wav")
     assert Path(item["uri"].rsplit(":", 1)[1]).stat().st_size > 1_000_000
     assert relay.hand_over_timed() == 0  # the missed time check stays off the air
+    # The last minute of the blackout: the silence file is cut where it ends, so the
+    # station is back on the second (a week offline: back 37 s late after Shabbos)
+    clock["now"] = now + 480
+    assert 'liq_cue_out="20.000"' in _next(relay)[1]["uri"]
     clock["now"] = now + 501
     assert _next(relay)[1]["entry_id"] == "song"
 
@@ -531,7 +553,8 @@ def test_start_reports_are_kept_and_sent_in_order_when_the_line_returns(rig):
     assert [c for c in fake.calls if "/started" in c[1]] == []
     assert relay.sync_plan()
     relay.catch_up()
-    posts = [(c[1], json.loads(c[2])) for c in fake.calls if c[0] == "POST"]
+    # (this backend has no batch route: one by one after its 404)
+    posts = [(c[1], json.loads(c[2])) for c in fake.calls if c[0] == "POST" and c[1] != "/started-batch"]
     assert posts[0][0] == "/hello"
     assert [p[1]["entry_id"] for p in posts[1:]] == ["a", "b", "c"]
     assert all(p[1]["at"] == clock["now"] for p in posts[1:])
@@ -962,3 +985,348 @@ async def test_box_health_is_kept_shown_and_alerted(client, db_session, tunnel_s
     monkeypatch.setattr(settings, "PLAYOUT_RELAY_STATION_ID", "")
     assert playout_tunnel.box_health(sid) is None
     assert [f.kind for f in await watch.check_station(db_session, st, datetime.now(UTC), mono=60.0)] == []
+
+
+# ── A week without the internet (wiki/local-fm-box.md, "Days offline") ───────
+
+
+def _ext(fake, now, timed=(), songs=("s1", "s2", "s3"), blackouts=()):
+    """An extension as GET /plan?days= gives it: timed items past the queue, the songs
+    for each hour of the day, Shabbos windows."""
+    template = "00000000-0000-0000-0000-000000000000"
+    lib = {
+        name: {"title": name, "duration": 200.0, "kind": "music", "url": fake.url(name),
+               "uri": f'annotate:kbr_entry="{template}",kbr_kind="music",kbr_asset="{name}":{fake.url(name)}'}
+        for name in songs
+    }
+    return {
+        "days": 8, "until": now + 8 * 86400, "generated_at": now, "timed": list(timed),
+        "music": {str(h): list(songs) for h in range(24)}, "songs": lib,
+        "template_entry": template, "blackouts": list(blackouts),
+    }
+
+
+def test_offline_past_the_end_of_the_queue_the_box_carries_on_for_days(rig):
+    """The queue holds about two days. Past it the box hands over the timed items worked
+    out for the days after (time checks, blocks), keeps Shabbos from its month of windows
+    and draws the station's songs for the hour, the longest-rested first, each with an
+    id of its own and the song's item named for the site's log."""
+    fake, relay, clock = rig
+    now = clock["now"]
+    tc = fake.entry("tc-day5", None, at=now + 5 * 86400, mode="hard", kind="jingle")
+    tc["asset_id"] = "asset-tc"
+    dup = fake.entry("dup", None, at=now + 600, mode="hard", kind="jingle")  # the queue has this minute
+    fake.plan = {"blackouts": [], "entries": [
+        fake.entry("a", 1), fake.entry("q-tc", 2, at=now + 600, mode="hard", kind="jingle"),
+    ]}
+    fake.extension = _ext(fake, now, timed=[tc, dup], blackouts=[
+        {"start": now + 3 * 86400, "end": now + 3 * 86400 + 90000, "name": "Shabbos"}])
+    assert relay.sync_extension()
+    assert relay.extension["timed"][0]["entry_id"] == "tc-day5"
+    assert relay.fetch_plan_audio() == 0
+    assert [e["entry_id"] for e in relay.timed_entries()] == ["q-tc", "tc-day5"]
+    fake.up = False
+    assert _next(relay)[1]["entry_id"] == "a"
+    titles = []
+    for _ in range(3):
+        status, item = _next(relay)
+        assert status == 200
+        relay.started(json.dumps({"entry_id": item["entry_id"], "lane": "main"}).encode())
+        titles.append(relay.local_items[item["entry_id"]]["asset_id"])
+        assert 'kbr_entry="00000000' not in item["uri"] and item["entry_id"] in item["uri"]
+        clock["now"] += 200
+    assert sorted(titles) == ["s1", "s2", "s3"]  # none twice while another has rested longer
+    kept = [json.loads(line) for line in relay.spool_path.read_text().splitlines()]
+    assert [k["asset_id"] for k in kept] == titles
+    # Shabbos from the extension's windows: silence
+    clock["now"] = now + 3 * 86400 + 100
+    assert relay.in_blackout(relay.now())
+    assert '"Off air"' in _next(relay)[1]["uri"] or "silence" in _next(relay)[1]["uri"]
+    # Day five's time check reaches the engine's timed lane on its second
+    clock["now"] = now + 5 * 86400 - 40
+    assert relay.hand_over_timed() == 1
+    assert fake.timed[-1]["id"] == "tc-day5" and fake.timed[-1]["at"] == now + 5 * 86400
+    st = relay.status()
+    assert st["songs_for_rotation"] == 3 and st["songs_on_disk"] == 3
+
+
+def test_offline_a_song_rests_before_it_comes_back(rig):
+    fake, relay, clock = rig
+    now = clock["now"]
+    fake.plan = {"blackouts": [], "entries": []}
+    fake.extension = _ext(fake, now, songs=("s1", "s2"))
+    relay.sync_extension()
+    relay.fetch_plan_audio()
+    fake.up = False
+    first = relay.local_items[_next(relay)[1]["entry_id"]]["asset_id"]
+    clock["now"] += 200
+    second = relay.local_items[_next(relay)[1]["entry_id"]]["asset_id"]
+    assert first != second
+    clock["now"] += 300
+    # Both aired in the last 6 hours: the one aired longest ago comes first
+    assert relay.local_items[_next(relay)[1]["entry_id"]]["asset_id"] == first
+
+
+def test_offline_a_shiur_paused_by_the_time_check_carries_on_after_it(rig):
+    """With the line down a hard item cut the shiur on air and it never came back
+    (simulator, 16 h offline, 2026-11-19). Now the box does what the site does: the
+    shiur carries on after the time check from 3 s before where it stopped, and the
+    song the engine had pre-loaded is played later instead."""
+    fake, relay, clock = rig
+    now = clock["now"]
+    at = now + 1200
+    shiur = fake.entry("shiur", 1, kind="shiur")
+    shiur.update(duration=3600.0, long=True, asset_id="asset-shiur")
+    shiur["uri_main"] = f'annotate:kbr_entry="shiur",liq_cue_in="2.000",title="Daf":{fake.url("shiur")}'
+    fake.plan = {"blackouts": [], "long_items": "pause", "entries": [
+        shiur, fake.entry("song", 2), fake.entry("tc", 3, at=at, mode="hard", kind="jingle"),
+    ]}
+    relay.sync_plan()
+    relay.fetch_plan_audio()
+    fake.up = False
+    assert _next(relay)[1]["entry_id"] == "shiur"
+    relay.started(json.dumps({"entry_id": "shiur", "lane": "main", "at": now}).encode())
+    assert _next(relay)[1]["entry_id"] == "song"  # pre-loaded
+    clock["now"] = at - 44
+    assert relay.hand_over_timed() == 1
+    resume = relay.resume
+    assert resume and resume["asset_id"] == "asset-shiur"
+    _, item = _next(relay)
+    assert item["entry_id"] == resume["entry_id"]
+    assert 'liq_cue_in="1199.000"' in item["uri"]  # 2 s cue-in + 1200 s - 3 s rewind
+    assert item["uri"].count("liq_cue_in") == 1
+    assert _next(relay)[1]["entry_id"] == "song"  # the pre-loaded song plays after all
+    # Only one resume however often the hand-over runs
+    assert relay.hand_over_timed() == 0 and relay.resume is None
+
+
+def test_offline_station_id_waits_for_a_song_and_stays_clear_of_breaks(rig):
+    fake, relay, clock = rig
+    now = clock["now"]
+    sid_entry = fake.entry("id", 2, kind="jingle")
+    sid_entry["station_id"] = True
+    fake.plan = {"blackouts": [], "entries": [
+        fake.entry("song1", 1), sid_entry, fake.entry("song2", 3), fake.entry("song3", 4),
+        fake.entry("brk", 5, at=now + 2000, mode="soft", kind="spot"),
+    ]}
+    relay.sync_plan()
+    relay.fetch_plan_audio()
+    fake.up = False
+    assert _next(relay)[1]["entry_id"] == "song1"
+    relay.started(json.dumps({"entry_id": "song1", "lane": "main", "at": now}).encode())
+    assert _next(relay)[1]["entry_id"] == "id"  # after a song, nothing timed near
+    relay.started(json.dumps({"entry_id": "id", "lane": "main", "at": now + 10}).encode())
+    # an ID never follows a spoken item: the next song
+    assert _next(relay)[1]["entry_id"] == "song2"
+
+
+def test_two_catch_ups_at_once_send_each_kept_report_once(rig):
+    """The sync loop and an engine ask both started a catch-up when the line came back:
+    every play of the outage reached the site twice (two play log rows each)."""
+    fake, relay, _ = rig
+    fake.up = False
+    relay.started(b'{"entry_id":"x","lane":"main"}')
+    fake.up = True
+    relay._catching.acquire()
+    try:
+        relay.catch_up()  # another catch-up is running: this one does nothing
+        assert not [c for c in fake.calls if c[1] == "/started"]
+    finally:
+        relay._catching.release()
+    relay.catch_up()
+    assert len([c for c in fake.calls if c[1] == "/started"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_plan_extension_works_out_the_week_from_recordings_that_exist(client, db_session, monkeypatch):
+    """GET /plan?days=8: past the queue's two days, the hourly time check from the
+    hour's own clip, weather only for days that have a report (no report written now
+    for a day five days away), the songs by hour, and a month of Shabbos."""
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_TOKEN", TOKEN)
+    from app.services import playout_plan
+
+    playout_plan._extension_cache.clear()
+    station = Station(id=uuid.uuid4(), name="FM", timezone="America/New_York",
+                      automation_config={"hourly_time_announcement": True, "weather_enabled": True,
+                                         "weather_interval_minutes": 60})
+    db_session.add(station)
+    now = datetime.now(UTC)
+    for hour in range(24):
+        db_session.add(Asset(id=uuid.uuid4(), title=f"The time is {hour}", asset_type="jingle",
+                             category="time_announcement", duration=6.0,
+                             metadata_extra={"time_of_day": f"{hour:02d}", "source": "upload"},
+                             file_path=f"https://cdn.example.com/t{hour}.mp3"))
+    from zoneinfo import ZoneInfo
+
+    day3 = (now + timedelta(days=3)).astimezone(ZoneInfo("America/New_York")).date()
+    weather = Asset(id=uuid.uuid4(), title=f"Weather {day3}", asset_type="spot", category="weather_spot",
+                    duration=30.0, metadata_extra={"slot_key": day3.isoformat(), "source": "upload"},
+                    file_path="https://cdn.example.com/w3.mp3")
+    song = Asset(id=uuid.uuid4(), title="Song", duration=200.0, file_path="https://cdn.example.com/a.mp3",
+                 asset_type="music")
+    db_session.add_all([weather, song])
+    await db_session.flush()
+    db_session.add_all([
+        QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=song.id, position=1, status="pending", source="auto"),
+        HolidayWindow(id=uuid.uuid4(), name="Far Shabbos", is_blackout=True,
+                      start_datetime=now + timedelta(days=20), end_datetime=now + timedelta(days=21)),
+    ])
+    await db_session.commit()
+
+    resp = await client.get(f"/api/v1/playout/{station.id}/plan", headers=HEADERS, params={"days": 8})
+    assert resp.status_code == 200
+    ext = resp.json()["extension"]
+    timed = ext["timed"]
+    assert timed and all(now.timestamp() + 47 * 3600 < e["at"] <= now.timestamp() + 8 * 86400 + 60 for e in timed)
+    checks = [e for e in timed if e["title"].startswith("The time is")]
+    assert len(checks) >= 6 * 24 - 2
+    assert all(e["mode"] == "hard" and 'kbr_lane="timed"' in e["uri_timed"] for e in checks)
+    weathers = [e for e in timed if e["title"].startswith("Weather")]
+    assert weathers and {datetime.fromtimestamp(e["at"], ZoneInfo("America/New_York")).date() for e in weathers} == {day3}
+    assert len({e["entry_id"] for e in timed}) == len(timed)
+    assert ext["songs"][str(song.id)]["uri"].startswith('annotate:kbr_entry="00000000-0000-0000-0000-000000000000"')
+    assert any(str(song.id) in ids for ids in ext["music"].values())
+    assert [b["name"] for b in ext["blackouts"]] == ["Far Shabbos"]
+    # The same ids on the next fetch, so the box knows what already aired
+    playout_plan._extension_cache.clear()
+    again = (await client.get(f"/api/v1/playout/{station.id}/plan", headers=HEADERS, params={"days": 8})).json()
+    assert [e["entry_id"] for e in again["extension"]["timed"][:5]] == [e["entry_id"] for e in timed[:5]]
+
+
+@pytest.mark.asyncio
+async def test_kept_report_of_an_item_not_in_the_queue_is_logged_by_its_asset(client, db_session, monkeypatch):
+    """A song removed on the site while the box was offline still aired: its kept start
+    report names the item and the site logs it at the time it aired."""
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_TOKEN", TOKEN)
+    from sqlalchemy import select
+
+    from app.models.play_log import PlayLog
+
+    station = Station(id=uuid.uuid4(), name="FM", timezone="America/New_York")
+    a = Asset(id=uuid.uuid4(), title="Removed", duration=200.0, file_path="https://cdn.example.com/r.mp3", asset_type="music")
+    b = Asset(id=uuid.uuid4(), title="Drawn", duration=200.0, file_path="https://cdn.example.com/d.mp3", asset_type="music")
+    db_session.add_all([station, a, b])
+    await db_session.commit()
+    from app.services import playout_engine
+
+    sid, aid, bid = station.id, str(a.id), str(b.id)
+    t0 = time.time() - 3600
+    await playout_engine.handle_started(db_session, sid, str(uuid.uuid4()), "main", at=t0,
+                                        kept=True, quiet=True, asset_id=aid)
+    await playout_engine.handle_started(db_session, sid, str(uuid.uuid4()), "main", at=t0 + 200,
+                                        kept=True, quiet=True, asset_id=bid)
+    db_session.expire_all()
+    logs = (await db_session.execute(select(PlayLog).where(PlayLog.station_id == sid))).scalars().all()
+    assert [(str(p.asset_id), round(p.start_utc.replace(tzinfo=UTC).timestamp() - t0)) for p in logs] == [(aid, 0)]
+
+
+def test_offline_past_the_queue_station_ids_come_between_songs(rig):
+    """Days offline: the box puts the station's IDs between the songs it draws, after a
+    song, at the station's spacing and clear of a break (a week offline had none for
+    five days)."""
+    fake, relay, clock = rig
+    now = clock["now"]
+    fake.plan = {"blackouts": [], "entries": []}
+    ext = _ext(fake, now, songs=("s1", "s2", "s3", "s4", "s5", "s6"))
+    template = ext["template_entry"]
+    ext["songs"]["id1"] = {"title": "ID", "duration": 8.0, "kind": "jingle", "station_id": True,
+                           "url": fake.url("id1"),
+                           "uri": f'annotate:kbr_entry="{template}",kbr_kind="jingle":{fake.url("id1")}'}
+    ext["ids"] = {"enabled": True, "assets": ["id1"], "min_minutes": 12, "max_minutes": 12,
+                  "clear_minutes": 3, "start_hour": 0, "end_hour": 24}
+    fake.extension = ext
+    assert relay.sync_extension()
+    relay.fetch_plan_audio()
+    fake.up = False
+    relay.online = False
+    kinds = []
+    for _ in range(12):
+        status, item = _next(relay)
+        assert status == 200
+        got = relay.local_items[item["entry_id"]]
+        relay.started(json.dumps({"entry_id": item["entry_id"], "lane": "main"}).encode())
+        kinds.append(got["kind"])
+        clock["now"] += float(got["duration"])
+    # never first (nothing before it was a song), never two together, 12 min apart
+    assert kinds[0] == "music" and "jingle" in kinds
+    assert all(not (a == b == "jingle") for a, b in zip(kinds, kinds[1:]))
+    ids_at = [i for i, k in enumerate(kinds) if k == "jingle"]
+    assert len(ids_at) >= 2 and all(b - a >= 4 for a, b in zip(ids_at, ids_at[1:]))  # 200 s songs: 12 min
+    # no ID right before a break
+    for e in list(relay.extension["timed"]):
+        relay.extension["timed"].remove(e)
+    relay.extension["timed"].append(fake.entry("tc", None, at=clock["now"] + 60, mode="hard", kind="time"))
+    relay.last_id_at = clock["now"] - 3600
+    assert relay.draw_id(relay.now(), relay.timed_entries()) is None
+    # nor before a soft sponsorship that is already due (it airs after this song)
+    relay.extension["timed"][:] = [fake.entry("sp", None, at=clock["now"] - 120, mode="soft", kind="spot")]
+    assert relay.draw_id(relay.now(), relay.timed_entries()) is None
+    relay.extension["timed"][:] = []
+    relay.on_air = {**(relay.on_air or {}), "kind": "music", "at": clock["now"], "duration": 0.0, "uri": ""}
+    assert relay.draw_id(relay.now(), relay.timed_entries()) is not None
+
+
+def test_back_online_kept_reports_go_up_many_at_a_time(rig):
+    """A week offline is thousands of start reports: they go up 200 a call, in order, the
+    newest last and the rest quiet; an older backend without the route gets them one by
+    one."""
+    fake, relay, clock = rig
+    fake.plan = {"blackouts": [], "entries": [fake.entry(f"e{i}", i + 1) for i in range(450)]}
+    relay.sync_plan()
+    fake.up = False
+    relay.online = False
+    for i in range(450):
+        clock["now"] += 10
+        relay.started(json.dumps({"entry_id": f"e{i}", "lane": "main"}).encode())
+    fake.up = True
+    fake.batch = True
+    relay.catch_up()
+    batches = [json.loads(c[2])["reports"] for c in fake.calls if c[1] == "/started-batch"]
+    assert [len(b) for b in batches] == [200, 200, 50]
+    flat = [r for b in batches for r in b]
+    assert [r["entry_id"] for r in flat] == [f"e{i}" for i in range(450)]
+    assert all(r["kept"] for r in flat) and all(r.get("more") for r in flat[:-1]) and not flat[-1].get("more")
+    assert not [c for c in fake.calls if c[1] == "/started"]
+    assert not relay.spool_path.read_text().strip()
+
+
+def test_back_online_older_backend_gets_reports_one_by_one(rig):
+    fake, relay, clock = rig
+    fake.plan = {"blackouts": [], "entries": [fake.entry("a", 1), fake.entry("b", 2)]}
+    relay.sync_plan()
+    fake.up = False
+    relay.online = False
+    for eid in ("a", "b"):
+        clock["now"] += 10
+        relay.started(json.dumps({"entry_id": eid, "lane": "main"}).encode())
+    fake.up = True
+    relay.catch_up()
+    assert [json.loads(c[2])["entry_id"] for c in fake.calls if c[1] == "/started"] == ["a", "b"]
+    assert not relay.spool_path.read_text().strip()
+
+
+def test_offline_shabbos_silence_ends_with_the_blackout(rig):
+    """Offline, the site's blackout silence (hard at candle lighting) runs to its own
+    length; when the window ends the box drops what is left and skips to the music, as
+    the site's playout tick does online (a week offline: back 37 s late)."""
+    fake, relay, clock = rig
+    now = clock["now"]
+    s1 = fake.entry("sil1", 1, at=now + 10, mode="hard", kind="silence")
+    s2 = fake.entry("sil2", 2, at=now + 10, mode="hard", kind="silence")
+    fake.plan = {"blackouts": [{"start": now + 10, "end": now + 400, "name": "Shabbos"}],
+                 "entries": [s1, s2, fake.entry("song", 3)]}
+    relay.sync_plan()
+    relay.fetch_plan_audio()
+    fake.up = False
+    relay.online = False
+    clock["now"] = now + 5
+    assert relay.hand_over_timed() == 2
+    clock["now"] = now + 10
+    relay.started(json.dumps({"entry_id": "sil1", "lane": "timed"}).encode())
+    clock["now"] = now + 300
+    assert relay.end_blackout_silence() is False  # still Shabbos
+    clock["now"] = now + 401
+    assert relay.end_blackout_silence() is True
+    assert fake.dropped == ["sil2"] and fake.skips == 1 and fake.flushes >= 1
+    assert relay.end_blackout_silence() is False  # once
+    assert _next(relay)[1]["entry_id"] == "song"

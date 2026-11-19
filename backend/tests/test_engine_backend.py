@@ -1820,6 +1820,60 @@ async def test_a_timed_item_still_loading_counts_as_taken_only_when_asked(monkey
 
 
 @pytest.mark.asyncio
+async def test_kept_start_reports_in_one_batch_are_recorded_when_they_aired(client, db_session, eng, monkeypatch):
+    """POST /started-batch (a local FM box back on line after days): the same recording
+    as one report a call, all but the newest quiet; a 12-day-old play is believed."""
+    station, entries, _, calls = eng
+    base = datetime.now(UTC) - timedelta(days=12)
+    # the site's own time check for an hour the box ran alone, and one still to come
+    stale = await _add(db_session, station, title="The time is 10:00", duration=5.0, kind="jingle",
+                       position=50, preempt_at=base + timedelta(seconds=100), timing_mode="hard")
+    coming = await _add(db_session, station, title="The time is 11:00", duration=5.0, kind="jingle",
+                        position=51, preempt_at=datetime.now(UTC) + timedelta(minutes=20), timing_mode="hard")
+    reports = [{"entry_id": str(entries[i].id), "lane": "main", "kept": True, "asset_id": str(entries[i].asset_id),
+                "at": (base + timedelta(seconds=180 * i)).timestamp()} for i in range(3)]
+    r = await client.post(f"/api/v1/playout/{station.id}/started-batch", headers=HEADERS,
+                          json={"reports": reports})
+    assert r.status_code == 200 and r.json()["taken"] == 3
+    assert calls["broadcast"] == [str(entries[2].id)]
+
+    def aware(t):
+        return t if t.tzinfo else t.replace(tzinfo=UTC)
+
+    rows = [await _fresh(db_session, e.id) for e in entries[:3]]
+    assert [r.status for r in rows] == ["played", "played", "playing"]
+    for i, row in enumerate(rows):
+        assert abs((aware(row.started_at) - base).total_seconds() - 180 * i) < 1
+    # a batch with more to come holds the playout tick (the "playing" row is from the
+    # offline days); the last batch lets it go
+    from app.config import settings
+    from app.services import playout_engine as pe
+    monkeypatch.setattr(settings, "PLAYOUT_RELAY_STATION_ID", str(station.id))
+    more = [{**reports[0], "more": True}]
+    r = await client.post(f"/api/v1/playout/{station.id}/started-batch", headers=HEADERS, json={"reports": more})
+    assert pe.get_state(station.id).box_catch_up_until > 0
+    again = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=entries[0].asset_id,
+                       position=60, status="pending", source="auto")
+    db_session.add(again)
+    await db_session.commit()
+    r = await client.post(f"/api/v1/playout/{station.id}/started-batch", headers=HEADERS,
+                          json={"reports": [reports[2]]})
+    assert pe.get_state(station.id).box_catch_up_until == 0
+    # a song the box aired in its last hours is not played again from the site's queue
+    assert (await _fresh(db_session, again.id)).status == "skipped"
+    # a droplet engine's station is never held
+    monkeypatch.setattr(settings, "PLAYOUT_RELAY_STATION_ID", "")
+    r = await client.post(f"/api/v1/playout/{station.id}/started-batch", headers=HEADERS, json={"reports": more})
+    assert pe.get_state(station.id).box_catch_up_until == 0
+    # the stale one does not go out on return; the coming one waits for its time
+    assert (await _fresh(db_session, stale.id)).status == "skipped"
+    assert (await _fresh(db_session, coming.id)).status == "pending"
+    # without the token: refused like the other engine routes
+    r = await client.post(f"/api/v1/playout/{station.id}/started-batch", json={"reports": reports})
+    assert r.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
 async def test_kept_start_reports_are_recorded_when_they_aired(client, db_session, eng):
     """A local FM box's relay sends the start reports it kept while its line was down,
     each with the time the item went on air (`at`). Start times and the play log use

@@ -56,6 +56,7 @@ PUBLIC_WRITES = {
     ("POST", "/live-shows/twilio/status"),  # Twilio webhook
     ("POST", "/song-requests"),
     ("POST", "/playout/{station_id}/started"),
+    ("POST", "/playout/{station_id}/started-batch"),  # playout token: a local FM box's kept reports
     ("POST", "/playout/{station_id}/hello"),
     ("POST", "/playout/{station_id}/commands/poll"),
     ("POST", "/playout/{station_id}/alert"),  # playout token
