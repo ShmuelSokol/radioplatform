@@ -206,6 +206,25 @@ async def alert_report(
     return {"ok": alert is not None, "alert_id": str(alert.id) if alert else None}
 
 
+class LevelsReport(BaseModel):
+    l: list[float] = []  # noqa: E741
+    r: list[float] = []
+    step: float = 0.1
+    at: float | None = None
+
+
+@router.post("/{station_id}/levels")
+async def levels_report(body: LevelsReport, station_id: uuid.UUID = Depends(_require_engine)):
+    """The engine's on-air level, ten RMS values per side each second: passed straight on
+    to the station's open pages for the control room meters (no database). Token only, no
+    one-engine check: it runs every second and must stay cheap; a second engine is refused
+    on every call that matters (wiki/control-room.md, "Level meters")."""
+    from app.api.v1.websocket import broadcast_levels
+
+    broadcast_levels(str(station_id), body.l, body.r, body.step)
+    return {"ok": True}
+
+
 # The show goes out as MP3 for the engine's live lane (agreed with the engine thread
 # 2026-11-18: CBR 192 kbps, 44.1 kHz stereo; engine proto 5 plays it)
 LIVE_MP3_ARGS = ("-f", "mp3", "-codec:a", "libmp3lame", "-b:a", "192k", "-ar", "44100", "-ac", "2",

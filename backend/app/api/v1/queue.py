@@ -1538,6 +1538,10 @@ async def _get_queue_impl(station_id, limit, db):
     def _air(asset) -> float:
         if asset is None:
             return float(DEFAULT_DURATION)
+        if getattr(asset, "asset_type", None) == "silence":
+            # a blackout's silences fill its window end to end (311 x 5 min for a
+            # Shabbos); 3 s off each put Motzei Shabbos 15 min early
+            return float(getattr(asset, "duration", None) or DEFAULT_DURATION)
         meta = getattr(asset, "metadata_extra", None)
         meta = meta if isinstance(meta, dict) else None
         return _on_air(getattr(asset, "duration", None) or DEFAULT_DURATION, meta)
@@ -1578,6 +1582,7 @@ async def _get_queue_impl(station_id, limit, db):
             _est_map[e.id] = _np_sa or now_utc_sort
 
         ri, hi, si = 0, 0, 0
+        _timed_end = now_utc_sort  # end of the last timed item placed
         _safety = len(entries) * 3  # prevent infinite loops
 
         # A soft item due while a shiur or story has more than 5 minutes left pauses
@@ -1618,12 +1623,18 @@ async def _get_queue_impl(station_id, limit, db):
             if hi < len(hard_preempts):
                 hp_pa = _tz(hard_preempts[hi].preempt_at)
                 if hp_pa <= _cursor:
-                    _cursor = hp_pa
+                    # A hard item cuts the song under it, but never another timed item
+                    # or the past: a group sharing one time (a blackout's silence, all
+                    # due at its start) plays one after another. Jumping back to hp_pa
+                    # gave all 311 of KBR Jerusalem's Shabbos silences the same start,
+                    # and everything after them showed Friday times.
+                    _cursor = max(hp_pa, _timed_end)
                     _est_map[hard_preempts[hi].id] = _cursor
                     _dur = _air(hard_preempts[hi].asset)
                     _cursor = _soft_into_long(
                         hard_preempts[hi].asset, _cursor, _cursor + timedelta(seconds=_dur or DEFAULT_DURATION)
                     )
+                    _timed_end = _cursor
                     hi += 1
                     continue
 
@@ -1634,6 +1645,7 @@ async def _get_queue_impl(station_id, limit, db):
                     _est_map[soft_preempts[si].id] = _cursor
                     _dur = _air(soft_preempts[si].asset)
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
+                    _timed_end = _cursor
                     si += 1
                     continue
 
@@ -1665,12 +1677,14 @@ async def _get_queue_impl(station_id, limit, db):
                     _est_map[hard_preempts[hi].id] = _cursor
                     _dur = _air(hard_preempts[hi].asset)
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
+                    _timed_end = _cursor
                     hi += 1
                 elif next_sp:
                     _cursor = max(_cursor, next_sp)
                     _est_map[soft_preempts[si].id] = _cursor
                     _dur = _air(soft_preempts[si].asset)
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
+                    _timed_end = _cursor
                     si += 1
                 else:
                     break

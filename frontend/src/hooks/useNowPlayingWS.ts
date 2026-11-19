@@ -184,6 +184,11 @@ export const useNowPlayingWS = (stationId: string) => {
               // HS / Spots mode changed in some control room: every open one shows it at once
               window.dispatchEvent(new CustomEvent('kbr-modes', { detail: message.data }));
             }
+            if (message.type === 'levels' && message.data) {
+              // The engine's on-air level, ten values a second: the control room meters
+              // (hooks/useOnAirLevels) show it whether or not this page makes sound
+              window.dispatchEvent(new CustomEvent('kbr-levels', { detail: { ...message.data, stationId } }));
+            }
             if (message.type === 'ping') {
               ws.send('pong');
             }
