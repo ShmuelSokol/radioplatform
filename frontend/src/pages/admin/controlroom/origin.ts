@@ -82,6 +82,25 @@ export function matchingSteps(tpl: PlaylistTemplate, assetType: string | undefin
     }));
 }
 
+type Timed = 'time' | 'weather' | 'zmanim' | 'omer';
+const TIMED_WORDS: Record<Timed, { short: string; what: string }> = {
+  time: { short: 'Time check', what: 'the time check' },
+  weather: { short: 'Weather', what: 'the weather' },
+  zmanim: { short: 'Zmanim', what: 'the zmanim' },
+  omer: { short: 'Omer count', what: 'the Omer count' },
+};
+
+/** A time check, weather report, zmanim or Omer count clip, by its category or the title the server gives it. */
+function timedKind(a: QueueRow['asset']): Timed | null {
+  const cat = low(a?.category);
+  const title = low(a?.title);
+  if (cat === 'time' || cat === 'time_announcement' || title.startsWith('time announcement')) return 'time';
+  if (cat === 'weather' || cat === 'weather_spot' || title.startsWith('weather report')) return 'weather';
+  if (cat === 'zmanim') return 'zmanim';
+  if (cat === 'omer_count') return 'omer';
+  return null;
+}
+
 interface Lookup {
   blocks: Map<string, { block: ScheduleBlock; schedule: Schedule }>;
   playlists: Map<string, PlaylistTemplate>;
@@ -120,9 +139,11 @@ export function originOf(row: QueueRow, look: Lookup): Origin {
       lines: ['Timed to end exactly at candle lighting, from the station’s “Last song before Shabbos” setting.'],
       links: [{ label: 'Open Stations (Last song before Shabbos)', to: '/admin/stations' }] };
   }
+  const timed = timedKind(a);
   if (source === 'block') {
-    if (cat === 'time' || cat === 'weather') {
-      return { kind: cat === 'time' ? 'time' : 'weather', short: cat === 'time' ? 'Time check' : 'Weather', title: `Part of a program block (${cat === 'time' ? 'time check' : 'weather'})`,
+    if (timed) {
+      const w = TIMED_WORDS[timed];
+      return { kind: timed === 'weather' ? 'weather' : 'time', short: w.short, title: `Part of a program block (${w.what})`,
         lines: ['A program block places it at its clock time, together with the other items of that block.'],
         links: [{ label: 'Open Program Blocks', to: '/admin/program-blocks' }] };
     }
@@ -130,12 +151,21 @@ export function originOf(row: QueueRow, look: Lookup): Origin {
       lines: ['A program block (a named run of items at set clock times) placed it here.'],
       links: [{ label: 'Open Program Blocks', to: '/admin/program-blocks' }] };
   }
-  if (cat === 'time' || cat === 'zmanim' || cat === 'weather') {
-    const isTime = cat !== 'weather';
-    return { kind: isTime ? 'time' : 'weather', short: isTime ? 'Time check' : 'Weather',
-      title: isTime ? 'The time check on the hour (or half hour)' : 'The weather in the break',
-      lines: ['Queued for this station’s :00 / :30 break by the break settings.'],
-      links: [{ label: 'Open the break settings', to: '/admin/spot-schedule' }] };
+  if (timed && source !== 'manual' && source !== 'staff' && source !== 'request') {
+    const w = TIMED_WORDS[timed];
+    const titles: Record<Timed, string> = {
+      time: 'The time check on the hour (or half hour)',
+      weather: 'The weather in the break',
+      zmanim: 'The zmanim in the break',
+      omer: 'The Omer count after the time check',
+    };
+    return { kind: timed === 'weather' ? 'weather' : 'time', short: w.short, title: titles[timed],
+      lines: [timed === 'omer'
+        ? 'Queued after the hour’s time check by the station’s “Omer count on the hour” setting.'
+        : `Queued at its clock time for this station’s break by the break settings: ${w.what} plays at :00 (and :30 when the station has the half-hour time check), whatever playlist is on.`],
+      links: timed === 'omer'
+        ? [{ label: 'Open Stations (Omer count on the hour)', to: '/admin/stations' }]
+        : [{ label: 'Open the break settings', to: '/admin/spot-schedule' }] };
   }
   if (source === 'manual' || source === 'staff') {
     return { kind: 'manual', short: 'Added by hand', title: 'Added by a person',
@@ -151,10 +181,22 @@ export function originOf(row: QueueRow, look: Lookup): Origin {
     return { kind: 'loop', short: 'Loop', title: 'Loop is on',
       lines: ['The operator turned Loop on: this item repeats until Loop is turned off or Next is pressed.'], links: [] };
   }
+  if (cat === 'hourly_id') {
+    return { kind: 'station-id', short: 'Station ID', title: 'The hourly station ID',
+      lines: ['Plays with the :00 time check, from the station’s “Hourly station ID” setting.'],
+      links: [{ label: 'Open Stations', to: '/admin/stations' }] };
+  }
   if (cat.startsWith('station_id')) {
     return { kind: 'station-id', short: 'Station ID', title: 'A station ID between songs',
       lines: ['Sprinkled between songs by the station’s “Station IDs between songs” setting.'],
       links: [{ label: 'Open Stations (Station IDs between songs)', to: '/admin/stations' }] };
+  }
+
+  // Anything else queued for a clock time by the system (not a song drawn from a playlist)
+  if (row.preempt_at && !row.block_id && source !== 'manual' && source !== 'staff') {
+    return { kind: 'other', short: 'Timed item', title: 'Queued for a clock time',
+      lines: ['The system queued it to play at a set time (a break, a station setting or an intro clip), not from a playlist.'],
+      links: [{ label: 'Open the break settings', to: '/admin/spot-schedule' }, { label: 'Open Program Blocks', to: '/admin/program-blocks' }] };
   }
 
   // An automatic song: the schedule block it was drawn for, and that block's playlist
