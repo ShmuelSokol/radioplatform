@@ -38,9 +38,11 @@ def _asset(db, title, kind="jingle", duration=30.0):
 
 
 async def _setup(db, *, left, policy=None, kind="shiur", duration=49 * 60, soft_items=1,
-                 soft_source=None, due_ago=1.0, hard_by_in=None, talk_preempt_at=None):
+                 soft_source=None, due_ago=1.0, hard_by_in=None, talk_preempt_at=None,
+                 extra_config=None, soft_mode=None):
     """A shiur on air with `left` seconds to go and a soft group due `due_ago` s ago."""
     config = {"timed_during_long_items": policy} if policy else {}
+    config.update(extra_config or {})
     station = Station(id=uuid.uuid4(), name="KBR Jerusalem", timezone="Asia/Jerusalem",
                       automation_config=config)
     db.add(station)
@@ -59,7 +61,7 @@ async def _setup(db, *, left, policy=None, kind="shiur", duration=49 * 60, soft_
         e = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=a.id, position=2 + i,
                        status="pending", preempt_at=due,
                        source=soft_source or "block",
-                       timing_mode=None if soft_source == "ad_slot" else "soft",
+                       timing_mode=soft_mode or (None if soft_source == "ad_slot" else "soft"),
                        hard_by=(now + timedelta(seconds=hard_by_in)) if hard_by_in else None)
         soft_entries.append(e)
     db.add_all(soft_entries)
@@ -377,3 +379,18 @@ async def test_queue_shows_a_soft_item_after_a_shiur_that_is_nearly_over(client,
     now = datetime.now(UTC)
     body = (await client.get(f"/api/v1/stations/{station.id}/queue", headers=auth_headers)).json()
     assert abs((_shown(body, "Soft 0") - now).total_seconds() - 8 * 60) < 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [None, "hard"])
+async def test_sponsorships_wait_for_the_story_on_a_station_that_says_so(db_session, mode):
+    """All Day Stories (coordinator 2026-11-19): sponsorships alone never cut into a
+    story there, soft or hard; they play when it ends, then the music."""
+    station, talk, spots, song = await _setup(
+        db_session, left=19 * 60, kind="story", soft_items=2, soft_source="ad_slot", soft_mode=mode,
+        extra_config={long_items.SPONSORSHIPS_WAIT: True},
+    )
+    assert (await queue_module._check_advance(db_session, station.id)).asset_id == talk.id
+    assert (await _finish_current(db_session, station.id)).asset_id == spots[0].id
+    assert (await _finish_current(db_session, station.id)).asset_id == spots[1].id
+    assert (await _finish_current(db_session, station.id)).asset_id == song.id

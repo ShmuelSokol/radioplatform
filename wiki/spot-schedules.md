@@ -100,3 +100,6 @@ Tests and the clock: a slot due within the 2-minute safety margin is left alone 
 ## Plays skipped by staff (2026-11-18)
 
 The control room's Sponsor panel can skip one coming `ad_slot` play: the queue row becomes status `cancelled` and `reconcile_spot_slots` treats a cancelled row at that minute for that recording as kept, so the play is not planned again. Put back sets it to `pending`. See [control-room](control-room.md#sponsor-panel-tapping-a-sponsorship-spot-2026-11-18).
+
+
+**Sponsorships wait for stories (per station).** `automation_config.sponsorships_wait_for_talks: true` (`long_items.SPONSORSHIPS_WAIT`): on that station a timed group made only of sponsorships (clock-slot `ad_slot` plays or contract audio) due while a shiur or story is on air is made soft and waits for its end, so it plays between stories; it never pauses or cuts one. Groups with a time check or weather are unchanged. Done in `queue._soft_items_pause_long` (both players). Meant for All Day Stories (coordinator 2026-11-19: hard :15/:30/:45 sponsorships cut into stories 25 times a day in the simulator); off elsewhere, where Shmuel's 2026-11-17 soft rule (pause with more than 5 min left) still holds. Simulator test: `test_sponsorships_wait_for_stories_on_all_day_stories`.
