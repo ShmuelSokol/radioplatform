@@ -1191,7 +1191,8 @@ async def handle_started(
     if key:
         state.starting.add(key)
     try:
-        return await _handle_started_locked(db, station_id, state, entry_id, lane, at=at, quiet=quiet, kept=kept)
+        return await _handle_started_locked(db, station_id, state, entry_id, lane, at=at, quiet=quiet, kept=kept,
+                                            asset_id=asset_id)
     finally:
         if key:
             state.starting.discard(key)
@@ -1199,7 +1200,7 @@ async def handle_started(
 
 async def _handle_started_locked(
     db: AsyncSession, station_id, state: "EngineState", entry_id: str | None, lane: str | None,
-    at: float | None = None, quiet: bool = False, kept: bool = False,
+    at: float | None = None, quiet: bool = False, kept: bool = False, asset_id: str | None = None,
 ) -> dict:
     async with state.started_lock:
         mono = time.monotonic()
@@ -1254,7 +1255,7 @@ async def handle_started_batch(db: AsyncSession, station_id, reports: list[dict]
     if kept_at:
         upto = datetime.fromtimestamp(min(max(kept_at), datetime.now(UTC).timestamp()), UTC)
         # never a row whose start report is on its way
-        in_flight = set(state.recent_started) | set(getattr(state, "starting", None) or ())
+        in_flight = set(state.recent_started) | set(state.starting)
         if state.cued_entry_id:
             in_flight.add(state.cued_entry_id)
         keep_ids = []
