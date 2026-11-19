@@ -275,3 +275,80 @@ async def test_playlist_fill_keeps_ids_inside_the_hours(db_session: AsyncSession
     plan = await generate(db_session, station, MONDAY_7AM, 4, artist_distance=0)
     hours = {p.at.astimezone(ZoneInfo("America/New_York")).hour for p in plan.picks if p.asset_type == "jingle"}
     assert hours and hours <= {8, 9}, hours
+
+
+# --- First switch-on, 2026-11-19: station IDs drawn by "any jingle" picks ---------
+
+
+@pytest.mark.asyncio
+async def test_a_jingle_step_with_no_category_never_draws_a_station_id(db_session: AsyncSession):
+    """A playlist step asking for "a jingle" took KBR Jerusalem's ID onto Main, with the
+    setting off. Station IDs air only through their own rule (or a step naming them)."""
+    from app.models.playlist_template import TemplateSlot
+
+    random.seed(21)
+    station, songs, morning, evening = await _setup(db_session, None)
+    db_session.add(TemplateSlot(id=uuid.uuid4(), template_id=morning.playlist_template_id,
+                                position=4, asset_type="jingle", category=None))
+    main_ids = [_jingle(n) for n in range(3)]
+    jerusalem = [_jingle(n, "station_id_jerusalem") for n in range(2)]
+    sweep = Asset(id=uuid.uuid4(), title="Sweeper", duration=5.0, file_path="s.mp3",
+                  asset_type="jingle", category="sweepers")
+    db_session.add_all([*main_ids, *jerusalem, sweep])
+    await db_session.commit()
+
+    plan = await generate(db_session, station, MONDAY_7AM, 3, artist_distance=0)
+    jingles = [p.asset_id for p in plan.picks if p.asset_type == "jingle"]
+    assert jingles and set(jingles) == {sweep.id}
+
+    # Turned on: only this station's own IDs, never Jerusalem's, never two short items together
+    station.automation_config = {"station_ids": {**IDS, "min_minutes": 5, "max_minutes": 6}}
+    await db_session.commit()
+    plan = await generate(db_session, station, MONDAY_7AM, 3, artist_distance=0)
+    picked = {p.asset_id for p in plan.picks}
+    assert not picked & {a.id for a in jerusalem}
+    assert picked & {a.id for a in main_ids}
+    for a, b in zip(plan.picks, plan.picks[1:]):
+        assert not (a.asset_type == "jingle" and b.asset_type == "jingle"), (a.title, b.title)
+
+
+@pytest.mark.asyncio
+async def test_a_generic_jingle_rule_never_draws_a_station_id(db_session: AsyncSession):
+    """The seeded "Jingle Every 30 Min" rule (any jingle) queued station IDs on All Day
+    Stories with the setting off; it may still play other jingles."""
+    from app.models.schedule_rule import ScheduleRule
+    from app.services.queue_replenish_service import QueueReplenishService
+
+    station, jingle_ids = await _stories_with_ids(db_session, {"enabled": False})
+    jerusalem = _jingle(9, "station_id_jerusalem")
+    sweep = Asset(id=uuid.uuid4(), title="Sweeper", duration=5.0, file_path="s2.mp3",
+                  asset_type="jingle", category="sweepers")
+    db_session.add_all([jerusalem, sweep])
+    db_session.add(ScheduleRule(
+        id=uuid.uuid4(), name="Jingle Every 30 Min", rule_type="interval", asset_type="jingle",
+        interval_minutes=30, hour_start=0, hour_end=24, days_of_week="0,1,2,3,4,5,6",
+        is_active=True, priority=40, station_id=station.id,
+    ))
+    await db_session.commit()
+    await QueueReplenishService(db_session, station.id).replenish()
+    queued = {e.asset_id for e in await _pending(db_session, station.id)}
+    assert sweep.id in queued
+    assert not queued & (jingle_ids | {jerusalem.id})
+
+
+@pytest.mark.asyncio
+async def test_a_block_jingle_item_with_no_category_never_draws_a_station_id(db_session: AsyncSession):
+    from app.services.program_block_service import _Resolver
+    from tests.test_program_blocks import _library
+
+    station, made = await _library(db_session)
+    sweep = Asset(id=uuid.uuid4(), title="Sweeper", duration=5.0, file_path="s3.mp3",
+                  asset_type="jingle", category="sweepers")
+    db_session.add(sweep)
+    await db_session.commit()
+    resolver = _Resolver(db_session, station, dry_run=True)
+    at = MONDAY_7AM
+    drawn = {getattr(await resolver._rotate("jingle", None, at + timedelta(hours=h)), "id", None) for h in range(4)}
+    assert drawn == {sweep.id}, drawn  # never made["id"], the station_id jingle
+    named = await resolver._rotate("jingle", "station_id", at)
+    assert named is not None and named.id == made["id"].id  # naming the category still works

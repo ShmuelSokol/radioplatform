@@ -251,6 +251,11 @@ class _Resolver:
             )
             if category:
                 stmt = stmt.where(in_category(category))
+            else:
+                # "any jingle" never means a station ID (those name their category)
+                from app.models.asset import not_station_id
+
+                stmt = stmt.where(not_station_id())
             from app.services.station_blocks import blocked_asset_ids
 
             stmt = stmt.where(Asset.id.notin_(blocked_asset_ids(self.station.id)))
