@@ -964,6 +964,41 @@ async def test_wait_policy_holds_the_time_check_until_the_shiur_ends(client, db_
     assert engine.timed() == []
 
 
+@pytest.mark.asyncio
+async def test_long_item_rule_runs_once_per_shiur_and_time_check(client, db_session, eng):
+    """F-ENGINE2-22: the scheduler ticks every few seconds; the pause rule must queue one
+    resume entry for the shiur, not one per tick, and the time check is handed over once."""
+    station, _, engine, _ = eng
+    st, shiur, clock = await _shiur_on_air(client, db_session, station, "pause")
+    for _ in range(3):
+        await playout_engine.tick(db_session, st)
+    pending = (await db_session.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station.id, QueueEntry.status == "pending")
+        .execution_options(populate_existing=True)
+    )).scalars().all()
+    resumed = [e for e in pending if e.asset_id == shiur.asset_id and resume_offset(e) > 500]
+    assert len(resumed) == 1
+    assert [c["id"] for c in engine.timed()] == [str(clock.id)]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_long_item_rule_still_hands_over_the_time_check(client, db_session, eng, monkeypatch):
+    """F-ENGINE2-22/24: a database error inside the long-item rule left the session failed,
+    so the rest of the tick (handing the time check to the engine) failed too. The tick
+    rolls back and goes on: the time check still reaches the engine on time."""
+    from sqlalchemy import text
+
+    station, _, engine, _ = eng
+    st, _, clock = await _shiur_on_air(client, db_session, station, "pause")
+
+    async def broken(db, *args, **kwargs):
+        await db.execute(text("SELECT * FROM no_such_table_for_this_test"))
+
+    monkeypatch.setattr(playout_engine, "_apply_long_item_rule", broken)
+    await playout_engine.tick(db_session, st)
+    assert [c["id"] for c in engine.timed()] == [str(clock.id)]
+
+
 # ── Restart (B-JOB-95/96/97, B-MODE-16) ──────────────────────────────────────
 
 
