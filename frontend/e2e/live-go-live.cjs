@@ -102,7 +102,8 @@ function toneWav(file, seconds = 30, amp = 6000) {
       }
       await host.waitForFunction(() => document.querySelector('[data-testid="air-banner"]')?.getAttribute('data-state') === 'on', null, { timeout: 12000 });
       check(P + 'G12 then ON AIR, in red, and the show is live on the station', /ON AIR: listeners hear you/.test(await T(host, 'air-banner').innerText()) && (await showNow(show.id)).status === 'live');
-      await sleep(600);
+      // The station record is written just after the first sound (one commit): up to 3 s on prod
+      for (let i = 0; i < 10 && (await stationNow()).live_show_id !== show.id; i++) await sleep(300);
       check(P + 'G13 the station is the show\'s once the host is heard', (await stationNow()).live_show_id === show.id);
       check(P + 'G14 no GO LIVE or mic check while on air', await T(host, 'go-live-button').count() === 0 && await T(host, 'mic-check-button').count() === 0);
       await shot(host, `${label}-4-on-air`);
