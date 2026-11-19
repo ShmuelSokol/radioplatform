@@ -120,6 +120,29 @@ async def test_engine_pick_between_songs_gives_the_id(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("handed_kind,airs", [("id", False), ("music", True)])
+async def test_engine_never_gives_an_id_right_after_one_it_already_holds(db_session: AsyncSession, handed_kind, airs):
+    """Main 2026-11-19 13:05Z, after an engine restart: two IDs back to back. radio.liq asks
+    for the next item while a short one is still loading, before its start report, so the
+    check must look at the item handed out, not at the song before it."""
+    station_id, id_entry, song_entry = await _setup(db_session, "song", None)
+    held = Asset(id=uuid.uuid4(), title="held", file_path=f"{uuid.uuid4().hex}.mp3", asset_type=
+                 "jingle" if handed_kind == "id" else "music",
+                 category="station_id" if handed_kind == "id" else "lively",
+                 duration=9.0 if handed_kind == "id" else 200.0)
+    db_session.add(held)
+    await db_session.flush()
+    handed = QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=held.id, position=2,
+                        status="pending", source="auto")
+    db_session.add(handed)
+    await db_session.commit()
+    handed_id = str(handed.id)
+    picked = await playout_engine.pick_next(db_session, station_id, {handed_id}, handed_id)
+    assert picked.id == (id_entry if airs else song_entry)
+    station_id_guard._passed.pop(str(station_id), None)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("minutes_ago,airs", [(10, False), (13, True)])
 async def test_not_sooner_than_the_shortest_gap_after_the_last_id(db_session: AsyncSession, minutes_ago, airs):
     """Simulator: IDs 10.2 min apart after a hard :30 cut the song between them."""
@@ -134,18 +157,22 @@ async def test_not_sooner_than_the_shortest_gap_after_the_last_id(db_session: As
 
 
 @pytest.mark.asyncio
-async def test_an_id_under_four_seconds_never_airs_or_gets_queued(db_session: AsyncSession):
-    """Jerusalem 2026-11-19: after a 1.8 s ID the engine played its emergency file."""
+@pytest.mark.parametrize("seconds,airs", [(1.2, False), (1.8, True)])
+async def test_a_nearly_empty_id_never_airs_or_gets_queued(db_session: AsyncSession, seconds, airs):
+    """Floor 1.5 s: the parked IDs (1.78 to 2.32 s) air again since the engine fetches
+    ahead during short items; a nearly empty file never does."""
     from app.services.playlist_generator_service import _Library
 
     station_id, id_entry, song_entry = await _setup(db_session, "song", None)
     jingle = (await db_session.execute(
         select(Asset).join(QueueEntry, QueueEntry.asset_id == Asset.id).where(QueueEntry.id == id_entry))).scalar_one()
-    jingle.duration = 1.8
+    jingle.duration = seconds
     await db_session.commit()
-    assert (await _pick_next_pending(db_session, station_id, datetime.now(UTC))).id == song_entry
+    picked = await _pick_next_pending(db_session, station_id, datetime.now(UTC))
+    assert picked.id == (id_entry if airs else song_entry)
     pool = await _Library(db_session, station_id, set()).pool("jingle", "station_id")
-    assert pool and all(r.duration >= 4.0 for r in pool)
+    assert pool and all(r.duration >= 1.5 for r in pool)
+    assert any(r.id == jingle.id for r in pool) == airs
 
 
 @pytest.mark.asyncio

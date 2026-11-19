@@ -588,7 +588,7 @@ export default function Databank() {
               <Link to="/admin/program-blocks" className="qn-btn h-11 lg:h-8 px-3 text-sm inline-flex items-center">Change blocks</Link>
             )}
             {tab === 'spots' && (
-              <Link to="/admin/spot-schedule" className="qn-btn h-11 lg:h-8 px-3 text-sm inline-flex items-center">Spot schedule</Link>
+              <Link to="/admin/spot-schedule" className="qn-btn h-11 lg:h-8 px-3 text-sm inline-flex items-center">All contracts</Link>
             )}
           </>
         )}

@@ -658,7 +658,7 @@ async def _analyse_ahead(db: AsyncSession, station_id, now: datetime) -> None:
 
 
 async def pick_next(
-    db: AsyncSession, station_id, exclude_ids: set[str] | None = None
+    db: AsyncSession, station_id, exclude_ids: set[str] | None = None, handed_id: str | None = None
 ) -> QueueEntry | None:
     from app.api.v1.queue import OPERATOR_SOURCES
     from app.models.asset import not_placeholder
@@ -721,6 +721,16 @@ async def pick_next(
     )
     entry = usable(ads.unique().scalars().all())
     if entry:
+        # ... unless it is a soft item and a paused shiur or story waits to carry on: it
+        # plays after the rest of it, as on the browser path (simulator 2026-11-19: a
+        # 10:45 sponsorship aired in the 11:00 time check's pause of a story)
+        from app.api.v1.queue import _resume_before_soft
+
+        first = await _resume_before_soft(db, station_id, entry)
+        if first is not entry and str(first.id) not in exclude:
+            return (await db.execute(
+                select(QueueEntry).options(joinedload(QueueEntry.asset)).where(QueueEntry.id == first.id)
+            )).unique().scalar_one()
         return entry
 
     # 2. Otherwise the next entry by position (future-timed entries wait for their time)
@@ -738,10 +748,17 @@ async def pick_next(
     )
     # A station ID that would follow a break or another spoken item, or land next to a
     # break, is passed over for good (services/station_id_guard.py)
+    handed = None
     for e in regular.unique().scalars().all():
         if str(e.id) in exclude or str(e.id) in id_guard.passed(station_id):
             continue
-        if await id_guard.must_wait(db, station_id, e, now):
+        if id_guard.is_auto_station_id(e) and handed_id and handed is None:
+            # the item handed out before this one, on its way to air
+            handed = (await db.execute(
+                select(QueueEntry).options(joinedload(QueueEntry.asset))
+                .where(QueueEntry.id == uuid.UUID(str(handed_id)))
+            )).unique().scalar_one_or_none()
+        if await id_guard.must_wait(db, station_id, e, now, handed):
             id_guard.pass_over(station_id, e.id)
             continue
         return e
@@ -982,8 +999,10 @@ async def handle_next(
         logger.warning("Loop repeat could not be queued: %s", e)
 
     unplayable = 0
+    # the entry handed out last, still on its way to air: what the next one follows
+    handed_before = state.cued_entry_id
     for _ in range(5):
-        entry = await pick_next(db, station_id, exclude)
+        entry = await pick_next(db, station_id, exclude, handed_before)
         if entry is None:
             # Nothing queued: try to refill once, then give up until the engine asks again
             try:
@@ -991,7 +1010,7 @@ async def handle_next(
 
                 if not await _is_blacked_out(db, station_id):
                     await _replenish_queue(db, station_id)
-                entry = await pick_next(db, station_id, exclude)
+                entry = await pick_next(db, station_id, exclude, handed_before)
             except Exception as e:
                 logger.warning("Replenish on empty queue failed: %s", e)
             if entry is None:

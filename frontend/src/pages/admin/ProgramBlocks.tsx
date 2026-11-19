@@ -138,7 +138,7 @@ function itemHint(item: BlockItem) {
   if (item.kind === 'sponsors')
     return item.max_seconds
       ? 'filled from the sponsorships that want this time of day; what does not fit goes to the next block with room'
-      : 'filled from the sponsorships that want this time of day (Spot Schedule)';
+      : 'filled from the sponsorships that want this time of day (All contracts)';
   return "the day's weather";
 }
 

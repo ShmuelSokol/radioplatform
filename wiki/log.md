@@ -413,6 +413,7 @@ INGEST 2026-11-18 control-room.md finding the Sponsor panel: SPONSOR › tag on 
 INGEST 2026-11-18 streaming-architecture.md start reports taken one at a time per station and an exact repeat ignored: two at once wrote the previous item's play log twice (Main 20:31Z sponsorship counted twice)
 UPDATE 2026-11-19 streaming-architecture.md the FM feed is the engine's stream; the backend's own Icecast source (icecast_service, /icecast start) is retired
 UPDATE 2026-11-18 control-room.md sponsorship rule tightened (weather report no longer tagged), station-day query uses indexes, panel shows today's not-aired plays at once
+UPDATE 2026-11-19 control-room.md Played list and RDS pickup log show start times to the second on the station's clock ("8:30:05 AM", shared.clockTimeSec); e2e/played-seconds.mjs checks all three stations at desktop and iPhone sizes from a browser in another zone
 INGEST 2026-11-18 live-shows.md engine holds two items during a show; a flush empties both but its given list forgets one, so the paused story's second part was closed unplayed after a held sponsorship (show_preloaded, flushed_unplayed, _not_dropped_by_a_flush)
 INGEST 2026-11-18 spot-schedules.md three-hour time slots beside the broad dayparts (planned narrowest first, reports stay broad) and least-full leveling over a slot's breaks: every break gets 3 before any gets a 4th
 UPDATE 2026-11-18 sponsor-accounts.md Sponsors got its own top menu (All Clients first); Campaigns points to the client page; Sponsor Portal link for sponsors only
@@ -446,11 +447,19 @@ UPDATE 2026-11-19 hourly-slots.md time clips no longer fall back to the Lakewood
 INGEST 2026-11-19 back-navigation.md Back line on staff pages (BackNav.tsx), per-tab history notes keyed by history.state.idx (lib/navMemory.ts), useNavState for page state, tapped row lit on return, deleted pages skipped via api/client.ts DELETE hook
 UPDATE 2026-11-19 playlist-generation.md station IDs: air-time guard (station_id_guard.py) passes over an ID after a break/spoken item or near a break; soft breaks move at air time
 UPDATE 2026-11-19 playlist-generation.md station IDs: drop_misplaced tidies waiting IDs beside breaks after each top-up; queue page estimates use on-air lengths
+UPDATE 2026-11-19 playlist-generation.md station IDs: shortest automatic ID 4 s -> 1.5 s once both engines run the radio.liq that fetches ahead
 UPDATE 2026-11-19 playlist-generation.md station IDs: drop_misplaced moves a misplaced ID later instead of removing it, only 5-90 min ahead
 UPDATE 2026-11-19 playlist-generation.md station IDs: passed-over IDs move one song later instead of being skipped; tidy never removes; fill draws gaps from the first half of min..max
+UPDATE 2026-11-19 playlist-generation.md, spot-schedules.md engine pick: an ID is checked against the item the engine already holds (two IDs back to back after a restart); a waiting soft sponsorship yields to a paused story's resume on the engine path too
 INGEST 2026-11-19 blackout-window-generation.md regenerate now corrects a stored window whose computed times changed (future, this station only, never edited); SQLite returns zone-less clock times
 UPDATE 2026-11-19 control-room.md Sponsors list rows always open the Sponsor panel (SongTarget.sponsorship); station-day sends asset.sponsor_id: a block-placed sponsor recording with no spots category opened the song options on Main
 INGEST 2026-11-19 holiday-music.md holiday lists (holiday_items) mixed in before/during each holiday at a rising 1-in-N per station (holiday_settings); holiday-only items out of every ordinary pick (not_holiday_only); credit carried between top-ups; 2 h/6 h rest; Holiday Music page; queue tag
 UPDATE 2026-11-19 playlist-generation.md seasonal types switched by the calendar now exist as holiday lists (holiday-music.md)
 INGEST 2026-11-19 station-simulator.md every Yom Tov of 5787/5788 as broadcast days (tests/sim/yomtov.py); stand-in /skip now ends a timed item (late return after a blackout was the stand-in), one-station runs keep sponsorship audio tied to sponsors, quiet passes deep inside a blackout
 UPDATE 2026-11-19 hourly-slots.md the hour already begun still gets its :30 time check and weather (missing after a two-day Yom Tov or an empty-queue start)
+UPDATE 2026-11-19 station-simulator.md one-station runs: loose copies of contract audio (same title, other id) get the sponsor tie in seed() too; they were still drawn as filler on Jerusalem alone
+INGEST 2026-11-19 sponsor-accounts.md Book a sponsorship window (4 steps) and GET /spot-schedules/room: room per three-hour slot per day from block places (minus off air and shiurim) or clock minutes, booked from the planner's placements
+UPDATE 2026-11-19 sponsor-accounts.md Sponsors menu renamed (Clients, All contracts, Sponsor requests, Wording rules), Sponsorship board page, client page opens on Contracts with a Requests tab
+UPDATE 2026-11-19 sponsor-accounts.md Review pass: a click beside the booking window no longer closes a half-made booking, Book into this slot keeps the usual week, board boxes say how many plays are over, Record Spots 'Book this spot' opens the window with that spot (?sponsor=&asset=)
+UPDATE 2026-11-19 holiday-music.md a holiday list or settings change in season redraws the waiting automatic songs (queue is 48 h ahead; otherwise the change aired 2 days late)
+UPDATE 2026-11-19 holiday-music.md rest per holiday item now 3 h song / 24 h story or shiur (was 2 h / 6 h; two-story list aired each 4x a day)

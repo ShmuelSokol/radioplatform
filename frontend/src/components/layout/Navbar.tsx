@@ -63,7 +63,7 @@ export default function Navbar() {
   ];
 
   // Only offer links to screens this person's role can open.
-  const allowed = (link: NavLink) => canAccess(role, link.to);
+  const allowed = (link: NavLink) => canAccess(role, link.to.split('?')[0]);
 
   const standaloneLinks: NavLink[] = [
     { to: '/admin/dashboard', label: 'Dashboard', color: 'hover:text-yellow-300' },
@@ -79,11 +79,13 @@ export default function Navbar() {
       color: 'text-yellow-400',
       hoverColor: 'hover:text-yellow-300',
       links: [
-        { to: '/admin/sponsors', label: 'All Clients', color: 'hover:text-yellow-300' },
-        { to: '/admin/spot-schedule', label: 'Spot Schedule', color: 'hover:text-yellow-300' },
+        { to: '/admin/sponsors', label: 'Clients', color: 'hover:text-yellow-300' },
+        { to: '/admin/sponsors?book=1', label: 'Book a sponsorship', color: 'hover:text-yellow-300' },
+        { to: '/admin/sponsorship-board', label: 'Sponsorship board', color: 'hover:text-yellow-300' },
+        { to: '/admin/spot-schedule', label: 'All contracts', color: 'hover:text-yellow-300' },
         { to: '/admin/spot-recordings', label: 'Record Spots', color: 'hover:text-yellow-300' },
-        { to: '/admin/campaigns', label: 'Campaigns', color: 'hover:text-yellow-300' },
-        { to: '/admin/sponsorship-rules', label: 'Sponsorship Rules', color: 'hover:text-yellow-300' },
+        { to: '/admin/campaigns', label: 'Sponsor requests', color: 'hover:text-yellow-300' },
+        { to: '/admin/sponsorship-rules', label: 'Wording rules', color: 'hover:text-yellow-300' },
       ],
     },
     {

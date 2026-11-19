@@ -36,7 +36,11 @@ Page: `/admin/holiday-music` (Broadcast menu, "Holiday Music"). Code:
   goes in, so 1 in 4 is every fourth pick, not a coin toss. The credit carries over between
   fills from the queue and the last 12 h of plays (`_carried_credit`): top-ups of one or two
   songs each started at random and the simulator heard four holiday songs in a row.
-- **Rest**: a holiday song not again within 2 h, a shiur/story 6 h (`REST`). A short list
+- **Redraw on change**: the queue is drawn about two days ahead, so a list or setting
+  change that touches a day the queue holds (`touches_queue`, 4 days) draws the unplayed
+  automatic songs again shortly after (`replace_automatic_songs`, background, one per
+  station at a time). Without it, starting a mix "now" reached the air two days later.
+- **Rest**: a holiday song not again within 3 h, a shiur/story within 24 h (`REST`; 6 h let Stories air its two Chanukah stories four times a day each). A short list
   then airs less often than the rate (credit capped at 1, no burst after).
 - **Which holiday**: the one under way first, else the nearest coming (Yom Kippur's run-up
   overlaps Rosh Hashana's). Dates on the station's own calendar: Israel time zone = Israel
@@ -48,6 +52,13 @@ Page: `/admin/holiday-music` (Broadcast menu, "Holiday Music"). Code:
   or "Megillah 7", categories daf_yomi/block_only, and "Chanukas Habayis") and library
   search. The queue API gives a waiting holiday item `holiday` (name) while in season; the
   control room shows a lilac tag on that row (`row-holiday`).
+  The Playlists and Schedule blocks pages show `components/holiday/HolidayMixNote.tsx`
+  while a mix is in season on a station ("Chanukah items are mixed in ... 1 in N", link to
+  the page): the mix sits on top of every playlist, so it is no step in one.
+- **Never two in a row**: `pick` refuses a holiday item right after one (`prev_holiday`,
+  carried over a top-up), `hour_fit` never swaps a holiday item in, and after each top-up
+  `space_out` parts two waiting holiday items with the next ordinary song of the same kind
+  (the item on air, engine-held ones and the next two stay put).
 
 ## Tests
 

@@ -10,6 +10,7 @@ import {
   useAssetTypes,
 } from '../../hooks/usePlaylists';
 import PlaylistGenerationPanel from './PlaylistGenerationPanel';
+import HolidayMixNote from '../../components/holiday/HolidayMixNote';
 
 export default function Playlists() {
   const { data: stationsData } = useStations();
@@ -112,6 +113,8 @@ export default function Playlists() {
           ))}
         </select>
       </div>
+
+      <HolidayMixNote stations={filterStationId ? stations.filter((s: any) => s.id === filterStationId) : stations} />
 
       <PlaylistGenerationPanel stationId={filterStationId} />
 

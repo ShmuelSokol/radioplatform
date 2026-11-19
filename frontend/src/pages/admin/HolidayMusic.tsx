@@ -267,7 +267,7 @@ function HolidayDetail({
         )}
         <p className="text-sm text-gray-500">
           The rate goes up evenly each day from the start to the day before. A holiday song plays at
-          most once every 2 hours and a shiur or story once every 6, so a short list plays less often
+          most once every 3 hours and a shiur or story once a day, so a short list plays less often
           than the rate. The station is silent on Yom Tov and Shabbos as always; nothing is mixed in then.
         </p>
       </section>

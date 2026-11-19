@@ -101,6 +101,14 @@ class QueueReplenishService:
         except Exception:
             logger.exception("Station %s: misplaced station IDs could not be tidied", self.station_id)
             await self.db.rollback()
+        from app.services.holiday_music import space_out
+
+        try:
+            if await space_out(self.db, self.station_id):
+                await self.db.commit()
+        except Exception:
+            logger.exception("Station %s: holiday items could not be spaced out", self.station_id)
+            await self.db.rollback()
 
     async def _replenish(self) -> None:
         """

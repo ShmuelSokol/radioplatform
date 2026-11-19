@@ -111,8 +111,8 @@ def test_mix_spreads_items_evenly():
     assert len(set(ids)) == len(ids) == 10
 
 
-def test_a_short_list_rests_each_item_two_hours():
-    """Two songs at 1 in 2: each still waits two hours before it plays again, so the
+def test_a_short_list_rests_each_item_three_hours():
+    """Two songs at 1 in 2: each still waits three hours before it plays again, so the
     station hears them less often than the rate rather than every eight minutes."""
     from types import SimpleNamespace
 
@@ -122,12 +122,19 @@ def test_a_short_list_rests_each_item_two_hours():
     mix.seasons = [CHANUKAH]
     at = datetime(2026, 12, 7, 10, 0, tzinfo=NY)
     got = [(i, p) for i in range(90) if (p := mix.pick("music", at + timedelta(minutes=4 * i)))]
-    assert len(got) == 6  # two songs, six hours: three times each
+    assert len(got) == 4  # two songs, six hours: twice each
     times = defaultdict(list)
     for i, (row, _) in got:
         times[row.id].append(i * 4)
     for minutes in times.values():
-        assert all(b - a >= 120 for a, b in zip(minutes, minutes[1:]))
+        assert all(b - a >= 180 for a, b in zip(minutes, minutes[1:]))
+    # a story or shiur: once a day
+    stories = [SimpleNamespace(id=uuid.uuid4(), asset_type="stories") for _ in range(2)]
+    mix = HolidayMix(settings={"chanukah": Setting(during_every=2)}, items={"chanukah": stories},
+                     zone=NY, israel=False, credit=0.0)
+    mix.seasons = [CHANUKAH]
+    picked = [p for i in range(200) if (p := mix.pick("stories", at + timedelta(minutes=20 * i)))]
+    assert len(picked) == 6  # 66 hours: each story once a day
     # once a song is rested again it comes back at once, but only one: no burst
     assert all(b - a >= 2 for a, b in zip([i for i, _ in got], [i for i, _ in got][1:]))
 
@@ -290,10 +297,11 @@ async def test_rule_fill_mixes_in_holiday_stories(db_session: AsyncSession, monk
     # Two months before Pesach: never, though the list's stories are of the type drawn
     rows = await fill(datetime(2027, 2, 20, 8, 0, tzinfo=NY))
     assert not set(rows) & (stories_ids | music_ids)
-    # The day before Pesach: about 1 in 4, only items of the kind drawn (stories)
+    # The day before Pesach: 1 in 4 would be ~24 of a day's 95 stories, but each story
+    # airs at most once a day, so the six on the list each once; only stories drawn
     rows = await fill(datetime(2027, 4, 21, 8, 0, tzinfo=NY))
     got = [r for r in rows if r in stories_ids]
-    assert abs(len(got) - len(rows) / 4) <= 2, (len(got), len(rows))
+    assert sorted(got) == sorted(stories_ids), (len(got), len(rows))
     assert not set(rows) & music_ids
 
 
@@ -309,7 +317,16 @@ async def test_queue_tag_only_in_season(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_api(client: AsyncClient, db_session: AsyncSession, auth_headers: dict):
+async def test_api(client: AsyncClient, db_session: AsyncSession, auth_headers: dict, monkeypatch):
+    from app.api.v1 import holiday_music as api
+
+    redrawn = []
+
+    async def fake_redraw(db, stations):
+        redrawn.extend(str(s.id) for s in stations)
+        return [str(s.id) for s in stations]
+
+    monkeypatch.setattr(api, "_redraw", fake_redraw)
     station, songs, _ = await _playlist_station(db_session)
     sid = str(station.id)
     r = await client.get(f"/api/v1/holiday-music?station_id={sid}", headers=auth_headers)
@@ -352,7 +369,8 @@ async def test_api(client: AsyncClient, db_session: AsyncSession, auth_headers: 
     assert [s["title"] for s in r.json()] == ["Seder night shiur"]
     r = await client.post("/api/v1/holiday-music/chanukah/items",
                           json={"asset_ids": [str(extra.id)]}, headers=auth_headers)
-    assert r.json() == {"added": 1, "already_listed": 0, "removed_from_queues": 1}
+    assert {k: r.json()[k] for k in ("added", "already_listed", "removed_from_queues")} == {
+        "added": 1, "already_listed": 0, "removed_from_queues": 1}
     r = await client.post("/api/v1/holiday-music/chanukah/items",
                           json={"asset_ids": [str(extra.id)]}, headers=auth_headers)
     assert r.json()["added"] == 0
@@ -394,3 +412,92 @@ async def test_top_ups_carry_the_count_on(db_session: AsyncSession):
         await queue([*ordinary, next(iter(songs))])
         plan = await generate(db_session, station, at, 0.05, artist_distance=0)
         assert plan.picks[0].asset_id not in songs
+
+
+@pytest.mark.asyncio
+async def test_a_change_in_season_redraws_the_queue(db_session: AsyncSession, monkeypatch):
+    """A queue is drawn two days ahead: starting the mix earlier, or adding songs to a
+    list in season, draws the waiting automatic songs again so it airs now, not in
+    two days (Shmuel 2026-11-19, "start putting in the Hanukkah songs to play now").
+    Out of season nothing is redrawn."""
+    from app.api.v1 import holiday_music as api
+
+    calls = []
+
+    async def fake_replace(db, station_id):
+        calls.append(str(station_id))
+        return 0
+
+    monkeypatch.setattr("app.services.schedule_refresh_service.replace_automatic_songs", fake_replace)
+    monkeypatch.setattr(api, "REDRAW_INLINE", True)
+    station, songs, _ = await _playlist_station(db_session)
+    jerusalem = Station(id=uuid.uuid4(), name="KBR Jerusalem", timezone="Asia/Jerusalem", is_active=True)
+    db_session.add(jerusalem)
+    await db_session.commit()
+    nov19 = date(2026, 11, 19)
+    monkeypatch.setattr(api, "_today", lambda st: nov19)
+
+    # 16 days before Chanukah: 14 days ahead reaches the queue's last days, 16 is today
+    assert api.touches_queue(station, "chanukah", [Setting()])  # Nov 21 is within 4 days
+    assert not api.touches_queue(station, "chanukah", [Setting(lead_days=10)])
+    assert not api.touches_queue(station, "purim", [Setting(lead_days=30)])
+
+    from app.models.user import User
+
+    admin = User(id=uuid.uuid4(), email="a@x", hashed_password="x", role="admin")
+    body = api.SettingIn(lead_days=16)
+    out = await api.save_settings("chanukah", body, station.id, db_session, admin)
+    assert out["queue_redrawn"] is True and calls == [str(station.id)]
+    calls.clear()
+    # the same setting again: nothing changed, nothing redrawn
+    out = await api.save_settings("chanukah", body, station.id, db_session, admin)
+    assert out["queue_redrawn"] is False and calls == []
+    # Purim is months away: a change is saved, the queue left alone
+    out = await api.save_settings("purim", api.SettingIn(lead_days=20), station.id, db_session, admin)
+    assert out["queue_redrawn"] is False and calls == []
+
+    # a song added for every station: each station in season is redrawn
+    extra = _asset("O Hanukka")
+    db_session.add(extra)
+    await db_session.commit()
+    out = await api.add_items("chanukah", api.ItemsIn(asset_ids=[extra.id]), db_session, admin)
+    assert out["queues_redrawn"] == 2 and set(calls) == {str(station.id), str(jerusalem.id)}
+    calls.clear()
+    # switched off on Jerusalem: a later list change leaves Jerusalem's queue alone
+    await api.save_settings("chanukah", api.SettingIn(enabled=False), jerusalem.id, db_session, admin)
+    calls.clear()
+    item = (await db_session.execute(select(HolidayItem).where(HolidayItem.asset_id == extra.id))).scalar_one()
+    await api.remove_item(item.id, db_session, admin)
+    assert calls == [str(station.id)]
+
+
+@pytest.mark.asyncio
+async def test_space_out_parts_two_waiting_holiday_items(db_session: AsyncSession):
+    """Two holiday songs that end up next to each other in the queue (a jingle between
+    does not count) are swapped apart; the item on air and the next two stay put."""
+    from app.services.holiday_music import space_out
+
+    station = Station(id=uuid.uuid4(), name="Main", timezone="America/New_York", is_active=True)
+    db_session.add(station)
+    songs = [_asset(f"Song {i}") for i in range(6)]
+    h1, h2, h3 = _asset("Maoz Tzur"), _asset("O Hanukka"), _asset("Al Hanisim")
+    jingle = _asset("ID", "jingle", None, duration=8)
+    db_session.add_all(songs + [h1, h2, h3, jingle])
+    await db_session.flush()
+    for h in (h1, h2, h3):
+        db_session.add(HolidayItem(id=uuid.uuid4(), holiday="chanukah", asset_id=h.id))
+    order = [songs[0], songs[1], songs[2], h1, jingle, h2, songs[3], songs[4], h3, songs[5]]
+    for pos, a in enumerate(order, start=1):
+        db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=a.id, position=pos,
+                                  status="playing" if pos == 1 else "pending", source="auto"))
+    await db_session.commit()
+    assert await space_out(db_session, station.id) == 1
+    await db_session.commit()
+    rows = (await db_session.execute(
+        select(QueueEntry.asset_id).where(QueueEntry.station_id == station.id).order_by(QueueEntry.position)
+    )).scalars().all()
+    titles = {a.id: a.title for a in order}
+    got = [titles[r] for r in rows]
+    assert got == ["Song 0", "Song 1", "Song 2", "Maoz Tzur", "ID", "Song 3", "O Hanukka", "Song 4",
+                   "Al Hanisim", "Song 5"]
+    assert await space_out(db_session, station.id) == 0

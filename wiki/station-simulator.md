@@ -98,7 +98,8 @@ Two mistakes of the stand-in found on the first run, both fixed:
 - A run of one station drew another station's sponsorships as filler: `seed()` loads only
   the kept stations' contracts and the export has no `sponsor_id` on assets, so
   `not_contract_audio()` did not know them. `seed()` now ties every contract's audio to its
-  sponsor, as the site does.
+  sponsor, as the site does. Loose copies of that audio (same title, another id; the site
+  knows them by title through the contract) get the tie too.
 
 Check added: "weather report is today's, never drawn as filler" (a weather clip airs only
 on its own local date, in a timed place or block).

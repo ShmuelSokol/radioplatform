@@ -3,11 +3,21 @@ import { Link, useNavigate } from 'react-router-dom';
 import { usePlayLog } from '../../../hooks/useQueue';
 import { useTimelinePreview } from '../../../hooks/useSchedules';
 import { useCreateLiveShow, useEndLiveShow, useLiveShows, useStartLiveShow } from '../../../hooks/useLiveShows';
-import { typeStyle } from './shared';
+import { clockTimeSec, typeStyle } from './shared';
 import { useMayChange } from '../../../hooks/useMayChange';
 import { useAlerts, useResolveAlert } from '../../../hooks/useAlerts';
 
 /* ── Play log ─────────────────────────────────────────────── */
+
+/** When an item started, to the second, on the station's clock: "8:30:05 AM". */
+function PlayedAt({ iso, tz }: { iso: string; tz?: string }) {
+  const { time, ampm } = clockTimeSec(iso, tz);
+  return (
+    <span className="w-[80px] shrink-0 whitespace-nowrap tabular-nums text-xs text-gray-400" data-testid="played-at">
+      {time}<span className="ml-0.5 text-[10px]">{ampm}</span>
+    </span>
+  );
+}
 
 export const LogPanel = memo(function LogPanel({ stationId, stationTz }: { stationId: string | null; stationTz?: string }) {
   const { data } = usePlayLog(stationId, true);
@@ -16,9 +26,7 @@ export const LogPanel = memo(function LogPanel({ stationId, stationTz }: { stati
     <section className="h-full overflow-y-auto overscroll-contain bg-[#0a0a28]" aria-label="Recently played">
       {logs.map(log => (
         <div key={log.id} className="flex items-center gap-2 px-3 min-h-[44px] border-b border-[#15153a]">
-          <span className="w-[68px] shrink-0 tabular-nums text-xs text-gray-400">
-            {new Date(log.start_utc).toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', ...(stationTz ? { timeZone: stationTz } : {}) })}
-          </span>
+          <PlayedAt iso={log.start_utc} tz={stationTz} />
           <span className="flex-1 min-w-0 leading-tight">
             <span className="block truncate text-sm text-gray-100">{log.title ?? 'Unknown'}</span>
             <span className="block truncate text-xs text-gray-400">
