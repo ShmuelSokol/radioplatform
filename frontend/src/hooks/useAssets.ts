@@ -102,8 +102,8 @@ export function useTrimAsset() {
 export function useRemoveSilence() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, regions, progressId }: { id: string; regions: Array<{ start: number; end: number }>; progressId?: string }) =>
-      removeSilence(id, regions, progressId),
+    mutationFn: ({ id, regions, progressId, keepGap }: { id: string; regions: Array<{ start: number; end: number }>; progressId?: string; keepGap?: number }) =>
+      removeSilence(id, regions, progressId, keepGap),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assets'] });
       queryClient.invalidateQueries({ queryKey: ['asset'] });

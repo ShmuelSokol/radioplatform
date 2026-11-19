@@ -121,7 +121,7 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
         setStatusMsg(null);
         onEnhanceComplete?.();
       },
-      onError: () => setStatusMsg('AI enhancement failed'),
+      onError: () => setStatusMsg('Smart Enhance failed'),
     });
   };
 
@@ -136,7 +136,7 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
         </div>
         {aiReasons && aiReasons.length > 0 && (
           <div className="bg-blue-50 border border-blue-200 rounded p-3 mb-4">
-            <p className="text-xs font-medium text-blue-800 mb-1">AI applied these optimizations:</p>
+            <p className="text-xs font-medium text-blue-800 mb-1">Smart Enhance applied these changes:</p>
             <ul className="text-xs text-blue-700 space-y-0.5 list-disc list-inside">
               {aiReasons.map((r, i) => <li key={i}>{r}</li>)}
             </ul>
@@ -173,17 +173,17 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
         )}
       </div>
 
-      {/* AI Auto-Enhance */}
+      {/* Smart Enhance (was AI Auto-Enhance) */}
       {canEdit && (
         <button
           onClick={handleAutoEnhance}
           disabled={autoEnhanceMutation.isPending}
           className="w-full mb-3 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50"
         >
-          {autoEnhanceMutation.isPending ? <><Spinner className="mr-1" />Analyzing &amp; Enhancing...</> : 'AI Auto-Enhance'}
+          {autoEnhanceMutation.isPending ? <><Spinner className="mr-1" />Analyzing &amp; Enhancing...</> : 'Smart Enhance'}
         </button>
       )}
-      <EditProgressBar progressId={progressId} active={autoEnhanceMutation.isPending} label="AI Auto-Enhance" />
+      <EditProgressBar progressId={progressId} active={autoEnhanceMutation.isPending} label="Smart Enhance" />
 
       {/* Preset buttons */}
       <div className="flex flex-wrap gap-2 mb-3">

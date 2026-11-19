@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { getEditProgress, type EditProgress } from '../../api/assets';
 
 /**
- * Progress of a long audio edit (AI Enhance, Remove All Found Silence) while the page
+ * Progress of a long audio edit (Smart Enhance, Remove All Found Silence) while the page
  * waits for it: a bar, the step it is on, the percent and the time so far.
  * Shmuel 2026-11-19: "can it show a progress bar?" The page makes up `progressId`,
  * sends it with the edit, and this asks the server how far it is every second.

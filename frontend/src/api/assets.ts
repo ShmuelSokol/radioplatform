@@ -160,14 +160,16 @@ export const removeSilence = async (
   id: string,
   regions: Array<{ start: number; end: number }>,
   progressId?: string,
+  keepGap = 0,
 ): Promise<Asset> => {
   const res = await apiClient.post<Asset>(`/assets/${id}/remove-silence`, {
     regions: regions.map((r) => ({ start: r.start, end: r.end })),
+    keep_gap: keepGap,
   }, { timeout: 1_800_000, params: progressId ? { progress_id: progressId } : undefined });
   return res.data;
 };
 
-/** How far a long edit (AI Enhance, Remove All Found Silence) has got; the page made up
+/** How far a long edit (Smart Enhance, Remove All Found Silence) has got; the page made up
  *  the id and sent it with the edit. */
 export interface EditProgress {
   fraction: number;
@@ -224,6 +226,9 @@ export interface BulkAutoTrimParams {
   duration_max?: number;
   threshold_db?: number;
   min_silence?: number;
+  /** Gaps in the middle longer than this (seconds) are shortened to keep_gap; 0 = ends only */
+  middle_gap_over?: number;
+  keep_gap?: number;
 }
 
 export interface BulkAutoTrimStatus {
@@ -234,6 +239,7 @@ export interface BulkAutoTrimStatus {
   trimmed: number;
   skipped: number;
   errors: number;
+  gaps_shortened?: number;
   detail?: string | null;
 }
 
@@ -287,7 +293,7 @@ export const enhancePreview = async (id: string, body: EnhancePreviewRequest): P
   return res.data;
 };
 
-// --- AI Auto-Enhancement ---
+// --- Smart Enhance (was AI Auto-Enhance) ---
 
 export interface AutoEnhanceResult {
   asset: Asset;

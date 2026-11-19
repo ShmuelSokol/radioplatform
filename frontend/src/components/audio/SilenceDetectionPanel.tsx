@@ -32,6 +32,9 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
   const trimMutation = useTrimAsset();
   const removeMutation = useRemoveSilence();
   const [progressId, setProgressId] = useState<string | null>(null);
+  // Remove All shortens each gap in the middle to this many seconds instead of cutting it
+  // to nothing, so pauses do not sound unnaturally short (start and end silence goes)
+  const [keepGap, setKeepGap] = useState(0.5);
   const working = removeMutation.isPending || trimMutation.isPending;
   // Esc closes the confirm, but not while the edit runs (it would go on anyway)
   useEscape(showConfirm !== null && !trimPending && !working, () => setShowConfirm(null));
@@ -90,12 +93,12 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
   };
 
   // Cut silent regions out and join the rest (the server keeps the original for Undo)
-  const removeRegions = (toRemove: SilenceRegion[]) => {
+  const removeRegions = (toRemove: SilenceRegion[], keep = 0) => {
     if (toRemove.length === 0) return;
     const pid = newProgressId();
     setProgressId(pid);
     removeMutation.mutate(
-      { id: assetId, regions: toRemove, progressId: pid },
+      { id: assetId, regions: toRemove, progressId: pid, keepGap: keep },
       {
         onSuccess: () => {
           setRegions([]);
@@ -122,7 +125,7 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
     removeRegions([regions[selectedIndex]]);
   };
 
-  const handleRemoveAll = () => removeRegions(regions);
+  const handleRemoveAll = () => removeRegions(regions, keepGap);
 
   const handleUndoTrim = () => {
     restoreMutation.mutate(assetId, {
@@ -351,10 +354,30 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
               {showConfirm === 'auto'
                 ? 'This will remove leading and trailing silence from the audio file. You can review the result and undo if needed.'
                 : showConfirm === 'all'
-                ? `This removes all ${regions.length} silent part${regions.length === 1 ? '' : 's'} it found (${totalSilence.toFixed(1)} s in total), including gaps in the middle, and joins the rest. Listen to the result afterwards: Undo Trim or Restore Original brings back the original file, which is always kept.`
+                ? keepGap > 0
+                  ? `This cuts the silence at the start and end, and shortens each gap in the middle to ${keepGap} s so pauses still sound natural (${regions.length} silent part${regions.length === 1 ? '' : 's'} found, ${totalSilence.toFixed(1)} s in total). Listen to the result afterwards: Undo Trim or Restore Original brings back the original file, which is always kept.`
+                  : `This removes all ${regions.length} silent part${regions.length === 1 ? '' : 's'} it found (${totalSilence.toFixed(1)} s in total), including gaps in the middle, and joins the rest. Listen to the result afterwards: Undo Trim or Restore Original brings back the original file, which is always kept.`
                 : `This will trim out region #${(selectedIndex ?? 0) + 1} (${formatTime(selectedRegion?.start ?? 0)} - ${formatTime(selectedRegion?.end ?? 0)}). You can review the result and undo if needed.`
               }
             </p>
+            {showConfirm === 'all' && (
+              <label className="flex flex-wrap items-center gap-2 text-sm text-gray-700 mb-4">
+                Replace each gap in the middle with
+                <input
+                  type="number"
+                  min={0}
+                  max={10}
+                  step={0.25}
+                  value={keepGap}
+                  disabled={working}
+                  onChange={(e) => setKeepGap(Math.min(10, Math.max(0, Number(e.target.value) || 0)))}
+                  data-testid="keep-gap"
+                  aria-label="Seconds of silence to leave in each gap"
+                  className="w-20 border rounded px-2 py-1 text-sm"
+                />
+                s of silence <span className="text-xs text-gray-400">(0 = cut it out completely)</span>
+              </label>
+            )}
             <EditProgressBar progressId={progressId} active={removeMutation.isPending} label="Removing the silence" />
             <div className="flex gap-2 justify-end">
               <button

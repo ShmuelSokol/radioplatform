@@ -142,7 +142,7 @@ radioplatform/
 |--------|------|--------|
 | auth | auth.py | /auth |
 | stations | stations.py | /stations |
-| assets | assets.py | /assets (`DELETE /{id}` answers 503 with Retry-After when the queue holds the item's rows, see `wiki/library-delete.md`; `POST /{id}/remove-silence`: cut out every silent region the scan found (middle gaps too; original kept for Restore Original); `GET /progress/{progress_id}`: how far a long edit sent with `?progress_id=` (auto-enhance, remove-silence) has got, for the progress bar; `POST /{id}/do-not-play`: the control room's quick "do not play" / "allow again" on every station; `POST` and `GET /{id}/station-block`: "not on this station", one station only; see `wiki/control-room.md`) |
+| assets | assets.py | /assets (`DELETE /{id}` answers 503 with Retry-After when the queue holds the item's rows, see `wiki/library-delete.md`; `POST /{id}/remove-silence`: cut out every silent region the scan found (start and end completely; each middle gap shortened to `keep_gap` s, 0 = cut out; original kept for Restore Original); `POST /bulk-auto-trim` also shortens middle gaps longer than `middle_gap_over` to `keep_gap`; `GET /progress/{progress_id}`: how far a long edit sent with `?progress_id=` (auto-enhance, remove-silence) has got, for the progress bar; `POST /{id}/do-not-play`: the control room's quick "do not play" / "allow again" on every station; `POST` and `GET /{id}/station-block`: "not on this station", one station only; see `wiki/control-room.md`) |
 | streams | streams.py | /streams |
 | controls | controls.py | /controls |
 | users | users.py | /users |
@@ -244,7 +244,7 @@ radioplatform/
 | station_blocks.py | "Not on this station": the per-station list of items a station does not play, the subquery every pick uses (`blocked_asset_ids`) and block/undo with removal of that station's waiting copies |
 | emergency_alerts.py | The emergency override: sends an alert to each station (engine `/alert`, or WS `emergency_alert` to browser players), takes the engine's start/end reports into the log, drops hard items due during it, alert + ntfy on each (see `wiki/emergency-alerts.md`) |
 | eas_tones.py | Finds EAS attention signal and SAME bursts in a recording, so a staff upload with them is refused |
-| job_progress.py | How far a long audio edit (AI Enhance, Remove All Found Silence) has got: FFmpeg `-progress` on temp files, kept in memory per progress id for `GET /assets/progress/{id}` and the item page's progress bar (`components/audio/EditProgressBar.tsx`) |
+| job_progress.py | How far a long audio edit (Smart Enhance, Remove All Found Silence) has got: FFmpeg `-progress` on temp files, kept in memory per progress id for `GET /assets/progress/{id}` and the item page's progress bar (`components/audio/EditProgressBar.tsx`) |
 | playout_engine.py | Link to the playout engine: hands it the next track, records what really went on air, sends Next/flush/timed commands (see `wiki/streaming-architecture.md`) |
 
 ## Frontend Details

@@ -332,3 +332,13 @@ weather), for short items and for timed ones. `handover_seconds` hands a non-son
   so a long shiur failed (a 35 minute one takes about 2 1/2 minutes on 4 cores); now it
   reads a temp file with a 30 minute limit. Both edits commit the read transaction before
   FFmpeg runs, and drop `audio_analysis` afterwards.
+- Shorter gaps, not none (Shmuel 2026-11-19: "replace the longer gaps with shorter gaps ...
+  so it's not unnaturally short spaces"): `silence_service.cut_spans` cuts start and end
+  silence completely but leaves `keep_gap` seconds of each gap in the middle (half on each
+  side). Remove All Found Silence sends `keep_gap` (default 0.5 s on the page; "find" is the
+  scan's Min Duration). The Library's bulk Auto-Clip Silence now opens a settings box:
+  start and end always, and gaps in the middle longer than `middle_gap_over` (default 2 s)
+  become `keep_gap` (default 0.75 s); 0 = ends only. Ends only still cuts an MP3 without
+  re-encoding; with middle gaps it re-encodes at 256k. The original stays for Restore Original.
+- "AI Auto-Enhance" is called "Smart Enhance" on screen since 2026-11-19 (Shmuel asked);
+  the API route is still `auto-enhance`.

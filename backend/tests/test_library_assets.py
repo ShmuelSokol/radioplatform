@@ -271,7 +271,7 @@ async def test_bulk_auto_trim_cuts_only_the_ends(client, auth_headers, db_sessio
     await _finish_jobs()
     st = (await client.get(f"/api/v1/assets/bulk-auto-trim/status/{job_id}", headers=auth_headers)).json()
     assert st == {"job_id": job_id, "status": "completed", "total": 6, "processed": 6, "trimmed": 3,
-                  "skipped": 2, "errors": 1, "detail": None}
+                  "skipped": 2, "errors": 1, "gaps_shortened": 0, "detail": None}
 
     for x, length in ((lead, 3.0), (tail, 3.0), (both, 3.0)):
         f = await _fresh(db_session, x.id)
@@ -690,3 +690,55 @@ def test_studio_saves_takes_as_mp3():
         pytest.skip("frontend not checked out")
     text = open(src, encoding="utf-8").read()
     assert "'wav'" not in text and text.count("'mp3',") >= 2
+
+
+# --- B-ASSETS-11b: Shmuel 2026-11-19 "Yes also in middle ... replace the longer gaps
+# with shorter gaps ... so it's not unnaturally short spaces" ---
+
+def _long_middle_silence(gap: float = 4.0) -> bytes:
+    cmd = ["ffmpeg", "-v", "error",
+           "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono:d=1",
+           "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100:duration=2",
+           "-f", "lavfi", "-i", f"anullsrc=r=44100:cl=mono:d={gap}",
+           "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100:duration=2",
+           "-filter_complex", "[0:a][1:a][2:a][3:a]concat=n=4:v=0:a=1[o]", "-map", "[o]", "-f", "mp3", "pipe:1"]
+    return subprocess.run(cmd, capture_output=True, check=True).stdout
+
+
+@pytest.mark.asyncio
+async def test_bulk_auto_trim_shortens_long_middle_gaps(client, auth_headers, db_session, local_storage, jobs_db):
+    from app.services.silence_service import detect_silence
+    from app.services.storage_service import download_file
+
+    long_gap = await _stored_asset(db_session, _long_middle_silence(4.0), title="Long gap", duration=9.0)
+    short_gap = await _stored_asset(db_session, _middle_silence(), title="Short gap", duration=5.5)
+    other = await _stored_asset(db_session, _long_middle_silence(4.0), title="Ends only", duration=9.0)
+    before = {x.id: x.file_path for x in (long_gap, short_gap, other)}
+
+    r = await client.post("/api/v1/assets/bulk-auto-trim",
+                          json={"asset_ids": [str(long_gap.id), str(short_gap.id)]}, headers=auth_headers)
+    job_id = r.json()["job_id"]
+    await _finish_jobs()
+    st = (await client.get(f"/api/v1/assets/bulk-auto-trim/status/{job_id}", headers=auth_headers)).json()
+    assert (st["trimmed"], st["skipped"], st["errors"], st["gaps_shortened"]) == (1, 1, 0, 1)
+
+    f = await _fresh(db_session, long_gap.id)
+    # 1 s lead-in gone, 4 s gap now 0.75 s: 2 + 0.75 + 2
+    assert abs(f.duration - 4.75) < 0.3, f.duration
+    gaps = detect_silence(await download_file(f.file_path), threshold_db=-35, min_duration=0.3)
+    assert len(gaps) == 1 and 0.5 < gaps[0]["end"] - gaps[0]["start"] < 1.0, gaps
+    entry = f.metadata_extra["trim_history"][-1]
+    assert entry["keep_gap"] == 0.75 and len(entry["middle_gaps"]) == 1
+    assert f.metadata_extra["original_file_path"] == before[long_gap.id]
+    # a 1.5 s pause is under the 2 s line: left alone
+    assert (await _fresh(db_session, short_gap.id)).file_path == before[short_gap.id]
+
+    # middle_gap_over 0: only the start and end, the long gap stays
+    r = await client.post("/api/v1/assets/bulk-auto-trim",
+                          json={"asset_ids": [str(other.id)], "middle_gap_over": 0}, headers=auth_headers)
+    await _finish_jobs()
+    f = await _fresh(db_session, other.id)
+    assert abs(f.duration - 8.0) < 0.3, f.duration
+
+    r = await client.post(f"/api/v1/assets/{long_gap.id}/restore-original", headers=auth_headers)
+    assert r.json()["file_path"] == before[long_gap.id]
