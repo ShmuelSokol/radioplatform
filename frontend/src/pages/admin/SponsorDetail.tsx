@@ -252,7 +252,7 @@ function SpotLine({ s, account, listen, onPlays }: {
       {s.status_detail && <p className="text-sm text-gray-700">{s.status_detail}</p>}
       {s.kind === 'audio' && (
         <p className="text-sm text-gray-600">
-          {s.plays_total ? `Played ${s.plays_total} times, first ${when(s.first_played_at)}, last ${when(s.last_played_at)}` : 'Never played'}
+          {s.plays_total ? `Played ${s.plays_total} ${s.plays_total === 1 ? 'time' : 'times'}, first ${when(s.first_played_at)}, last ${when(s.last_played_at)}` : 'Never played'}
           {contracts.length > 0 && ` · ${contracts.length === 1 ? 'in 1 contract' : `in ${contracts.length} contracts`}: ${contracts.map((c) => `${c.station_name} (${CONTRACT_STATE_LABEL[c.state].toLowerCase()})`).join(', ')}`}
         </p>
       )}
@@ -271,7 +271,7 @@ function SpotLine({ s, account, listen, onPlays }: {
           <button className="px-3 py-1 border rounded text-sm" onClick={() => onPlays(s.asset_id!)}>What played</button>
         )}
         {s.kind === 'recording' && <Link className="px-3 py-1 border rounded text-sm" to={`/admin/spot-recordings?sponsor=${account.client.id}`}>Open in Record Spots</Link>}
-        {s.kind === 'campaign' && <Link className="px-3 py-1 border rounded text-sm" to={`/admin/campaigns/${s.campaign_id}`}>Open campaign</Link>}
+        {s.kind === 'campaign' && <Link className="px-3 py-1 border rounded text-sm" to={`/admin/campaigns/${s.campaign_id}`}>Open request</Link>}
       </div>
       {listen.failed === s.key && <p className="text-sm text-red-600">The audio could not be loaded.</p>}
       {open && s.script && <p className="text-sm whitespace-pre-wrap bg-gray-50 border rounded p-2">{s.script}</p>}
@@ -362,7 +362,7 @@ function ContractLine({ c, listen, account }: { c: ClientContract; listen: Retur
       <td className="px-3 py-2 hidden md:table-cell" data-label="Station">{c.station_name}</td>
       <td className="px-3 py-2 hidden md:table-cell" data-label="When it airs">{describeContract(c)}</td>
       <td className="px-3 py-2 hidden md:table-cell" data-label="Dates">
-        {c.start_date ? day(c.start_date) : 'From the start'} to {c.end_date ? day(c.end_date) : 'no end date'}
+        {span(c.start_date, c.end_date, !c.end_date) || 'No start or end date'}
         {editingEnd && (
           <form
             className="flex flex-wrap items-center gap-2 mt-1"

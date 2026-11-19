@@ -512,12 +512,11 @@ export default function SpotSchedules() {
         </div>
         {!schedules?.length ? (
           <p className="p-6 text-gray-500">
-            Nothing is scheduled yet. Until a spot is scheduled, the station keeps playing its
-            single default spot in every sponsor slot.
+            No contracts yet. Add the first with Book a sponsorship at the top of the page.
           </p>
         ) : (
           <ul className="divide-y">
-            {schedules.map((s) => (
+            {[...schedules].sort((a, b) => sponsorName(a.sponsor_id).localeCompare(sponsorName(b.sponsor_id))).map((s) => (
               <li key={s.id} id={`contract-${s.id}`} data-testid="spot-contract"
                 className={`px-6 py-4 flex flex-wrap items-center gap-3 ${s.id === linkedContract ? 'bg-yellow-100 outline outline-2 outline-yellow-500' : ''}`}>
                 <div className="flex-1 min-w-[16rem]">
@@ -532,9 +531,7 @@ export default function SpotSchedules() {
                     )}
                   </p>
                   <p className="text-sm text-gray-600">
-                    {describe(s)} on {stationName(s.station_id)}
-                    {s.start_date ? `, from ${s.start_date}` : ''}
-                    {s.end_date ? `, until ${s.end_date}` : ''}
+                    {s.name ? `${s.name}: ` : ''}{describe(s)} on {stationName(s.station_id)}
                   </p>
                   <p className="text-sm font-medium" data-testid="schedule-totals">{totalsLine(s)}</p>
                 </div>
@@ -556,7 +553,7 @@ export default function SpotSchedules() {
                 </button>
                 <button
                   onClick={() => {
-                    if (window.confirm(`Remove this schedule for ${sponsorName(s.sponsor_id)}?`))
+                    if (window.confirm(`Remove this contract for ${sponsorName(s.sponsor_id)}? Its coming plays are taken out of the queue.`))
                       deleteMut.mutate(s.id);
                   }}
                   className="text-sm px-3 py-1 border border-red-200 text-red-600 rounded-lg hover:bg-red-50"
@@ -624,7 +621,7 @@ export default function SpotSchedules() {
                 <ul className="text-sm mt-1 list-disc list-inside">
                   {plan.unplaced.slice(0, 12).map((u, i) => (
                     <li key={i}>
-                      {u.sponsor_name}, {formatDay(u.local_date)} {u.daypart}
+                      {u.sponsor_name}, {formatDay(u.local_date)}, {daypartText(u.daypart)}
                       {u.count > 1 ? ` (${u.count} plays)` : ''}: {u.reason}
                     </li>
                   ))}
@@ -650,14 +647,14 @@ export default function SpotSchedules() {
               </div>
             )}
             {!byDay.length ? (
-              <p className="text-gray-500">No sponsor spots are planned on this station.</p>
+              <p className="text-gray-500">No sponsorships are planned on this station in the next 7 days.</p>
             ) : (
               byDay.map(([day, spots]) => (
                 <div key={day}>
                   <p className="font-medium text-gray-800 mb-2">
                     {formatDay(day)}{' '}
                     <span className="text-sm text-gray-500 font-normal">
-                      {spots.length} spot{spots.length === 1 ? '' : 's'}
+                      {spots.length} play{spots.length === 1 ? '' : 's'}
                     </span>
                   </p>
                   <div className="flex flex-wrap gap-2">

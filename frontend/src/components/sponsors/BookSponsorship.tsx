@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getClientAccount, listSponsors } from '../../api/sponsors';
@@ -51,6 +51,7 @@ export function RoomBar({ booked, room, state }: { booked: number; room: number;
 
 export interface BookingStart {
   sponsorId?: string;
+  assetId?: string; // the spot to book (from Record Spots)
   stationId?: string;
   day?: number; // Monday = 0
   slot?: string;
@@ -69,9 +70,14 @@ export default function BookSponsorship({ start, onClose }: { start?: BookingSta
   const [sponsorId, setSponsorId] = useState(start?.sponsorId ?? '');
   const [assetId, setAssetId] = useState('');
   const [assetTitle, setAssetTitle] = useState('');
+  const [assetSeconds, setAssetSeconds] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [stationId, setStationId] = useState(start?.stationId ?? '');
-  const [days, setDays] = useState<number[]>(start?.day != null ? [start.day] : [0, 1, 2, 3, 4, 6]);
+  const [days, setDays] = useState<number[]>(() => {
+    const usual = [0, 1, 2, 3, 4, 6]; // Sunday to Friday
+    // Opened from a box on the board: the usual week, with that box's day in it
+    return start?.day != null && !usual.includes(start.day) ? [...usual, start.day] : usual;
+  });
   const [slots, setSlots] = useState<Daypart[]>(start?.slot ? [start.slot as Daypart] : DEFAULT_SLOTS.slice(0, 2));
   const [perSlot, setPerSlot] = useState(1);
   const [firstDay, setFirstDay] = useState('');
@@ -89,6 +95,13 @@ export default function BookSponsorship({ start, onClose }: { start?: BookingSta
   const clientName = account?.client.name ?? sponsors?.find((s) => s.id === sponsorId)?.name ?? '';
   // The client's own audio that can air: never a rejected copy or a stand-in voice
   const spots = (account?.spots ?? []).filter((s) => s.asset_id && s.stage !== 'rejected' && !/stand-?in/i.test(s.title));
+  // Opened for one spot (Record Spots): choose it once the client's spots are loaded
+  const wanted = start?.assetId ? spots.find((s) => s.asset_id === start.assetId) : undefined;
+  useEffect(() => {
+    if (wanted && !assetId) { setAssetId(wanted.asset_id!); setAssetTitle(wanted.title); setAssetSeconds(wanted.duration ?? null); }
+    // only when the spot first becomes known
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wanted?.asset_id]);
   const inWorks = (account?.spots ?? []).filter((s) => !s.asset_id && s.kind === 'recording');
   const { data: found, isFetching: searching } = useQuery({
     queryKey: ['spot-search', search],
@@ -114,9 +127,12 @@ export default function BookSponsorship({ start, onClose }: { start?: BookingSta
     end_date: lastDay || null,
   };
   const totals = contractTotals(shape);
-  const seconds = spots.find((s) => s.asset_id === assetId)?.duration ?? null;
+  const seconds = assetSeconds;
   const stationText = stationId ? stations.find((s) => String(s.id) === String(stationId))?.name ?? 'one station' : 'every station';
   const slotText = TIME_SLOTS.filter((s) => slots.includes(s.key)).map((s) => s.hours.replace(' to ', '-')).join(', ');
+
+  // Chosen slots with no sponsorship place on any chosen day in the coming week
+  const noRoomSlots = room ? TIME_SLOTS.filter((s) => slots.includes(s.key) && !fullestDay(room, s.key, days)) : [];
 
   const save = useMutation({
     mutationFn: (data: SpotScheduleInput) => createSpotSchedule(data),
@@ -165,10 +181,10 @@ export default function BookSponsorship({ start, onClose }: { start?: BookingSta
     });
   };
 
-  const pickSpot = (id: string, title: string) => { setAssetId(id); setAssetTitle(title); setError(''); };
+  const pickSpot = (id: string, title: string, duration?: number | null) => { setAssetId(id); setAssetTitle(title); setAssetSeconds(duration ?? null); setError(''); };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-y-auto p-2 sm:p-6" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-y-auto p-2 sm:p-6" onMouseDown={(e) => { if (e.target === e.currentTarget && (saved || (step === 0 && !assetId))) onClose(); }}>
       <div role="dialog" aria-label="Book a sponsorship" data-testid="book-sponsorship" className="bg-white rounded-xl shadow-xl w-full max-w-3xl p-4 sm:p-6 space-y-4 my-auto">
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-xl font-semibold break-words">Book a sponsorship{clientName ? `: ${clientName}` : ''}</h2>
@@ -224,7 +240,7 @@ export default function BookSponsorship({ start, onClose }: { start?: BookingSta
                     {spots.length ? (
                       <div className="grid gap-2">
                         {spots.map((s) => (
-                          <button key={s.key} type="button" aria-pressed={assetId === s.asset_id} className={chip(assetId === s.asset_id)} onClick={() => pickSpot(s.asset_id!, s.title)}>
+                          <button key={s.key} type="button" aria-pressed={assetId === s.asset_id} className={chip(assetId === s.asset_id)} onClick={() => pickSpot(s.asset_id!, s.title, s.duration)}>
                             <span className="font-medium">{s.title}</span>
                             <span className="ml-2 text-xs opacity-80">{[length(s.duration), s.stage_label].filter(Boolean).join(' · ')}</span>
                           </button>
@@ -243,7 +259,7 @@ export default function BookSponsorship({ start, onClose }: { start?: BookingSta
                       {!!found?.assets?.length && (
                         <div className="grid gap-1 mt-2">
                           {found.assets.map((a) => (
-                            <button key={a.id} type="button" aria-pressed={assetId === a.id} className={chip(assetId === a.id)} onClick={() => pickSpot(a.id, a.title)}>
+                            <button key={a.id} type="button" aria-pressed={assetId === a.id} className={chip(assetId === a.id)} onClick={() => pickSpot(a.id, a.title, a.duration)}>
                               {a.title}{a.duration ? <span className="ml-2 text-xs opacity-80">{length(a.duration)}</span> : null}
                             </button>
                           ))}
@@ -298,7 +314,7 @@ export default function BookSponsorship({ start, onClose }: { start?: BookingSta
                     const state: Fullness = cell ? fullness(cell) : 'off';
                     const on = slots.includes(s.key);
                     return (
-                      <button key={s.key} type="button" aria-pressed={on} data-slot={s.key} className={`${chip(on)} py-2 space-y-1`} onClick={() => setSlots(toggle(slots, s.key))}>
+                      <button key={s.key} type="button" aria-pressed={on} data-slot={s.key} className={`${chip(on)} py-2 flex flex-col items-stretch gap-1`} onClick={() => setSlots(toggle(slots, s.key))}>
                         <span className="block font-semibold">{s.hours}{on ? ' ✓' : ''}</span>
                         {cell ? (
                           <>
@@ -340,7 +356,12 @@ export default function BookSponsorship({ start, onClose }: { start?: BookingSta
                   const c = fullestDay(room, s.key, days);
                   return c && ['nearly', 'full'].includes(fullness(c));
                 }) && (
-                  <p className="text-sm text-yellow-800">Some of these slots are nearly full. A play with no room moves to the next break with room, and anything left over shows under Missed plays.</p>
+                  <p className="text-sm text-yellow-800" data-testid="booking-nearly-full">Some of these slots are full or nearly full. A play with no room moves to the next break with room, and anything left over shows under Missed plays.</p>
+                )}
+                {noRoomSlots.length > 0 && (
+                  <p className="text-sm text-red-700" data-testid="booking-no-room">
+                    {roomStationName} has no sponsorship places on these days in: {noRoomSlots.map((s) => s.hours.replace(' to ', '-')).join(', ')}. Plays booked there will not air until places are added (Program Blocks). Go back to choose another slot, or save anyway.
+                  </p>
                 )}
                 <label className="block text-sm">Name for this contract (optional)
                   <input className={field} value={name} onChange={(e) => setName(e.target.value)} placeholder="For example: Winter sale" />

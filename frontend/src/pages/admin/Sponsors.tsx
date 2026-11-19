@@ -87,7 +87,7 @@ export default function Sponsors() {
 
   return (
     <div className="w-full space-y-4">
-      {mayChange && params.get('book') && <BookSponsorship start={{ sponsorId: params.get('sponsor') || undefined }} onClose={() => setParam('book', '')} />}
+      {mayChange && params.get('book') && <BookSponsorship start={{ sponsorId: params.get('sponsor') || undefined, assetId: params.get('asset') || undefined }} onClose={() => { const next = new URLSearchParams(params); for (const k of ['book', 'sponsor', 'asset']) next.delete(k); setParams(next, { replace: true }); }} />}
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div>
           <h1 className="text-3xl font-bold">Clients</h1>

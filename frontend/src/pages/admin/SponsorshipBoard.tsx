@@ -44,7 +44,9 @@ function dayLong(iso: string): string {
 function cellText(c: RoomCell): string {
   if (c.off_air) return 'Off the air';
   if (c.room === 0 && c.booked === 0) return 'No room';
-  return c.room > 0 ? `${c.booked} of ${c.room}` : `${c.booked}`;
+  const base = c.room > 0 ? `${c.booked} of ${c.room}` : `${c.booked}`;
+  // plays the planner wanted here and had no place for
+  return c.no_room > 0 ? `${base}, ${c.no_room} over` : base;
 }
 
 export default function SponsorshipBoard() {

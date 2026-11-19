@@ -27,11 +27,17 @@ export function StatusBadge({ status }: { status: string }) {
 export const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
 /** Start / end / budget line under a campaign's name. */
+/** "Apr 1, 2027" from "2027-04-01" (a calendar day, no time zone involved) */
+function niceDay(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 export function CampaignFacts({ c, className = '' }: { c: Campaign; className?: string }) {
   return (
     <div className={`flex flex-wrap gap-x-4 gap-y-1 ${className}`}>
-      {c.start_date && <span>Start: {c.start_date}</span>}
-      {c.end_date && <span>End: {c.end_date}</span>}
+      {c.start_date && <span>Start: {niceDay(c.start_date)}</span>}
+      {c.end_date && <span>End: {niceDay(c.end_date)}</span>}
       {c.budget_cents != null && <span>Budget: {money(c.budget_cents)}</span>}
     </div>
   );

@@ -1876,7 +1876,7 @@ section('spot-recordings', async () => {
       const approve = cardR().getByRole('button', { name: 'Approve for air' });
       await approve.waitFor();
       await timedResponse(page, (m, p) => m === 'POST' && p.includes('approve'), () => approve.click());
-      await cardR().getByRole('link', { name: 'Schedule this spot' }).waitFor();
+      await cardR().getByRole('link', { name: 'Book this spot' }).waitFor();
       const lib = await api('GET', `/assets?search=${encodeURIComponent(title)}&limit=5`, { token: USERS.admin.token }).catch(() => null);
       return lib ? `library has ${(lib.assets || []).length} match(es)` : 'approved';
     }, page);

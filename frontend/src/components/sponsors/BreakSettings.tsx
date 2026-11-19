@@ -11,7 +11,7 @@ import { useMayChange } from '../../hooks/useMayChange';
 export default function BreakSettings({ stationId }: { stationId: string }) {
   const queryClient = useQueryClient();
   const mayChange = useMayChange('/admin/spot-schedule');
-  const { data: timing } = useQuery({
+  const { data: timing, isError } = useQuery({
     queryKey: ['spot-timing-defaults', stationId],
     queryFn: () => getTimingDefaults(stationId),
     enabled: !!stationId,
@@ -24,6 +24,7 @@ export default function BreakSettings({ stationId }: { stationId: string }) {
       queryClient.invalidateQueries({ queryKey: ['slot-room'] });
     },
   });
+  if (isError) return <p className="text-sm text-red-700" data-testid="break-settings">Could not load the break settings. Try again in a moment.</p>;
   if (!timing) return null;
   const busy = save.isPending || !mayChange;
   return (
@@ -57,6 +58,8 @@ export default function BreakSettings({ stationId }: { stationId: string }) {
         />
         Time check on the half hour ("The time is 10:30") before the weather
       </label>
+      {save.isError && <p className="w-full text-red-700" role="alert">That change was not saved. Try again in a moment.</p>}
+      {!mayChange && <p className="w-full text-xs text-gray-600">Only managers can change these.</p>}
     </div>
   );
 }
