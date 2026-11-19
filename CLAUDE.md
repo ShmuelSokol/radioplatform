@@ -548,6 +548,9 @@ cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMI
 # Program Blocks page: "Only part of the year" season pickers (fake backend, desktop and iPhone)
 cd frontend && BASE_URL=http://localhost:4173 node e2e/program-block-season.mjs
 
+# Played list and RDS log: start times to the second on each station's clock, three stations, desktop and iPhone (fake backend)
+cd frontend && BASE_URL=http://localhost:4173 node e2e/played-seconds.mjs
+
 # The control room's Song panel (category, not on this station, do not play, details) on desktop and phone sizes
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs
 

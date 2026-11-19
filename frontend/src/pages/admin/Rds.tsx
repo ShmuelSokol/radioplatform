@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { rememberStation, stationToShow } from '../../lib/lastStation';
+import { validZone } from '../../lib/stationTime';
 import { useStations } from '../../hooks/useStations';
 import { useMayChange } from '../../hooks/useMayChange';
 import { listSponsors } from '../../api/sponsors';
@@ -58,8 +59,12 @@ function errorText(e: unknown): string {
   return 'Could not save.';
 }
 
-function localTime(iso: string) {
-  return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+/** Times on this page are the station's clock, to the second. */
+function localTime(iso: string, tz?: string) {
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', ...(validZone(tz) ? { timeZone: tz } : {}) });
+}
+function localDayTime(iso: string, tz?: string) {
+  return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', ...(validZone(tz) ? { timeZone: tz } : {}) });
 }
 
 function Counter({ n, max }: { n: number; max: number }) {
@@ -92,6 +97,7 @@ export default function Rds() {
   const stations = stationData?.stations ?? [];
   const [chosen, setChosen] = useState('');
   const station = stationToShow(stations, chosen);
+  const stationTz = stations.find((s) => s.id === station)?.timezone;
 
   const settingsQ = useQuery({ queryKey: ['rds-settings', station], queryFn: () => getRdsSettings(station), enabled: !!station });
   const messagesQ = useQuery({ queryKey: ['rds-messages', station], queryFn: () => listRdsMessages(station), enabled: !!station });
@@ -224,7 +230,7 @@ export default function Rds() {
             <div className="text-xs text-gray-600">
               {KIND_LABEL[previewQ.data.now.kind]}
               {previewQ.data.now.sponsor_name ? ` · ${previewQ.data.now.sponsor_name}` : ''}
-              {previewQ.data.now.changes_at ? ` · next line at ${localTime(previewQ.data.now.changes_at)}` : ''}
+              {previewQ.data.now.changes_at ? ` · next line at ${localTime(previewQ.data.now.changes_at, stationTz)}` : ''}
             </div>
           )}
         </div>
@@ -235,7 +241,7 @@ export default function Rds() {
               <tbody>
                 {(previewQ.data?.coming ?? []).map((r) => (
                   <tr key={r.at} className="border-b last:border-0">
-                    <td className="px-2 py-1 whitespace-nowrap text-gray-500 tabular-nums">{localTime(r.at)}</td>
+                    <td className="px-2 py-1 whitespace-nowrap text-gray-500 tabular-nums">{localTime(r.at, stationTz)}</td>
                     <td className="px-2 py-1 font-mono break-words sm:truncate sm:max-w-0 w-full" title={r.rt}>{r.rt}</td>
                     <td className="px-2 py-1 whitespace-nowrap text-xs text-gray-500">{KIND_LABEL[r.kind]}</td>
                   </tr>
@@ -474,8 +480,8 @@ export default function Rds() {
               <tbody>
                 {playsQ.data!.plays.map((p) => (
                   <tr key={p.id} className="border-t">
-                    <td className="px-2 py-1 whitespace-nowrap tabular-nums">{new Date(p.first_seen_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>
-                    <td className="px-2 py-1 whitespace-nowrap tabular-nums hidden sm:table-cell">{localTime(p.last_seen_at)}</td>
+                    <td className="px-2 py-1 whitespace-nowrap tabular-nums">{localDayTime(p.first_seen_at, stationTz)}</td>
+                    <td className="px-2 py-1 whitespace-nowrap tabular-nums hidden sm:table-cell">{localTime(p.last_seen_at, stationTz)}</td>
                     <td className="px-2 py-1 font-mono break-words sm:truncate sm:max-w-0 w-full" title={p.text}>{p.text}</td>
                     <td className="px-2 py-1 sm:whitespace-nowrap text-xs">{KIND_LABEL[p.kind]}{p.sponsor_name ? ` · ${p.sponsor_name}` : ''}</td>
                   </tr>
