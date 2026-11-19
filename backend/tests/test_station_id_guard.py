@@ -152,3 +152,31 @@ async def test_a_short_song_after_a_break_is_not_enough(db_session: AsyncSession
     await db_session.commit()
     picked = await _pick_next_pending(db_session, station_id, datetime.now(UTC))
     assert picked.id == (id_entry if airs else song_entry)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sponsor_status", ["playing", "played"])
+async def test_no_id_after_a_sponsorship_that_waited_for_a_story(db_session: AsyncSession, sponsor_status):
+    """All Day Stories 2026-11-19 06:36Z, browser player: TEST SPONSOR 08 waited for a story
+    to end (sponsorships_wait_for_talks), aired at 06:36:04, and an ID followed at 06:36:32."""
+    station_id, id_entry, song_entry = await _setup(db_session, "song", None)
+    now = datetime.now(UTC)
+    story = Asset(id=uuid.uuid4(), title="A story", file_path=f"{uuid.uuid4().hex}.mp3",
+                  asset_type="story", category="stories", duration=1200.0)
+    db_session.add(story)
+    await db_session.flush()
+    spot = (await db_session.execute(select(Asset).where(Asset.category == "sponsorship"))).scalars().first()
+    # the song in _setup aired before the story; the story then the late sponsorship
+    for e in (await db_session.execute(select(QueueEntry).where(
+            QueueEntry.station_id == station_id, QueueEntry.status == "playing"))).scalars():
+        e.status, e.started_at = "played", now - timedelta(minutes=40)
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=story.id, position=0,
+                              status="played", source="auto", started_at=now - timedelta(minutes=20)))
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=spot.id, position=1,
+                              status=sponsor_status, source="ad_slot", timing_mode="soft",
+                              preempt_at=now - timedelta(minutes=12), started_at=now - timedelta(seconds=28)))
+    await db_session.commit()
+    picked = await _pick_next_pending(db_session, station_id, now)
+    await db_session.commit()
+    assert picked.id == song_entry
+    assert await _status(db_session, id_entry) == "skipped"
