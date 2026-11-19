@@ -84,7 +84,7 @@ async def must_wait(db: AsyncSession, station_id, entry: QueueEntry, now: dateti
             start = max(start, ends)
     # Not sooner than the station's shortest gap after the last ID that aired: the fill
     # spaced them by predicted times, and a cut song or a moved break brings them closer
-    # (simulator: 10.2 minutes apart). 
+    # (simulator: 10.2 minutes apart).
     from app.models.asset import Asset
 
     last_id = (await db.execute(
