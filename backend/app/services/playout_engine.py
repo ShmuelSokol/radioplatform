@@ -110,6 +110,11 @@ class EngineState:
     # Entries the engine reported on air, newest last. Never handed out again, even
     # while their start report is still being written (it is not committed yet)
     recent_started: list[str] = field(default_factory=list)
+    # Entries whose start report is being taken right now (or waits for the lock): a
+    # next call meanwhile must not close them as "aired without a report". Main
+    # 2026-11-19 16:50Z: a 751 ms start report and the engine's next ask for a 4 s
+    # item overlapped; the song on air was closed and the site showed nothing for 6 min.
+    starting: set[str] = field(default_factory=set)
     # Hard-timed entries already reported as never accepted by the engine
     timed_alerted: set[str] = field(default_factory=set)
     # Monotonic time of the first tick, the watchdog's reference until the engine calls
@@ -857,12 +862,16 @@ async def _reconcile_given(db: AsyncSession, station_id, given: list[str]) -> se
             ids.append(uuid.UUID(raw))
         except ValueError:
             continue
+    # Not one whose start report is being taken now, or that was reported already
+    # (its report may not be committed yet)
+    state = get_state(station_id)
+    reported = state.starting | set(state.recent_started)
     if len(ids) > 1:
         res = await db.execute(
             select(QueueEntry).where(
                 # (the newest can be in the list twice: handed out, dropped by a flush
                 # during a live show, handed out again)
-                QueueEntry.id.in_([i for i in ids[1:] if i != ids[0]]),
+                QueueEntry.id.in_([i for i in ids[1:] if i != ids[0] and str(i) not in reported]),
                 QueueEntry.station_id == station_id,
                 QueueEntry.status == "pending",
             )
@@ -1168,6 +1177,20 @@ async def handle_started(
     station are taken one at a time, and an exact repeat (same entry within
     REPEAT_START_SECONDS) changes nothing."""
     state = get_state(station_id)
+    key = str(entry_id) if entry_id else None
+    if key:
+        state.starting.add(key)
+    try:
+        return await _handle_started_locked(db, station_id, state, entry_id, lane, at=at, quiet=quiet, kept=kept)
+    finally:
+        if key:
+            state.starting.discard(key)
+
+
+async def _handle_started_locked(
+    db: AsyncSession, station_id, state: "EngineState", entry_id: str | None, lane: str | None,
+    at: float | None = None, quiet: bool = False, kept: bool = False,
+) -> dict:
     async with state.started_lock:
         mono = time.monotonic()
         if (entry_id and not kept and state.last_started is not None
