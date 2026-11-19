@@ -506,13 +506,23 @@ def shabbos_silence(res: Result, ctx: Context):
             if start < ws < end - 60:
                 inside = [r for r in rows if r.start < ws + 1 < r.end]
                 first_silence = next((r for r in rows if r.kind == "silence" and r.start >= ws - 2), None)
-                if first_silence is None or abs(first_silence.start - ws) > ON_TIME_SECONDS:
+                cfg = ctx.config(sid).get("shabbos_ending") or {}
+                opener = next((r for r in rows if cfg.get("enabled") and cfg.get("after_asset_id")
+                               and r.asset_id == str(cfg["after_asset_id"]) and abs(r.start - ws) <= ON_TIME_SECONDS),
+                              None)
+                expected = opener.end if opener is not None else ws
+                if first_silence is None or abs(first_silence.start - expected) > ON_TIME_SECONDS:
                     _add(res, check, sid, f"{w['start'].astimezone(tz):%a %H:%M:%S}",
                          "silence did not start at candle lighting: "
                          + (f"first silence {first_silence.local_start}" if first_silence else "no silence")
                          + (f"; on air {inside[0].label()}" if inside else ""))
+            # The item the station airs at candle lighting before the silence (the shofar,
+            # shabbos_ending) is not a leak
+            after_id = ((ctx.config(sid).get("shabbos_ending") or {}).get("after_asset_id")
+                        if (ctx.config(sid).get("shabbos_ending") or {}).get("enabled") else None)
             leaks = [r for r in rows if r.kind != "silence" and r.lane != "emergency"
-                     and max(r.start, ws) + 1 < min(r.end, we)]
+                     and max(r.start, ws) + 1 < min(r.end, we)
+                     and not (after_id and r.asset_id == str(after_id) and abs(r.start - ws) <= ON_TIME_SECONDS)]
             for r in leaks[:5]:
                 _add(res, check, sid, r.local_start, f"{r.label()} on air during {w['reason']}")
             emerg = [r for r in rows if r.lane == "emergency" and max(r.start, ws) + 1 < min(r.end, we)]
@@ -530,6 +540,65 @@ def shabbos_silence(res: Result, ctx: Context):
                 silence_after = [r for r in rows if r.kind == "silence" and r.start > we + 1]
                 for r in silence_after[:2]:
                     _add(res, check, sid, r.local_start, "silence item still airing after the window")
+
+
+def shabbos_ending(res: Result, ctx: Context):
+    """Erev Shabbos (Shmuel 2026-11-19): the station's chosen song (automation_config
+    .shabbos_ending) is the last song and ends exactly at candle lighting, not cut; the item
+    after it (the shofar) starts right at candle lighting; nothing else airs between the
+    song's start and the silence."""
+    check = "Erev Shabbos: song ends at candle lighting, shofar, then silence"
+    res.checks_run.setdefault(check, 0)
+    start, end = ctx.window()
+    for sid in ctx.stations:
+        cfg = ctx.config(sid).get("shabbos_ending") or {}
+        if not cfg.get("enabled") or not cfg.get("song_asset_id"):
+            continue
+        rows = [r for r in res.rows if r.station == sid]
+        tz = ZoneInfo(ctx.stations[sid].timezone)
+        for w in ctx.sim.blackouts:
+            if w["stations"] and sid not in w["stations"]:
+                continue
+            if w["reason"] != "Shabbos" and not cfg.get("yom_tov"):
+                continue
+            ws = w["start"].timestamp()
+            if not (start + 600 < ws < end - 60):
+                continue
+            _count(res, check)
+            at = f"{w['start'].astimezone(tz):%a %H:%M:%S}"
+            song = next((r for r in rows if r.asset_id == str(cfg["song_asset_id"]) and r.start < ws < r.end + 5), None)
+            if song is None:
+                _add(res, check, sid, at, "the song did not air before candle lighting")
+                continue
+            if abs(song.end - ws) > ON_TIME_SECONDS:
+                _add(res, check, song, song.local_end, f"song ends {song.end - ws:+.1f} s from candle lighting")
+            if song.cut and song.end < ws - ON_TIME_SECONDS:
+                _add(res, check, song, song.local_end, "song was cut")
+            for r in rows:
+                # (a copy already on its way to air when the run starts, i.e. when the
+                # ending is first planned, may still air; in production that is 6 h ahead)
+                if r is not song and r.asset_id == str(cfg["song_asset_id"]) and r.start > start + 600 \
+                        and ws - 6 * 3600 < r.start < ws:
+                    _add(res, check, r, r.local_start, "the song also aired earlier the same afternoon")
+                if r.category == "shabbos_ending" and not (cfg.get("after_asset_id") == r.asset_id
+                                                           and abs(r.start - ws) <= ON_TIME_SECONDS):
+                    _add(res, check, r, r.local_start, f"{r.label()} aired outside the Shabbos ending")
+            between = [r for r in rows if r is not song and r.kind != "silence"
+                       and max(r.start, song.start) + 0.5 < min(r.end, ws)]
+            for r in between[:3]:
+                _add(res, check, r, r.local_start, f"{r.label()} airs during the song")
+            if cfg.get("after_asset_id"):
+                after = next((r for r in rows if r.asset_id == str(cfg["after_asset_id"]) and r.start >= ws - 5), None)
+                if after is None or abs(after.start - ws) > ON_TIME_SECONDS:
+                    _add(res, check, sid, at, "item after the song not at candle lighting: "
+                         + (after.local_start if after else "did not air"))
+                elif after.cut:
+                    _add(res, check, after, after.local_end, "item after the song was cut")
+                else:
+                    nxt = next((r for r in rows if r.start >= after.end - 0.5 and r is not after), None)
+                    if nxt is None or nxt.kind != "silence" or nxt.start - after.end > ON_TIME_SECONDS:
+                        _add(res, check, after, after.local_end, "silence does not follow it: "
+                             + (nxt.label() if nxt else "nothing"))
 
 
 def site_log_matches_air(res: Result, ctx: Context):
@@ -609,6 +678,6 @@ def one_resume_per_pause(res: Result, ctx: Context):
                 _add(res, check, sid, "", f"{len(es)} resume entries '{source}' for {a.title if a else asset_id!r}")
 
 
-ALL_CHECKS = [site_log_matches_air, one_resume_per_pause, shabbos_silence, hard_items_on_time, time_checks_on_the_hour, no_dead_air, nothing_inside_a_shiur,
+ALL_CHECKS = [site_log_matches_air, one_resume_per_pause, shabbos_silence, shabbos_ending, hard_items_on_time, time_checks_on_the_hour, no_dead_air, nothing_inside_a_shiur,
               sponsor_spacing, station_ids, station_isolation, time_check_says_the_hour,
               soft_items_wait_for_the_song, nothing_twice]

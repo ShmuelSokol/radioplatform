@@ -365,6 +365,28 @@ function FillerPick({ value, onChange }: {
   value: { id: string; title: string } | null;
   onChange: (v: { id: string; title: string } | null) => void;
 }) {
+  return (
+    <LibraryPick value={value} onChange={onChange} testId="live-filler" label="Filler after a Dump"
+      placeholder="Search the library for a jingle" searchLabel="Search the library for a filler" clearLabel="No filler">
+      A jingle or station ID that listeners hear right after a Dump, for as long as was cut, so the delay is full
+      again when it ends and a second Dump works at once. Pick one at least as long as the delay; a shorter one
+      plays once and the rest fills back slowly. With no filler the delay fills back slowly while the host talks.
+      Remember to press Save.
+    </LibraryPick>
+  );
+}
+
+function LibraryPick({ value, onChange, testId, label, placeholder, searchLabel, clearLabel, disabled, children }: {
+  value: { id: string; title: string } | null;
+  onChange: (v: { id: string; title: string } | null) => void;
+  testId: string;
+  label: string;
+  placeholder: string;
+  searchLabel: string;
+  clearLabel: string;
+  disabled?: boolean;
+  children?: React.ReactNode;
+}) {
   const [text, setText] = useState('');
   const [found, setFound] = useState<Asset[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -384,23 +406,23 @@ function FillerPick({ value, onChange }: {
     return s ? ` (${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')})` : '';
   };
   return (
-    <div className="mt-4 max-w-lg text-sm" data-testid="live-filler">
-      <span className="block font-medium text-gray-700">Filler after a Dump</span>
+    <div className="mt-4 max-w-lg text-sm" data-testid={testId}>
+      <span className="block font-medium text-gray-700">{label}</span>
       {value ? (
         <div className="mt-1 flex items-center gap-2">
-          <span className="px-2 py-1 border rounded bg-gray-50" data-testid="live-filler-chosen">{value.title}</span>
-          <button type="button" onClick={() => onChange(null)} data-testid="live-filler-clear"
-            className="px-2 py-1 border rounded text-xs hover:bg-gray-100">No filler</button>
+          <span className="px-2 py-1 border rounded bg-gray-50" data-testid={`${testId}-chosen`}>{value.title}</span>
+          <button type="button" onClick={() => onChange(null)} data-testid={`${testId}-clear`} disabled={disabled}
+            className="shrink-0 whitespace-nowrap px-2 py-1 border rounded text-xs hover:bg-gray-100 disabled:opacity-50">{clearLabel}</button>
         </div>
       ) : (
         <>
-          <input type="search" value={text} onChange={e => setText(e.target.value)}
-            placeholder="Search the library for a jingle" aria-label="Search the library for a filler"
-            className="mt-1 w-full px-2 py-1 border rounded" data-testid="live-filler-search" />
+          <input type="search" value={text} onChange={e => setText(e.target.value)} disabled={disabled}
+            placeholder={placeholder} aria-label={searchLabel}
+            className="mt-1 w-full px-2 py-1 border rounded" data-testid={`${testId}-search`} />
           {failed && <div className="mt-1 text-xs text-red-600">The library could not be searched. Try again.</div>}
           {found && found.length === 0 && <div className="mt-1 text-xs text-gray-500">Nothing found.</div>}
           {found && found.length > 0 && (
-            <ul className="mt-1 border rounded divide-y" data-testid="live-filler-results">
+            <ul className="mt-1 border rounded divide-y" data-testid={`${testId}-results`}>
               {found.map(a => (
                 <li key={a.id}>
                   <button type="button" className="w-full text-left px-2 py-1 hover:bg-gray-100"
@@ -413,12 +435,7 @@ function FillerPick({ value, onChange }: {
           )}
         </>
       )}
-      <span className="block mt-1 text-xs text-gray-500">
-        A jingle or station ID that listeners hear right after a Dump, for as long as was cut, so the delay is full
-        again when it ends and a second Dump works at once. Pick one at least as long as the delay; a shorter one
-        plays once and the rest fills back slowly. With no filler the delay fills back slowly while the host talks.
-        Remember to press Save.
-      </span>
+      {children && <span className="block mt-1 text-xs text-gray-500">{children}</span>}
     </div>
   );
 }
@@ -455,6 +472,14 @@ function AutomationConfig({ config, onSave, saving }: {
     config.live_dump_filler_asset_id
       ? { id: String(config.live_dump_filler_asset_id), title: String(config.live_dump_filler_title || 'Chosen item') }
       : null);
+  const ending = (config.shabbos_ending ?? {}) as Record<string, any>;
+  const [endingOn, setEndingOn] = useState<boolean>(ending.enabled === true);
+  const [endingSong, setEndingSong] = useState<{ id: string; title: string } | null>(
+    ending.song_asset_id ? { id: String(ending.song_asset_id), title: String(ending.song_title || 'Chosen song') } : null);
+  const [endingAfter, setEndingAfter] = useState<{ id: string; title: string } | null>(
+    ending.after_asset_id ? { id: String(ending.after_asset_id), title: String(ending.after_title || 'Chosen item') } : null);
+  const [endingShabbos, setEndingShabbos] = useState<boolean>(ending.shabbos !== false);
+  const [endingYomTov, setEndingYomTov] = useState<boolean>(ending.yom_tov === true);
 
   const handleSave = () => {
     const minutes = (v: string, d: number) => Math.min(240, Math.max(3, Number.isFinite(parseFloat(v)) ? parseFloat(v) : d));
@@ -477,6 +502,16 @@ function AutomationConfig({ config, onSave, saving }: {
         category: idsCategory.trim() || 'station_id',
         start_hour: idsFrom,
         end_hour: idsTo,
+      },
+      shabbos_ending: {
+        ...ending,
+        enabled: endingOn && !!endingSong,
+        song_asset_id: endingSong?.id ?? null,
+        song_title: endingSong?.title ?? null,
+        after_asset_id: endingAfter?.id ?? null,
+        after_title: endingAfter?.title ?? null,
+        shabbos: endingShabbos,
+        yom_tov: endingYomTov,
       },
       hourly_station_id: hourlyId,
       hourly_time_announcement: hourlyTime,
@@ -567,6 +602,43 @@ function AutomationConfig({ config, onSave, saving }: {
             {HOURS.slice(1).map(h => <option key={h} value={h}>{hourLabel(h)}</option>)}
           </select>
           <span className="text-xs text-gray-500">(12 AM until 12 AM = all day; the station's own time)</span>
+        </div>
+      </div>
+      <div className="mt-4 max-w-lg text-sm" data-testid="shabbos-ending">
+        <label className="flex items-start gap-2">
+          <input type="checkbox" checked={endingOn} onChange={e => setEndingOn(e.target.checked)}
+            className="mt-1" data-testid="shabbos-ending-on" />
+          <span>
+            <span className="block font-medium text-gray-700">Last song before Shabbos</span>
+            <span className="block mt-1 text-xs text-gray-500">
+              This song is started at just the right moment so it ends exactly at candle lighting (the start of the
+              station&apos;s Shabbos silence). The item after it (the shofar) plays right at candle lighting, then the
+              silence. Time checks, sponsorships and station IDs are kept out of its way. Needs a song.
+            </span>
+          </span>
+        </label>
+        <div className="ml-6">
+          <LibraryPick value={endingSong} onChange={setEndingSong} testId="shabbos-ending-song" disabled={!endingOn}
+            label="Song that ends at candle lighting" placeholder="Search the library for the song"
+            searchLabel="Search the library for the last song before Shabbos" clearLabel="Change" />
+          <LibraryPick value={endingAfter} onChange={setEndingAfter} testId="shabbos-ending-after" disabled={!endingOn}
+            label="Then, at candle lighting" placeholder="Search the library (the shofar)"
+            searchLabel="Search the library for the item at candle lighting" clearLabel="Nothing (silence right away)">
+            Give it the category shabbos_ending in the Library so it never plays at any other time.
+          </LibraryPick>
+          <div className="mt-3 flex flex-wrap gap-4">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={endingShabbos} disabled={!endingOn}
+                onChange={e => setEndingShabbos(e.target.checked)} data-testid="shabbos-ending-shabbos" />
+              Erev Shabbos
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={endingYomTov} disabled={!endingOn}
+                onChange={e => setEndingYomTov(e.target.checked)} data-testid="shabbos-ending-yomtov" />
+              Erev Yom Tov
+            </label>
+          </div>
+          <span className="block mt-1 text-xs text-gray-500">Remember to press Save.</span>
         </div>
       </div>
       <h4 className="text-sm font-bold text-gray-700 uppercase mt-6 mb-2">Live shows</h4>
