@@ -8,7 +8,7 @@ import logging
 import time
 import uuid
 
-from fastapi import APIRouter, Body, Depends, Header, Query, Response
+from fastapi import APIRouter, Body, Depends, Header, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -85,6 +85,48 @@ async def plan(
     local FM box keeps so it can carry on with no internet (`wiki/local-fm-box.md`).
     `days`: also the days after the queue (`extension`), for a box offline for a week."""
     return await playout_plan.build_plan(db, station_id, hours, days=days)
+
+
+@router.post("/{station_id}/box-upload")
+async def box_upload(
+    request: Request,
+    station_id: uuid.UUID = Depends(_require_token),
+    x_upload_id: str = Header(...),
+    x_title: str | None = Header(default=None),
+    x_kind: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    """A recording loaded at the local FM box (from a USB stick) while it was offline,
+    now put into the library. The title comes percent-encoded (headers are Latin-1)."""
+    from urllib.parse import unquote
+
+    from app.services import box_sync
+
+    audio = await request.body()
+    if not audio:
+        return {"ok": False, "error": "empty"}
+    if len(audio) > box_sync.MAX_BOX_UPLOAD_BYTES:
+        return {"ok": False, "error": "too big"}
+    try:
+        asset = await box_sync.store_box_upload(db, x_upload_id, audio, unquote(x_title or ""), x_kind)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    await db.commit()
+    return {"ok": True, "asset_id": str(asset.id), "duration": asset.duration}
+
+
+@router.post("/{station_id}/box-changes")
+async def box_changes(
+    station_id: uuid.UUID = Depends(_require_token),
+    body: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """What was added or taken off at the box's own control room while it was offline."""
+    from app.services import box_sync
+
+    result = await box_sync.apply_box_changes(db, station_id, body)
+    await db.commit()
+    return result
 
 
 @router.get("/{station_id}/library")

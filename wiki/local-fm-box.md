@@ -353,6 +353,45 @@ Simulator: `uv run python -m tests.sim.offline --start 2026-11-19T17:30 --cut 20
 --back 2026-11-26T18:00 --end 2026-11-26T20:00 --windows --weather-days 5` (7 days, a
 Shabbos; `--offline-days 0` for the old behaviour).
 
+## Control room on the box (2026-11-19)
+
+Shmuel, 2026-11-19: "it needs to have some sort of visual interface for someone to
+physically go there and operate the station without any internet." The relay serves
+`infra/local/kbr_panel.py` on `KBR_PANEL_PORT` (8080): `http://localhost:8080` on a
+screen and keyboard plugged into the box, or `http://<box>:8080` from a laptop on its
+network port. It listens on the network only with `KBR_PANEL_PASSWORD` (setup-box.sh
+makes one and prints it; without one it is 127.0.0.1 only). POSTs need the header
+`X-Panel: 1` (a page from another site cannot send it); the sign-in cookie is
+HttpOnly, SameSite=Strict.
+
+It looks like the site's control room (black list, yellow titles, red remaining,
+green clock, grey buttons) and shows: the line UP/DOWN, on air with time left, what
+comes next as the box will choose it (`Panel.coming`, read-only), the library copy on
+the disk (titles from the library pages, `library.json`) and recordings loaded from a
+USB stick. Offline it can: Next (engine `/skip`), Play now (engine timed lane, 3 s
+ahead), Play next / after the list (`relay.front`, served before the queue's own
+untimed items; the engine's pre-loaded item is flushed and put back), schedule at a
+time on the second or after the song (`relay.local_timed`, handed over like any timed
+item), take an item off, move it. **While the line is up the site is in charge**: the
+page shows the station and offers Next only (changes answer 409), so the two never
+disagree.
+
+When the line returns (`Relay.catch_up`, in this order): kept alert reports; USB
+recordings to `POST /playout/{id}/box-upload` (token; raw body, `X-Upload-Id`,
+`X-Title` percent-encoded, `X-Kind`; the same upload id twice makes one asset,
+`box_sync.store_box_upload`); kept start reports, with `upload:<id>` replaced by the new
+asset id so their plays are logged; then `POST /playout/{id}/box-changes`
+(`box_sync.apply_box_changes`): items added at the box that are still to come go into
+the site's queue (`source="manual"`, timed ones with their time and mode); items of the
+site's queue taken off at the box are **not** removed on the site (staff may have
+changed them meanwhile, the site's future wins) but listed with the additions in one
+alert ("Changes made at the FM box while it was offline", warning when something was
+taken off).
+
+Tests: `backend/tests/test_box_panel.py` (play now/next/at, take off, move, online
+refusal, password, USB to library to log, the site's side). Screenshots of the page:
+`/mnt/project-files/fm-box-offline/`.
+
 ## Known gaps (next stages; nothing is installed at BMG yet)
 
 

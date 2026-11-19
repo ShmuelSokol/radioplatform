@@ -122,6 +122,7 @@ async def build_plan(db: AsyncSession, station_id, hours: float = 48.0, days: fl
         "generated_at": now.timestamp(),
         "hours": hours,
         "timezone": (station.timezone if station else None) or "America/New_York",
+        "station_name": (station.name if station else None) or "",
         # What a hard item does to a shiur on air: pause (default), wait or cut
         "long_items": long_items.policy(station),
         "entries": entries,
@@ -404,17 +405,22 @@ async def library_page(db: AsyncSession, after: str | None = None, limit: int = 
     """One page of the whole library's audio addresses, by id, for the box's full copy.
     `next` is the `after` of the following page, or None on the last one."""
     limit = max(1, min(int(limit), 2000))
-    stmt = select(Asset.id, Asset.file_path, Asset.asset_type).order_by(Asset.id).limit(limit)
+    stmt = (
+        select(Asset.id, Asset.file_path, Asset.asset_type, Asset.title, Asset.artist, Asset.duration)
+        .order_by(Asset.id).limit(limit)
+    )
     if after:
         import uuid
 
         stmt = stmt.where(Asset.id > uuid.UUID(after))
     rows = (await db.execute(stmt)).all()
     items = []
-    for asset_id, file_path, asset_type in rows:
+    for asset_id, file_path, asset_type, title, artist, duration in rows:
         url = playout_engine.audio_url(_PathOnly(file_path))
         if url:
-            items.append({"asset_id": str(asset_id), "url": url, "kind": (asset_type or "").lower()})
+            # title, artist and length: the box's own control room searches them offline
+            items.append({"asset_id": str(asset_id), "url": url, "kind": (asset_type or "").lower(),
+                          "title": title or "", "artist": artist or "", "duration": duration})
     return {"items": items, "next": str(rows[-1][0]) if len(rows) == limit else None}
 
 

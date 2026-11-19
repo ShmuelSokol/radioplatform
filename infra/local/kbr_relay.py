@@ -153,6 +153,20 @@ class Relay:
         # it drew, a shiur's resume), by entry id, for their start reports
         self.local_items: dict[str, dict] = dict(state.get("local_items", {}))
         self.last_id_at: float | None = state.get("last_id_at")
+        # The box's own control room (kbr_panel.py), used while the line is down:
+        # items an operator put first in the music lane, in order
+        self.front: list[str] = list(state.get("front", []))
+        # recordings an operator scheduled at a time
+        self.local_timed: list[str] = list(state.get("local_timed", []))
+        # what was added there (still to come when the line returns: carried to the
+        # site) and items of the site's queue taken off there (listed for staff)
+        self.added_local: list[str] = list(state.get("added_local", []))
+        self.removed_site: list[dict] = list(state.get("removed_site", []))
+        # recordings loaded from a USB stick: upload id -> {path, title, kind, duration,
+        # asset_id once the site has it}
+        self.uploads: dict[str, dict] = self._read_json("uploads.json", {})
+        # the library's titles for the control room's search (from the library copy)
+        self.library: dict[str, dict] = self._read_json("library.json", {})
         self.online = True
         # The engine's own run id (X-Playout-Instance), passed on to the backend with every
         # call, so its one-engine-per-station rule also covers a box (a box set up with a
@@ -194,13 +208,17 @@ class Relay:
             self.served = dict(list(self.served.items())[-DONE_KEEP:])
         if len(self.aired) > AIRED_KEEP:
             self.aired = dict(sorted(self.aired.items(), key=lambda kv: kv[1])[-AIRED_KEEP:])
-        if len(self.local_items) > 200:
-            self.local_items = dict(list(self.local_items.items())[-200:])
+        if len(self.local_items) > 1000:
+            keep = set(self.front) | set(self.local_timed) | set(self.added_local)
+            items = list(self.local_items.items())
+            self.local_items = dict([kv for kv in items[:-1000] if kv[0] in keep] + items[-1000:])
         self._write_json("state.json", {
             "done": self.done[-DONE_KEEP:], "timed_sent": sorted(self.timed_sent)[-500:],
             "served": self.served, "aired": self.aired, "on_air": self.on_air,
             "cued_main": self.cued_main, "resume": self.resume, "paused_for": self.paused_for[-50:],
             "local_items": self.local_items, "last_id_at": self.last_id_at,
+            "front": self.front, "local_timed": self.local_timed, "added_local": self.added_local,
+            "removed_site": self.removed_site[-500:],
         })
 
     def local_path(self, url: str) -> Path:
@@ -390,6 +408,11 @@ class Relay:
             if round(e["at"] / 60) in minutes:
                 continue
             extra.append({**e, "position": e.get("position") or (10_000_000 + i)})
+        # recordings scheduled at the box's own control room
+        for i, eid in enumerate(self.local_timed):
+            item = self.local_items.get(eid)
+            if item and item.get("at") is not None:
+                extra.append({**item, "position": item.get("position") or (5_000_000 + i)})
         return mine + extra
 
     def find_item(self, entry_id: str | None) -> dict | None:
@@ -550,6 +573,16 @@ class Relay:
                 if self.have(e["url"]) and e.get("kind") != "silence":
                     chosen = e
                     break
+            if chosen is None:
+                # put first at the box's control room
+                while self.front and chosen is None:
+                    eid = self.front[0]
+                    item = self.find_item(eid)
+                    if eid in done or item is None or not (item.get("local") == "upload" or self.have(item["url"])):
+                        self.front.pop(0)
+                        continue
+                    chosen = item
+                    self.front.pop(0)
             if chosen is None:
                 held_id = None
                 for e in waiting:
@@ -785,8 +818,13 @@ class Relay:
             except Offline:
                 return
         self.send_kept_alerts()
-        if not self.spool_path.is_file():
-            return
+        self.send_uploads()
+        self._name_uploads_in_spool()
+        if self.spool_path.is_file():
+            self._send_spool()
+        self.send_box_changes()
+
+    def _send_spool(self) -> None:
         with self.lock:
             lines = [ln for ln in self.spool_path.read_text().splitlines() if ln.strip()]
         sent = 0
@@ -844,6 +882,101 @@ class Relay:
             part.write_text("".join(ln + "\n" for ln in rest))
             os.replace(part, self.spool_path)
 
+    # ── the box's own control room: what it did goes up when the line is back ─────
+    def send_uploads(self) -> int:
+        """Recordings loaded from a USB stick go into the site's library first, so
+        their plays can be logged against them."""
+        sent = 0
+        for uid, up in list(self.uploads.items()):
+            if up.get("asset_id"):
+                continue
+            try:
+                data = Path(up["path"]).read_bytes()
+            except OSError:
+                continue
+            headers = {"X-Playout-Token": self.token, "Content-Type": "application/octet-stream",
+                       "X-Upload-Id": uid, "X-Title": urllib.parse.quote(up.get("title") or ""),
+                       "X-Kind": up.get("kind") or "music"}
+            req = urllib.request.Request(f"{self.upstream}/playout/{self.station_id}/box-upload",
+                                         data=data, method="POST", headers=headers)
+            try:
+                with urllib.request.urlopen(req, timeout=300) as resp:
+                    answer = json.loads(resp.read() or b"{}")
+            except (OSError, ValueError) as e:
+                log.warning("upload %s not sent yet: %s", uid, e)
+                return sent
+            if answer.get("asset_id"):
+                with self.lock:
+                    up["asset_id"] = answer["asset_id"]
+                    self._write_json("uploads.json", self.uploads)
+                sent += 1
+        return sent
+
+    def _upload_asset(self, asset_id: str | None) -> str | None:
+        if asset_id and asset_id.startswith("upload:"):
+            return (self.uploads.get(asset_id[7:]) or {}).get("asset_id")
+        return asset_id
+
+    def _name_uploads_in_spool(self) -> None:
+        """Kept reports of a USB recording name it by the library item the site just made."""
+        if not self.spool_path.is_file():
+            return
+        with self.lock:
+            lines = [ln for ln in self.spool_path.read_text().splitlines() if ln.strip()]
+            changed = False
+            out = []
+            for line in lines:
+                try:
+                    report = json.loads(line)
+                except ValueError:
+                    out.append(line)
+                    continue
+                aid = report.get("asset_id")
+                if aid and str(aid).startswith("upload:"):
+                    real = self._upload_asset(aid)
+                    if real:
+                        report["asset_id"] = real
+                    else:
+                        report.pop("asset_id")
+                    changed = True
+                out.append(json.dumps(report))
+            if changed:
+                part = self.dir / "spool.jsonl.part"
+                part.write_text("".join(ln + "\n" for ln in out))
+                os.replace(part, self.spool_path)
+
+    def send_box_changes(self) -> bool:
+        """What was added at the box and is still to come goes into the site's queue; what
+        was taken off is listed for staff (the site's own changes stand)."""
+        with self.lock:
+            done = set(self.done)
+            added = []
+            for eid in self.added_local:
+                item = self.local_items.get(eid)
+                if not item or eid in done:
+                    continue
+                aid = self._upload_asset(item.get("asset_id"))
+                added.append({"asset_id": aid, "title": item.get("title"), "at": item.get("at"),
+                              "mode": item.get("mode")})
+            removed = list(self.removed_site)
+        if not added and not removed:
+            return True
+        try:
+            status, _ = self._call("POST", "/box-changes", json.dumps({"added": added, "removed": removed}).encode(),
+                                   timeout=20.0)
+        except Offline:
+            return False
+        if status != 200:
+            return False
+        with self.lock:
+            self.added_local, self.removed_site = [], []
+            # the site has them now: the box stops holding them itself
+            self.front = []
+            self.local_timed = [e for e in self.local_timed if e in done]
+            self._save_state()
+        log.info("box changes sent: %d added, %d taken off", len(added), len(removed))
+        return True
+
     def download(self, url: str) -> bool:
         if self.have(url):
             return True
@@ -893,6 +1026,10 @@ class Relay:
             if status != 200:
                 break
             page = json.loads(data)
+            with self.lock:
+                for item in page.get("items", []):
+                    self.library[item["asset_id"]] = {
+                        k: item.get(k) for k in ("url", "kind", "title", "artist", "duration")}
             for item in page.get("items", []):
                 if self.stop.is_set():
                     break
@@ -903,6 +1040,8 @@ class Relay:
             after = page.get("next")
             if not after:
                 break
+        with self.lock:
+            self._write_json("library.json", self.library)
         return have, missing
 
     def run_commands(self, wait: float = 25.0) -> None:
@@ -1249,6 +1388,17 @@ def main() -> None:
     relay.silence_file()
     serve(relay, int(env.get("KBR_RELAY_PORT", "8090")))
     relay.run_background()
+    panel_port = int(env.get("KBR_PANEL_PORT", "8080") or 0)
+    if panel_port:
+        # The box's own control room (a screen on the box, or a laptop on its network
+        # port). Reachable from the network only with a password.
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import kbr_panel
+
+        password = env.get("KBR_PANEL_PASSWORD", "")
+        kbr_panel.serve(kbr_panel.Panel(relay, password), panel_port, "0.0.0.0" if password else "127.0.0.1")
     log.info("relay for station %s listening on 127.0.0.1:%s", relay.station_id, env.get("KBR_RELAY_PORT", "8090"))
     try:
         while True:

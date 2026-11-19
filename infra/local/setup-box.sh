@@ -115,6 +115,9 @@ ADMIN_PW="$(old KBR_ICECAST_ADMIN_PASSWORD "$ENV_FILE")"; ADMIN_PW="${ADMIN_PW:-
 MIRROR="$(old KBR_RELAY_MIRROR_LIBRARY "$RELAY_ENV")"; MIRROR="${MIRROR:-1}"
 TIMED="$(old KBR_RELAY_TIMED "$RELAY_ENV")"; TIMED="${TIMED:-offline}"
 OFFLINE_DAYS="$(old KBR_OFFLINE_DAYS "$RELAY_ENV")"; OFFLINE_DAYS="${OFFLINE_DAYS:-8}"
+# The box's own control room: port and the password for a laptop on the network port
+PANEL_PORT="$(old KBR_PANEL_PORT "$RELAY_ENV")"; PANEL_PORT="${PANEL_PORT:-8080}"
+PANEL_PW="$(old KBR_PANEL_PASSWORD "$RELAY_ENV")"; PANEL_PW="${PANEL_PW:-$(openssl rand -base64 9 | tr -dc 'A-Za-z0-9' | head -c 10)}"
 
 # The station's name for the stream's title (the box still sets up if the site is away)
 NAME_TZ="$(BACKEND_URL="$BACKEND_URL" SID="$STATION" python3 -c '
@@ -141,8 +144,9 @@ fetch streaming/radio.liq "$ETC/radio.liq.new"
 fetch streaming/kbr-engine@.service /etc/systemd/system/kbr-engine@.service
 fetch streaming/icecast.xml /tmp/kbr-icecast.xml
 fetch local/kbr_relay.py "$OPT/kbr_relay.py.new"
+fetch local/kbr_panel.py "$OPT/kbr_panel.py.new"
 fetch local/kbr-relay.service /etc/systemd/system/kbr-relay.service
-chmod 644 "$ETC/radio.liq.new" "$OPT/kbr_relay.py.new"
+chmod 644 "$ETC/radio.liq.new" "$OPT/kbr_relay.py.new" "$OPT/kbr_panel.py.new"
 
 umask 077
 # The engine asks the relay on this box, never the website directly
@@ -176,6 +180,8 @@ KBR_RELAY_DIR=${RELAY_DIR}
 KBR_RELAY_TIMED=${TIMED}
 KBR_RELAY_MIRROR_LIBRARY=${MIRROR}
 KBR_OFFLINE_DAYS=${OFFLINE_DAYS}
+KBR_PANEL_PORT=${PANEL_PORT}
+KBR_PANEL_PASSWORD=${PANEL_PW}
 RENV
 for f in "$ENV_FILE" "$STATION_ENV" "$RELAY_ENV"; do chown root:liquidsoap "$f"; chmod 640 "$f"; done
 umask 022
@@ -243,7 +249,7 @@ if ! cmp -s "$ETC/radio.liq.new" "$ETC/radio.liq"; then
   if ! ( set -a; . "$ENV_FILE"; . "$STATION_ENV"; set +a
          export KBR_DEBUG_WAV= KBR_ALSA_DEVICE=
          nice -n 19 runuser -u liquidsoap -- liquidsoap --check "$ETC/radio.liq.new" ); then
-    rm -f "$ETC/radio.liq.new" "$OPT/kbr_relay.py.new"
+    rm -f "$ETC/radio.liq.new" "$OPT/kbr_relay.py.new" "$OPT/kbr_panel.py.new"
     echo "The new engine script does not pass its check. Nothing was restarted."
     exit 1
   fi
@@ -266,7 +272,8 @@ fi
 
 # The relay: a restart takes a second and is not heard (the engine holds its next item)
 mv "$OPT/kbr_relay.py.new" "$OPT/kbr_relay.py"
-RELAY_SUM="$(sum_of "$OPT/kbr_relay.py" /etc/systemd/system/kbr-relay.service "$RELAY_ENV")"
+mv "$OPT/kbr_panel.py.new" "$OPT/kbr_panel.py"
+RELAY_SUM="$(sum_of "$OPT/kbr_relay.py" "$OPT/kbr_panel.py" /etc/systemd/system/kbr-relay.service "$RELAY_ENV")"
 if [ "$RELAY_SUM" != "$(cat "$APPLIED/relay" 2>/dev/null)" ] || ! systemctl is-active --quiet kbr-relay; then
   systemctl restart kbr-relay
   echo "$RELAY_SUM" > "$APPLIED/relay"
@@ -361,6 +368,9 @@ fi
 [ "$AUTO" = 1 ] && echo "Updates: looked for every hour at :35, taken in a quiet time (release: ${REF})" \
   || echo "Updates: the hourly look is switched off"
 echo "Disk for the library: $(df -h --output=avail "$RELAY_DIR" | tail -1 | tr -d ' ') free"
+echo "Control room: http://localhost:${PANEL_PORT}/ on this box's screen, or"
+echo "              http://$(hostname -I 2>/dev/null | awk '{print $1}'):${PANEL_PORT}/ from a laptop on its network"
+echo "              password: ${PANEL_PW}   (write it on the sheet kept with the box)"
 echo
 echo "Backend settings (Railway), both lists must hold this station:"
 echo "  PLAYOUT_ENGINE_STATION_ID=...,${STATION}"
