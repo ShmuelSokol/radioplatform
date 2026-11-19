@@ -824,8 +824,17 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
     if started:
         await broadcast_show_event(show_id, "show_started", {"show_id": show_id})
 
+    # One host microphone per station: a second page or device takes the show over.
+    # The first one's frames went on to listeners beside it and it was never told
+    # (review tests, 2026-11-19). 4011 = "your microphone was opened somewhere else".
+    replaced = live_relay.hosts.get(station_id)
     audio_manager.active_connections[show_id] = websocket
     live_relay.hosts[station_id] = websocket  # hears the callers on air
+    if replaced is not None and replaced is not websocket:
+        try:
+            await replaced.close(code=4011)
+        except Exception:
+            pass
     logger.info("Audio WS authed for show %s user %s (station %s, delay %.0f s)", show_id, user.id, station_id, delay)
     if not taken_over:
         from app.services.live_show_service import take_over_when_heard
@@ -846,6 +855,8 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
     try:
         while True:
             data = await websocket.receive_bytes()
+            if live_relay.hosts.get(station_id) is not websocket:
+                continue   # another page took the microphone over: this one is not heard
             if live_relay.on_air.get(station_id) != show_id:
                 # The show was ended while the host's page stayed open: the host was
                 # heard for a minute over the returning music (Jerusalem 2026-11-17)
@@ -863,7 +874,11 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
     except Exception as e:
         logger.error("Audio WS error for show %s: %s", show_id, e)
     finally:
-        audio_manager.disconnect(show_id)
+        took_over = live_relay.hosts.get(station_id)
+        if took_over is not None and took_over is not websocket:
+            return   # replaced by a newer page: the show goes on with that one
+        if audio_manager.active_connections.get(show_id) is websocket:
+            audio_manager.disconnect(show_id)
         if live_relay.hosts.get(station_id) is websocket:
             live_relay.hosts.pop(station_id, None)
         if live_relay.on_air.get(station_id) == show_id:

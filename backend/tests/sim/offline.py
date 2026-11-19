@@ -219,7 +219,7 @@ async def _after(sim, sid, result, cut, back, made, notes) -> list[str]:
 
     c, b = cut.timestamp(), back.timestamp()
     off = [r for r in result.rows if c <= r.start < b]
-    with_entry = [r for r in off if r.entry_id]
+    with_entry = [r for r in off if r.entry_id and r.seconds >= 3]  # under 3 s is not a play (the site does not log it)
     async with sim.Session() as db:
         logs = (await db.execute(select(PlayLog).where(PlayLog.station_id == sid))).scalars().all()
         entries = {str(e.id): e for e in (await db.execute(select(QueueEntry).where(QueueEntry.station_id == sid))).scalars().all()}

@@ -418,6 +418,7 @@ UPDATE 2026-11-18 spot-schedules.md spread sponsorships skip soft breaks inside 
 UPDATE 2026-11-18 spot-schedules.md a break next to the same sponsor's play counts one fuller (no back-to-back sponsor; levelling may be off by one)
 INGEST 2026-11-18 live-shows.md End Show right after GO LIVE: take-over landed after End, stale-show check waited for ever on an open delay; it now stops it
 INGEST 2026-11-19 live-shows.md one station, one show: start answers 409 and the audio socket closes 4010 while another show is live there
+INGEST 2026-11-19 live-shows.md second host socket takes the show over (4011); Next twice within 1 s is one Next; rating widget hidden in a live show
 INGEST 2026-11-18 deploys.md deploy gate: CI's last job on main waits while a live show is on air and around :00/:30; needs Railway Wait for CI; [deploy-now] skips it
 UPDATE 2026-11-19 spot-schedules.md a block rebuild reads talk windows before deleting the queued shiur (TALKS_BEFORE_REBUILD), so it no longer queues sponsorships inside it
 UPDATE 2026-11-19 spot-schedules.md sponsorships avoid hard breaks inside a shiur too (talk_tier: outside, then hard inside, then soft inside)
@@ -427,6 +428,7 @@ INGEST 2026-11-19 audio-engine.md checklist player rows: e2e/player-rows.mjs (ha
 INGEST 2026-11-19 engine-harness.md harness engine_rows (checklist rows V1-3/12/12h/14/16, F-ENGINE2-10/11): proxy counts /next asks (stack.next_asks) and can answer 204 (next_empty); found a 204 while a song plays is asked ~25/s (retry_delay only holds for errors and on emergency music); emergency folder needs chmod 777 in the harness (engine runs as nobody); frontend/e2e/live-stream-unit.mjs runs liveStream.ts in Node with a fake audio element
 UPDATE 2026-11-19 spot-schedules.md never a sponsorship inside a shiur or one sponsor within 20 min (rules, not preferences); paused shiur (resume@ entry) is a talk window; _SponsorGuard last check before queueing block sponsorships
 UPDATE 2026-11-19 station-simulator.md scenarios with events and restarts; play-log row is written when the next item starts
+INGEST 2026-11-19 spot-schedules.md automation_config.sponsorships_wait_for_talks: sponsorship-only groups wait for a story's end (All Day Stories)
 UPDATE 2026-11-19 spot-schedules.md block_talk_windows: a block's own shiur counts before it is queued (Daf block queued in the same pass as the breaks); loose copies of contract audio (same title) never drawn at random (old "Sponsor Ad Every 30min" rules)
 INGEST 2026-11-19 spot-schedules.md contract totals (plays a day, days and plays over the dates, spot length) in Edit contract, client contract rows and Spot Schedule: components/sponsors/contractTotals.ts
 INGEST 2026-11-19 back-navigation.md Back line on staff pages (BackNav.tsx), per-tab history notes keyed by history.state.idx (lib/navMemory.ts), useNavState for page state, tapped row lit on return, deleted pages skipped via api/client.ts DELETE hook
