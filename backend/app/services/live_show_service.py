@@ -296,6 +296,22 @@ async def _resume_automation(db: AsyncSession, station_id, now: datetime) -> Non
         logger.error("Station %s: could not restart the queue after the show: %s", station_id, e)
 
 
+async def other_live_show(db: AsyncSession, show: LiveShow, now: datetime | None = None) -> LiveShow | None:
+    """Another show that is live on this show's station now, or None. One station has
+    one show: a second one started beside it took the station and its listeners from
+    the first (review tests, 2026-11-19). A show left "live" past its planned end
+    does not count: it must not lock the station."""
+    now = now or datetime.now(timezone.utc)
+    rows = (await db.execute(select(LiveShow).where(
+        LiveShow.station_id == show.station_id, LiveShow.status == LiveShowStatus.LIVE,
+        LiveShow.id != show.id))).scalars().all()
+    for other in rows:
+        end = _aware(other.scheduled_end)
+        if end is None or end > now:
+            return other
+    return None
+
+
 async def start_show(
     db: AsyncSession,
     show_id: UUID | str,
@@ -514,6 +530,8 @@ async def start_if_scheduled(
     show = await get_show(db, show_id)
     if show is None or show.status != LiveShowStatus.SCHEDULED:
         return False
+    if await other_live_show(db, show) is not None:
+        return False   # the station has a show on air: the caller refuses this host
     await start_show(db, show.id, host_user_id=host_user_id)
     return True
 

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import station_guard as sg
 from app.core.dependencies import get_db, require_admin, require_dj_or_manager, require_staff
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.models.live_show import LiveShow, LiveShowStatus
 from app.models.call_in_request import CallInRequest, CallStatus
 from app.models.user import User
@@ -118,7 +118,12 @@ async def start_show(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_dj_or_manager),
 ):
-    """Start a live show (go live)."""
+    """Start a live show (go live). 409 while another show is live on the station."""
+    asked = await live_show_service.get_show(db, show_id)
+    if asked is not None and asked.status != LiveShowStatus.LIVE:
+        other = await live_show_service.other_live_show(db, asked)
+        if other is not None:
+            raise ConflictError(f'"{other.title}" is live on this station. End it before starting another show.')
     show = await live_show_service.start_show(db, show_id, host_user_id=user.id)
     if not show:
         raise NotFoundError("Live show not found")
