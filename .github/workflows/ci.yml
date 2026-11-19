@@ -14,9 +14,12 @@ on:
       - "docs/**"
       - "**/*.md"
 
-# A newer push to the same PR cancels the older, now-useless run.
+# A newer push to the same PR cancels the older, now-useless run. Each push to main
+# has its own group: in one shared group a run waiting behind the deploy gate was
+# cancelled by the next merge, and when that next merge changed no backend file
+# Railway deployed nothing, leaving the backend on the old commit.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -102,3 +105,18 @@ jobs:
       - name: Lint
         working-directory: frontend
         run: npm run lint
+
+  # Railway waits for CI ("Wait for CI"), so the backend restarts only when this last
+  # job is done: not during a live show, not at a time check (wiki/deploys.md).
+  # [deploy-now] in the merge commit's message skips the wait.
+  deploy-gate:
+    if: github.event_name == 'push'
+    needs: [backend-lint, backend-test, frontend-lint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 250
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait while a live show is on air
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: python3 infra/deploy/deploy_gate.py
