@@ -77,7 +77,7 @@ class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 # Clips made for one moment (a dated weather report, an hour's time check). They air
 # only through the timed weather/time paths, never as random filler of their type.
-ONE_MOMENT_CATEGORIES = ("weather_spot", "time_announcement")
+ONE_MOMENT_CATEGORIES = ("weather_spot", "time_announcement", "omer_count")
 
 
 # Items that must never be drawn at random: marked do-not-play, or made for tests

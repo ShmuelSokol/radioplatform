@@ -184,6 +184,7 @@ radioplatform/
 | activity | activity.py | /activity (admin): who did what with filters and `after` for live updates, /activity/people (one line per person: counts for the period), /activity/filters, /activity/listeners (listening sessions); POST /activity/page-view (any signed-in user) |
 | air_watch | air_watch.py | /air-watch (staff): recent on-air self-check findings |
 | bug_reports | bug_reports.py | /bug-reports (POST open to all, rate-limited; GET staff; PATCH/resend admin) |
+| omer_count | omer_count.py | /omer-count: the 49 Omer clips and which are recorded (staff), `/station/{id}?on=`: what a station says each hour of a day, `PUT /{day}`: upload a recording (manager; see `wiki/omer-count.md`) |
 | weather_spots | weather_spots.py | /weather-spots/{date} and /time-announcements/{hour}: upload ready-made recordings (Shprach voice) for the daily weather spot and the reusable hourly time clips, both per region (`?region=jerusalem`); `?minute=30` for the half-hour clip ("The time is 10:30", played when the station has `half_hour_time_check`); ElevenLabs is only the fallback |
 
 ### Services (`backend/app/services/`)
@@ -245,6 +246,7 @@ radioplatform/
 | sponsor_accounts.py | Sponsors as clients: status from contract dates, spots by stage of the flow, plays per contract, the as-run log (see `wiki/sponsor-accounts.md`) |
 | sponsor_delivery.py | What a sponsor was promised against what aired: missed plays of the last 14 days and coming plays with no room or moved, for `GET /sponsor-portal/missed-plays` (see `wiki/spot-schedules.md`) |
 | shabbos_ending.py | Last song before Shabbos: the station's chosen song back-timed to end exactly at candle lighting (the blackout's start), the item after it (the shofar) first in the silence group, timed items cleared out of its way; `automation_config.shabbos_ending` (see `wiki/shabbos-ending.md`) |
+| omer_count.py | Sefiras HaOmer on the hour: the count each station says (the next day from shekia at its place, days only as the siddur), the 49 clips (category `omer_count`), wording; queued after each hh:00 time check by `QueueReplenishService._schedule_omer_counts`; `automation_config.omer_count` (see `wiki/omer-count.md`) |
 | holiday_music.py | Holiday lists mixed in before and during each holiday: Hebrew calendar per station (Israel or diaspora), rising 1-in-N share, `HolidayMix.pick` used by both fills, rest and carried count, queue tags (see `wiki/holiday-music.md`) |
 | station_blocks.py | "Not on this station": the per-station list of items a station does not play, the subquery every pick uses (`blocked_asset_ids`) and block/undo with removal of that station's waiting copies |
 | emergency_alerts.py | The emergency override: sends an alert to each station (engine `/alert`, or WS `emergency_alert` to browser players), takes the engine's start/end reports into the log, drops hard items due during it, alert + ntfy on each (see `wiki/emergency-alerts.md`) |
@@ -257,7 +259,7 @@ radioplatform/
 ### Pages
 **Admin** (`frontend/src/pages/admin/`):
 - Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, not on this station, do not play on any station, details), queue and library columns the operator drags or double-clicks to fit, a "Playing from" column with a Why panel (playlist, block and step a song was drawn for, or what else queued it), Sponsors tab (today's sponsorships on the station; rows carry a SPONSOR tag) and a Sponsor panel instead for a sponsorship spot (sponsor, contracts, today's and coming plays with Skip, missed plays, Pause contract, links). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
-- Stations.tsx — Station management
+- Stations.tsx — Station management (incl. "Omer count on the hour")
 - Assets.tsx — Audio asset management
 - AssetUpload.tsx — File upload
 - Schedules.tsx — Schedule management (create/edit/delete)
@@ -546,6 +548,9 @@ cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMI
 
 # Stations page: "Last song before Shabbos" (song and item at candle lighting from a library search, saves and keeps other settings), desktop and iPhone
 cd frontend && BASE_URL=http://localhost:4313 node e2e/shabbos-ending-setting.mjs
+
+# Stations page: "Omer count on the hour" (setting, recordings uploaded, what each hour says), fake backend, desktop and iPhone
+cd frontend && BASE_URL=http://localhost:4313 node e2e/omer-count-setting.mjs
 
 # Holiday Music page and the queue's holiday tag against a real backend (seed in wiki/holiday-music.md), desktop and iPhone
 cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMIN_PASSWORD=... node e2e/holiday-music.mjs

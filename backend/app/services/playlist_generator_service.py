@@ -114,7 +114,7 @@ def id_settings_for(automation_config: dict | None) -> IdSettings:
 # A station ID never follows one of these (two short or spoken breaks back to back)
 NOT_BEFORE_AN_ID = {
     "jingle", "spot", "sweeper", "station_id", "time", "weather", "silence",
-    "time_announcement", "weather_spot", "zmanim", "announcement", "psa",
+    "time_announcement", "weather_spot", "omer_count", "zmanim", "announcement", "psa",
 }
 
 

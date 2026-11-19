@@ -135,6 +135,17 @@ short_item = 12.
 following = ref(false)
 # main_requests.add, set once the music lane exists (it is built from next_request)
 add_main = ref(fun (_) -> false)
+# main_requests.queue, likewise
+main_requests_queue = ref(fun () -> [])
+# The entry the music lane last began reading (its on_track, before it is heard)
+main_track_entry = ref("")
+def request_entry(r) =
+  list.assoc(default="", 1, r/kbr_entry="([^"]+)"/.exec(request.uri(r)))
+end
+def short_queued(entry) =
+  q = main_requests_queue()
+  list.exists(fun (x) -> request_entry(x) == entry, q())
+end
 def rec ask_backend() =
   flushes = flush_count()
   handed = string.concat(separator=",", given())
@@ -157,6 +168,7 @@ def rec ask_backend() =
       secs = null.get(default=0., data.seconds)
       if secs > 0. and secs < short_item then
         following := true
+        short_entry = data.entry_id
         thread.run(fast=false, fun () -> begin
           before = flush_count()
           follow = ask_backend()
@@ -164,15 +176,33 @@ def rec ask_backend() =
             r = request.create(follow)
             # Downloaded first (request.resolve), so the queue only ever holds it whole
             if request.resolve(timeout=120., r) and before == flush_count() then
-              log.important("next: fetched the item after a #{secs} s item in advance")
-              f = add_main()
-              ignore(f(r))
+              # Added only once the short item is in the queue (or playing): the music
+              # lane queues it only after its own download, and the item after it was
+              # sometimes added first and aired first (Main 15:39Z 2026-11-19: a song,
+              # then the station ID handed out before it, right before the sponsorships)
+              def rec place(tries) =
+                if before != flush_count() then
+                  log.important("next: the item after a short one was not kept (queue changed)")
+                  request.destroy(r)
+                  following := false
+                elsif main_track_entry() == short_entry or tries >= 150 or short_queued(short_entry) then
+                  log.important("next: fetched the item after a #{secs} s item in advance")
+                  f = add_main()
+                  ignore(f(r))
+                  following := false
+                else
+                  thread.run(delay=0.1, {place(tries + 1)})
+                end
+              end
+              place(0)
             else
               log.important("next: the item after a short one was not kept (queue changed or no file)")
               request.destroy(r)
+              following := false
             end
+          else
+            following := false
           end
-          following := false
         end)
       end
       data.uri
@@ -207,11 +237,15 @@ end
 # before it plays)
 main_requests = request.dynamic(id="main", prefetch=1, retry_delay=2., timeout=120., next_request)
 add_main := fun (r) -> main_requests.add(r)
+main_requests_queue := fun () -> main_requests.queue()
 # When the music lane last began reading a new item (before `cross` has buffered its
 # start and called transition()). skip_main() uses it to tell a skip that took (the next
 # item is on its way) from one that only ended a transition.
 main_fetched_at = ref(0.)
-main_requests.on_track(fun (_) -> main_fetched_at := time())
+main_requests.on_track(fun (m) -> begin
+  main_fetched_at := time()
+  main_track_entry := m["kbr_entry"]
+end)
 # Per-track level from the library's audio analysis (backend sends liq_amplify)
 main = amplify(1., override="liq_amplify", main_requests)
 # Song-to-song: the outgoing song fades out under the incoming one, which starts at full
