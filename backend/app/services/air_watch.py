@@ -308,7 +308,10 @@ class AirWatch:
                         "what the site shows may differ.", current.id)
 
         # timed_skipped: a time check, weather or sponsorship skipped with nothing aired for it
-        for e in rows:
+        # Not inside a blackout: what was due then was taken out on purpose (timed items
+        # inside the window, rows queued for before it), and nobody should be alerted
+        # on Shabbos for it
+        for e in ([] if blacked_out else rows):
             if e.status != "skipped" or e.preempt_at is None or e.asset is None:
                 continue
             important = e.asset.category in (TIME_CATEGORY, WEATHER_CATEGORY) or e.source in ("ad_slot", "block")

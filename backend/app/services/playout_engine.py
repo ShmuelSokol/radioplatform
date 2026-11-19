@@ -1027,11 +1027,15 @@ async def handle_next(
                 logger.warning("Replenish on empty queue failed: %s", e)
             if entry is None:
                 break
-        if entry.asset is not None and entry.asset.asset_type != "silence" and await _blacked_out(db, station_id):
+        if (entry.asset is not None and entry.asset.asset_type != "silence"
+                and entry.source != SHABBOS_END_SOURCE and await _blacked_out(db, station_id)):
             # In a blackout only its silence goes to the engine (normally all of it is in
             # the timed lane already). A song handed now waited loaded through Shabbos
             # and aired first after it (simulator, Jerusalem 2026-11-20). The engine asks
             # again by itself, as during a live show; the blackout's end flushes and skips.
+            # The item at candle lighting (the shofar, first in the silence group) still
+            # goes: normally it is in the timed lane already, but not after an engine
+            # restart in that minute.
             return None
         await ensure_level(db, entry)
         if str(entry.id) in state.timed_sent:
@@ -1078,6 +1082,9 @@ async def handle_next(
             ),
         )
     return None
+
+
+SHABBOS_END_SOURCE = "shabbos_end"  # shabbos_ending.SOURCE
 
 
 async def _blacked_out(db: AsyncSession, station_id) -> bool:

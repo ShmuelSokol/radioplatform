@@ -207,3 +207,27 @@ async def test_in_a_blackout_the_engine_is_handed_no_song(db_session):
     nxt = await playout_engine.handle_next(db_session, station.id)
     assert nxt is not None and nxt["uri"]
     playout_engine.reset_state(station.id)
+
+
+@pytest.mark.asyncio
+async def test_the_shofar_still_goes_to_the_engine_in_the_blackout(db_session):
+    """The item at candle lighting is first in the silence group: normally in the timed
+    lane already, but an engine restart that minute asks for it with /next."""
+    from app.services import playout_engine
+
+    station = Station(id=uuid.uuid4(), name="KBR Jerusalem", timezone="Asia/Jerusalem")
+    db_session.add(station)
+    shofar = _asset(db_session, "Shofar", "jingle", 20)
+    await db_session.flush()
+    now = datetime.now(UTC)
+    start = now - timedelta(seconds=20)
+    db_session.add_all([
+        HolidayWindow(id=uuid.uuid4(), name="Shabbos", start_datetime=start,
+                      end_datetime=now + timedelta(hours=24), is_blackout=True, affected_stations=None),
+        _row(station, shofar, 1, source="shabbos_end", timing_mode="hard", preempt_at=start),
+    ])
+    await db_session.commit()
+    playout_engine.reset_state(station.id)
+    nxt = await playout_engine.handle_next(db_session, station.id)
+    playout_engine.reset_state(station.id)
+    assert nxt is not None and nxt["uri"]

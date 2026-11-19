@@ -4286,6 +4286,77 @@ async def sc_duplicate_timed_id(h: Harness) -> None:
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
 
 
+async def sc_shabbos_silence(h: Harness) -> None:
+    """Shabbos on the real engine, shortened: a window that starts in the future (its
+    silences queued ahead, hard timed at its start), several silence items in a row, then
+    its end. Nothing is heard inside it (no music, no emergency music between the
+    silences, though the engine is handed nothing but silence then), the engine never
+    reports the emergency lane, and the song it held pre-loaded at the start does not
+    air first afterwards (simulator, Jerusalem 2026-11-20)."""
+    import re
+
+    from sqlalchemy import delete
+
+    from app.db.engine import async_session_factory
+    from app.models.holiday_window import HolidayWindow
+
+    name = "shabbos_silence"
+    await wait_music(h)
+    cur = await h.on_air()
+    await h.clear_pending()
+    await h.queue([(n, {}) for n in ("song1", "song2", "song3", "song4", "song5", "song6")
+                   if not cur or h.assets[n] != cur.asset_id][:4])
+    log_path = h.stack.dir / "backend.log"
+    offset = log_path.stat().st_size
+    wid = uuid.uuid4()
+    start = at(40)
+    end = start + timedelta(seconds=200)  # four 60 s silences, the last one cut at the end
+    async with async_session_factory() as db:
+        db.add(HolidayWindow(id=wid, name="Harness Shabbos", start_datetime=start, end_datetime=end,
+                             is_blackout=True, affected_stations={"station_ids": [str(STATION_ID)]}))
+        await db.commit()
+    try:
+        await asyncio.sleep(max(0, end.timestamp() - time.time()) + 20)
+        with open(log_path, errors="replace") as f:
+            f.seek(offset)
+            blog = f.read()
+        heard = h.heard(start.timestamp() + 3, end.timestamp() - 2)
+        loud = [(round(t - start.timestamp(), 1), round(db)) for t, db, _ in heard if db > -45]
+        h.check(name, not loud, f"nothing heard inside the window ({len(loud)} loud windows: {loud[:5]})")
+        emerg = [ln for ln in blog.splitlines() if "lane=emergency" in ln]
+        h.check(name, not emerg, f"no emergency start report: {emerg[:3]}")
+
+        def stamp(ln: str) -> float:
+            m = re.match(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3})", ln)
+            if not m:
+                return 0.0
+            return datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S,%f").replace(tzinfo=UTC).timestamp()
+
+        lines = blog.splitlines()
+        cued_before = [re.search(r"Engine next -> (\S+)", ln).group(1) for ln in lines
+                       if "Engine next -> " in ln and 0 < stamp(ln) < start.timestamp()]
+        handed_inside = [ln for ln in lines if "Engine next -> " in ln
+                         and start.timestamp() + 1 < stamp(ln) < end.timestamp() - 1]
+        first_after = [re.search(r"entry=(\S+) lane=main", ln).group(1) for ln in lines
+                       if "lane=main" in ln and "Engine started -> entry=" in ln
+                       and stamp(ln) > end.timestamp() - 1]
+        silence_id = str(h.assets["silence"])
+        rows = {str(e.id): e for e in await h.rows()}
+        handed_songs = [ln for ln in handed_inside
+                        if (lambda i: i in rows and str(rows[i].asset_id) != silence_id)(
+                            re.search(r"Engine next -> (\S+)", ln).group(1))]
+        h.check(name, not handed_songs, f"no song handed to the engine inside the window: {handed_songs[:2]}")
+        held = cued_before[-1] if cued_before else None
+        h.check(name, bool(first_after) and first_after[0] != held,
+                f"first item after the window {first_after[:1]} is not the one held before it ({held})")
+        tail = [n for _, n in timeline(h.heard(time.time() - 8, time.time() - 1))]
+        h.check(name, bool(tail) and all(n.startswith("song") for n in tail), f"station music heard after: {tail}")
+    finally:
+        async with async_session_factory() as db:
+            await db.execute(delete(HolidayWindow).where(HolidayWindow.id == wid))
+            await db.commit()
+
+
 async def sc_blackout_ended_early(h: Harness) -> None:
     """H-10 / B-JOB: a blackout (Shabbos, Yom Tov) puts silence on air; when it is ended
     early (its end moved to now) the silence is dropped and station music is back within a
@@ -4805,6 +4876,7 @@ SCENARIOS = {
     # the shiur's file arrives only after the announcement has ended: music fills in
     "block_with_very_slow_shiur": lambda h: sc_block_with_slow_shiur(h, 45.0),
     "blackout_ended_early": sc_blackout_ended_early,
+    "shabbos_silence": sc_shabbos_silence,
     "output_limiter": sc_output_limiter,
     "fit_before_hour": sc_fit_before_hour,
     "fit_preloaded_before_hour": sc_fit_preloaded_before_hour,
