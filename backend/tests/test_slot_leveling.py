@@ -6,7 +6,7 @@ next sponsorship goes to the break that has only 2.
 """
 
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -176,22 +176,14 @@ def test_sponsorships_steer_around_a_shiur_even_its_hard_breaks():
     assert max(_counts(placed).values()) == 2
 
 
-def test_a_hard_shiur_break_comes_before_a_soft_one():
-    # every break outside the shiur is full, so the overflow pauses the shiur only where
-    # the time check pauses it anyway
+def test_no_sponsorship_inside_a_shiur_even_with_no_other_room():
+    """Shmuel 2026-11-18: no sponsorships inside a shiur, hard break or soft; a play
+    with no other room in its slot is left out (and warned about) instead."""
     shiur = (datetime(DAY.year, DAY.month, DAY.day, 20, 1, tzinfo=NY), datetime(DAY.year, DAY.month, DAY.day, 20, 57, tzinfo=NY))
-    spots = [_spot(f"s{i:02d}", "early_evening") for i in range(28)]
+    spots = [_spot(f"s{i:02d}", "early_evening") for i in range(30)]
     placed, unplaced = plan_spots(spots, NY, DAY, 1, breaks=_mixed_breaks(18, 21), quiet=[shiur])
-    assert not unplaced
-    during = {p.local.strftime("%H:%M") for p in placed if shiur[0] < p.local < shiur[1]}
-    assert during == {"20:30"}
-
-
-def test_a_shiur_break_is_used_when_the_slot_has_no_other_room():
-    shiur = (datetime(DAY.year, DAY.month, DAY.day, 18, 0, tzinfo=NY), datetime(DAY.year, DAY.month, DAY.day, 21, 0, tzinfo=NY))
-    spots = [_spot(f"s{i:02d}", "early_evening") for i in range(36)]
-    placed, unplaced = plan_spots(spots, NY, DAY, 1, breaks=_mixed_breaks(18, 21), quiet=[shiur])
-    assert not unplaced and len(placed) == 36
+    assert not [p for p in placed if shiur[0] < p.local < shiur[1] - timedelta(minutes=5)]
+    assert len(placed) == 27 and len(unplaced) == 3  # 9 breaks outside it, 3 places each
 
 
 def test_a_soft_break_in_the_last_minutes_of_a_shiur_is_fine():
