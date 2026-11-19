@@ -29,7 +29,7 @@ a live station.
 ## Engine (proto 6)
 - `alert_lane` = `request.queue("alert")` (+ line gate) in a fallback ABOVE the whole
   programme, placed after the master level and mix-over (Next fades, jingles never touch
-  it) and before compressor/limiter. Below it everything pauses and resumes.
+  it) and before the broadcast sound chain (leveler, bands, limiter). Below it everything pauses and resumes.
 - `/alert {uri,id}` queues (two alerts play in turn), `/alert_stop` drops all,
   `/alert_line {on}` forces the line. `/status` has alert, alert_id, alert_source.
 - Reports `POST /playout/{id}/alert {phase, alert_id, source, at, started_at}`.

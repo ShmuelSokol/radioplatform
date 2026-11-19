@@ -493,7 +493,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - **Pydantic schemas**: ID fields use `uuid.UUID | str` for cross-DB compatibility (SQLite returns strings)
 - **Frontend Vercel deploy**: Repo-local git email is set to `shmuelsokol@yahoo.com` (matching the Vercel account). Deploy directly: `cd frontend && npx vercel --prod --yes`.
 - **Weather caching**: Weather TTS audio is cached per 15-min slot. Text changes don't take effect until the next slot.
-- **Playout engine**: Liquidsoap 2.2 + Icecast on its own server (not Railway), set up by `infra/streaming/setup.sh` (Ubuntu 24.04). The engine pulls the next track and reports real starts; for an engine station nothing in the backend advances playback by duration. Off until `PLAYOUT_ENGINE_*` is set. The older telnet path (`LIQUIDSOAP_ENABLED`) must stay off.
+- **Playout engine**: Liquidsoap 2.2 + Icecast on its own server (not Railway), set up by `infra/streaming/setup.sh` (Ubuntu 24.04). The engine pulls the next track and reports real starts; for an engine station nothing in the backend advances playback by duration. Off until `PLAYOUT_ENGINE_*` is set. The older telnet path (`LIQUIDSOAP_ENABLED`) must stay off. The engine's whole output goes through a broadcast sound chain when its engine has `KBR_PROCESSING=broadcast` (leveler, three-band compressor, limiter at -1.5 dBFS; setup.sh sets it per station from `KBR_BROADCAST_SOUND`; the default `light` is the older chain); never use Liquidsoap's `normalize()` or a plain `amplify()` there, they take each track's `liq_amplify` (see `wiki/streaming-architecture.md`, Broadcast sound).
 
 ## Milestones
 - **M1** (complete): Backend skeleton, auth, station CRUD, asset upload, React frontend — DEPLOYED
