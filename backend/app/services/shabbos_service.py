@@ -2,7 +2,8 @@
 Shabbos & Yom Tov blackout window generation service.
 
 Generates HolidayWindow dicts for:
-- Every Shabbos (Friday sunset −18 min → Saturday sunset +72 min)
+- Every Shabbos (candle lighting → Saturday sunset +72 min); candle lighting is
+  Friday sunset −18 min, or −40 min for a station in Israel (Jerusalem custom)
 - All Yom Tov days with proper Hebrew→Gregorian conversion: the 2-day diaspora
   calendar, or the 1-day Israel calendar for a station whose time zone is in Israel
 """
@@ -42,6 +43,18 @@ def is_israel_timezone(tz: str | None) -> bool:
     return (tz or "") in ISRAEL_TIMEZONES
 
 
+# Candle lighting before sunset: 18 minutes (Lakewood), 40 in Jerusalem. Shmuel
+# 2026-11-19: silence from candle lighting until 72 minutes after shekia. KBR Jerusalem's
+# window started 18 min before sunset, 22 minutes after Jerusalem candle lighting.
+CANDLE_LIGHTING_MINUTES = 18
+CANDLE_LIGHTING_MINUTES_ISRAEL = 40
+AFTER_SHEKIA_MINUTES = 72
+
+
+def candle_lighting_minutes(tz: str | None) -> int:
+    return CANDLE_LIGHTING_MINUTES_ISRAEL if is_israel_timezone(tz) else CANDLE_LIGHTING_MINUTES
+
+
 def _sunset_for(lat: float, lon: float, tz: str, d: date) -> datetime:
     """Get timezone-aware sunset datetime for a location and date."""
     times = get_sun_times(lat, lon, tz, d)
@@ -58,7 +71,7 @@ def generate_shabbos_windows(
 ) -> list[dict]:
     """Generate blackout windows for every Shabbos in the date range.
 
-    start = Friday sunset − 18 min
+    start = candle lighting: Friday sunset − 18 min (− 40 min in Israel)
     end   = Saturday sunset + 72 min
     """
     windows = []
@@ -73,8 +86,8 @@ def generate_shabbos_windows(
             saturday = d + timedelta(days=1)
             saturday_sunset = _sunset_for(lat, lon, tz, saturday)
 
-            window_start = friday_sunset - timedelta(minutes=18)
-            window_end = saturday_sunset + timedelta(minutes=72)
+            window_start = friday_sunset - timedelta(minutes=candle_lighting_minutes(tz))
+            window_end = saturday_sunset + timedelta(minutes=AFTER_SHEKIA_MINUTES)
 
             windows.append({
                 "name": f"Shabbos {d.strftime('%b %d, %Y')}",
@@ -119,7 +132,7 @@ def generate_yom_tov_windows(
     2-day diaspora one.
 
     For each Yom Tov block:
-      start = erev (day before first day) sunset − 18 min
+      start = candle lighting on erev (day before first day): sunset − 18 min (− 40 in Israel)
       end   = last day sunset + 72 min
     """
     windows = []
@@ -147,8 +160,8 @@ def generate_yom_tov_windows(
                 erev_sunset = _sunset_for(lat, lon, tz, erev)
                 last_day_sunset = _sunset_for(lat, lon, tz, last_day)
 
-                window_start = erev_sunset - timedelta(minutes=18)
-                window_end = last_day_sunset + timedelta(minutes=72)
+                window_start = erev_sunset - timedelta(minutes=candle_lighting_minutes(tz))
+                window_end = last_day_sunset + timedelta(minutes=AFTER_SHEKIA_MINUTES)
 
                 windows.append({
                     "name": f"{name} {hebrew_year}",

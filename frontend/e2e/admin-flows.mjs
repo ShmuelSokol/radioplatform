@@ -231,6 +231,16 @@ async function seeProgressBar(page, what) {
   await until(async () => /^100%/.test((await page.getByTestId('edit-progress-pct').innerText().catch(() => '')).trim()), `${what}: the bar reaches 100%`, 8000);
   assert(/Done/.test(await bar.innerText()), `${what}: the bar does not say Done at the end: ${await bar.innerText()}`);
 }
+// After the edit answers, "Done 100%" stays up a moment before the page moves on (the PC
+// saw a 35 minute Smart Enhance go from "Saving 92%" straight to gone, 2026-11-19)
+async function seeDoneHeld(page, what) {
+  const bar = page.getByTestId('edit-progress');
+  await bar.waitFor({ timeout: 2000 }).catch(() => {});
+  const text = await bar.innerText().catch(() => '');
+  assert(/Done/.test(text) && /100%/.test(text), `${what}: no "Done 100%" once it finished: "${text}"`);
+  await page.waitForTimeout(700);
+  assert(await bar.count() === 1, `${what}: "Done" vanished in under a second`);
+}
 async function timedSave(page, what, matcher, action, { expectStatus = s => s < 400 } = {}) {
   const r = await timedResponse(page, matcher, action);
   assert(expectStatus(r.status), `${what}: server answered ${r.status} ${(await r.resp.text().catch(() => '')).slice(0, 160)}`);
@@ -2821,6 +2831,23 @@ section('assets', async () => {
     await page.getByRole('button', { name: 'MP3', exact: true }).first().click();
     await until(async () => downloads.length >= 2, 'two downloads', 20000);
     await page.getByRole('button', { name: 'Auto-Clip Silence' }).click();
+    // Settings first (Shmuel 2026-11-19: "also in middle", shortened not cut to nothing)
+    const setup = page.getByRole('dialog', { name: 'Auto-Clip Silence settings' });
+    await setup.waitFor();
+    if (process.env.SHOT_DIR) await page.screenshot({ path: `${process.env.SHOT_DIR}/auto-clip-settings.png` });
+    assert(await setup.getByTestId('shorten-middle').isChecked(), 'shorten long middle gaps is not on by default');
+    assert(await setup.getByTestId('gap-over').inputValue() === '2' && await setup.getByTestId('bulk-keep-gap').inputValue() === '0.75',
+      'Auto-Clip defaults are not "longer than 2 s become 0.75 s"');
+    assert(/original/i.test(await setup.innerText()), 'Auto-Clip settings do not say the original is kept');
+    await setup.getByRole('button', { name: 'Cancel' }).click();
+    await setup.waitFor({ state: 'detached' });
+    await page.getByRole('button', { name: 'Auto-Clip Silence' }).click();
+    const [started] = await Promise.all([
+      page.waitForRequest(r => r.method() === 'POST' && r.url().endsWith('/assets/bulk-auto-trim')),
+      setup.getByRole('button', { name: 'Start' }).click(),
+    ]);
+    const sent = started.postDataJSON();
+    assert(sent.middle_gap_over === 2 && sent.keep_gap === 0.75, `Auto-Clip sent ${JSON.stringify(sent)}`);
     await page.getByText(/Complete!|Failed/).waitFor({ timeout: 30000 });
     assert(await page.getByText('Complete!').count(), 'auto-clip job failed');
     await page.getByRole('button', { name: 'Close' }).click();
@@ -3007,7 +3034,7 @@ section('asset-detail', async () => {
         await until(async () => (await lengthNow()) > 15, 'original restored');
         return `trim out middle gap → ${cut.toFixed(1)} s; auto-clip → ${after.toFixed(1)} s, restored`;
       }, page);
-      await step('F-ASSETDETAIL-4b Remove All Found Silence: count on the button, confirm says how much and that the original is kept; Cancel changes nothing; Remove All takes out all 3 gaps; Save; Restore Original', async () => {
+      await step('F-ASSETDETAIL-4b Remove All Found Silence: count on the button, confirm says how much and that the original is kept; middle gaps shortened to 0.5 s by default, 0 cuts them; Cancel changes nothing; Remove All takes out all 3 gaps; Save; Restore Original', async () => {
         const lengthNow = async () => (await api('GET', `/assets/${asset.id}`, { token: USERS.admin.token })).duration;
         await page.getByText('Original restored!').waitFor({ timeout: 10000 }).catch(() => {});
         await timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/detect-silence'), () => page.getByRole('button', { name: 'Detect Silence' }).click());
@@ -3023,9 +3050,17 @@ section('asset-detail', async () => {
           await page.screenshot({ path: `${process.env.SHOT_DIR}/remove-all-iphone.png` });
           await page.setViewportSize(size);
         }
-        const words = await dialog.innerText();
-        assert(/all 3 silent parts/.test(words) && /8\.0 s in total/.test(words) && /middle/.test(words) && /original/i.test(words),
-          `the confirm does not say what goes and that the original is kept: ${words}`);
+        // Shmuel 2026-11-19: gaps in the middle are shortened, not cut to nothing
+        const keep = dialog.getByTestId('keep-gap');
+        assert(await keep.inputValue() === '0.5', `gap kept by default is ${await keep.inputValue()}, expected 0.5 s`);
+        let words = await dialog.innerText();
+        assert(/start and end/.test(words) && /middle to 0\.5 s/.test(words) && /8\.0 s in total/.test(words) && /original/i.test(words),
+          `the confirm does not say the middle gaps are shortened and the original is kept: ${words}`);
+        await keep.fill('0');
+        words = await dialog.innerText();
+        assert(/all 3 silent parts/.test(words) && /including gaps in the middle/.test(words),
+          `with 0 s kept the confirm does not say every gap goes: ${words}`);
+        await keep.fill('0.5');
         await dialog.getByRole('button', { name: 'Cancel' }).click();
         await dialog.waitFor({ state: 'detached' });
         assert(Math.abs((await lengthNow()) - 16) < 0.5, 'Cancel changed the item');
@@ -3049,10 +3084,11 @@ section('asset-detail', async () => {
           ]);
         } finally { await release(); }
         assert(r.status < 300, `remove all ${r.status}`);
+        await seeDoneHeld(page, 'Remove All');
         await page.getByTestId('edit-progress').waitFor({ state: 'detached' });
         await page.getByText('Trim applied — review the result').waitFor({ timeout: 15000 });
         const left = await lengthNow();
-        assert(Math.abs(left - 8) < 0.5, `Remove All left ${left} s (expected the 8 s of tone)`);
+        assert(Math.abs(left - 8.5) < 0.4, `Remove All left ${left} s (expected 8 s of tone and the 2 s middle gap shortened to 0.5 s)`);
         await page.getByRole('button', { name: 'Save', exact: true }).first().click();
         await page.getByText('Trim saved.').waitFor();
         await page.getByRole('button', { name: 'Detect Silence' }).click();     // nothing left to find
@@ -3060,7 +3096,7 @@ section('asset-detail', async () => {
           && (await page.getByText(/silence region\(s\) found/).count()) === 0, 'a new scan finds no silence', 10000);
         await page.getByRole('button', { name: 'Restore Original' }).click();
         await until(async () => (await lengthNow()) > 15, 'Restore Original brought back the 16 s file');
-        return `16 s → ${left.toFixed(1)} s, restored`;
+        return `16 s → ${left.toFixed(1)} s (middle gap kept at 0.5 s), restored`;
       }, page);
       await step('F-ASSETDETAIL-5 enhance panel: preset, Preview, Apply, Undo Enhancement; full editor link', async () => {
         await page.getByRole('button', { name: 'Broadcast Polish' }).first().click();
@@ -3127,7 +3163,7 @@ section('asset-detail', async () => {
       const main = page.locator('main');
       // (the pre-listen lengths are the person's own setting and stay)
       assert(await main.locator('[data-testid=asset-title], [data-testid=asset-artist], [data-testid=asset-album], input[type=date], input[title*="vote"]').count() === 0, 'an editable field of the item is shown');
-      for (const name of ['AI Auto-Enhance', 'Restore Original', 'Apply', 'Trim Out', 'Auto-Clip Start & End'])
+      for (const name of ['Smart Enhance', 'Restore Original', 'Apply', 'Trim Out', 'Auto-Clip Start & End'])
         assert(await main.getByRole('button', { name, exact: true }).count() === 0, `"${name}" is offered`);
       await main.getByRole('button', { name: 'Detect Silence' }).click();
       await main.getByText(/silence region\(s\) found/).waitFor({ timeout: 10000 });
@@ -3160,7 +3196,7 @@ section('enhance', async () => {
     const pv = await timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/enhance-preview'), () => page.getByRole('button', { name: 'Preview Enhanced 15s' }).click());
     assert(pv.status < 300, `preview ${pv.status}`);
   }, page);
-  await step('F-ENHANCE-3 Apply Enhancement, Undo Enhancement, AI Auto-Enhance, Save; back link', async () => {
+  await step('F-ENHANCE-3 Apply Enhancement, Undo Enhancement, Smart Enhance (was AI Auto-Enhance), Save; back link', async () => {
     const ap = await timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/enhance'), () => page.getByRole('button', { name: 'Apply Enhancement' }).click());
     assert(ap.status < 300, `apply ${ap.status}`);
     await page.getByRole('button', { name: 'Undo Enhancement' }).click();
@@ -3169,11 +3205,12 @@ section('enhance', async () => {
     let ai;
     try {
       [ai] = await Promise.all([
-        timedResponse(page, (m, p) => m === 'POST' && /auto-enhance/.test(p), () => page.getByRole('button', { name: /AI Auto-Enhance/ }).click()),
-        seeProgressBar(page, 'AI Auto-Enhance'),
+        timedResponse(page, (m, p) => m === 'POST' && /auto-enhance/.test(p), () => page.getByRole('button', { name: /Smart Enhance/ }).click()),
+        seeProgressBar(page, 'Smart Enhance'),
       ]);
     } finally { await release(); }
     assert(ai.status < 300, `auto-enhance ${ai.status} ${(await ai.resp.text()).slice(0, 120)}`);
+    await seeDoneHeld(page, 'Smart Enhance');
     await page.getByTestId('edit-progress').waitFor({ state: 'detached' });
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await page.getByText('Enhancement saved.').waitFor();

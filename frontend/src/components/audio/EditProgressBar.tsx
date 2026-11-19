@@ -2,29 +2,32 @@ import { useEffect, useRef, useState } from 'react';
 import { getEditProgress, type EditProgress } from '../../api/assets';
 
 /**
- * Progress of a long audio edit (AI Enhance, Remove All Found Silence) while the page
+ * Progress of a long audio edit (Smart Enhance, Remove All Found Silence) while the page
  * waits for it: a bar, the step it is on, the percent and the time so far.
  * Shmuel 2026-11-19: "can it show a progress bar?" The page makes up `progressId`,
  * sends it with the edit, and this asks the server how far it is every second.
  */
-export default function EditProgressBar({ progressId, active, label }: {
+export default function EditProgressBar({ progressId, active, label, done = false }: {
   progressId: string | null;
   active: boolean;
   label: string;
+  /** The edit has finished: hold "Done 100%" (the page keeps it up a moment so it is seen) */
+  done?: boolean;
 }) {
   const [progress, setProgress] = useState<EditProgress | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const started = useRef(0);
 
   useEffect(() => {
-    if (!active || !progressId) {
-      setProgress(null);
+    if (!active || !progressId || done) {
+      if (!active) setProgress(null);
       return;
     }
     started.current = Date.now();
     setElapsed(0);
     let stopped = false;
     const tick = async () => {
+      if (stopped) return;
       setElapsed(Math.round((Date.now() - started.current) / 1000));
       try {
         const p = await getEditProgress(progressId);
@@ -39,16 +42,17 @@ export default function EditProgressBar({ progressId, active, label }: {
       stopped = true;
       clearInterval(timer);
     };
-  }, [active, progressId]);
+  }, [active, progressId, done]);
 
   if (!active) return null;
-  const pct = Math.round(Math.min(1, Math.max(0, progress?.fraction ?? 0)) * 100);
+  const pct = done ? 100 : Math.round(Math.min(1, Math.max(0, progress?.fraction ?? 0)) * 100);
+  const stage = done ? 'Done' : progress?.stage || label;
   const mins = Math.floor(elapsed / 60);
   const secs = elapsed % 60;
   return (
     <div data-testid="edit-progress" className="w-full my-2" role="status" aria-live="polite">
       <div className="flex justify-between text-xs text-gray-600 mb-1 gap-2">
-        <span className="truncate">{progress?.stage || label}</span>
+        <span className="truncate">{stage}</span>
         <span className="tabular-nums shrink-0" data-testid="edit-progress-pct">
           {pct}% · {mins}:{secs.toString().padStart(2, '0')}
         </span>
@@ -61,8 +65,12 @@ export default function EditProgressBar({ progressId, active, label }: {
         aria-valuemax={100}
         aria-valuenow={pct}
       >
-        <div className="h-full bg-brand-600 transition-all duration-300" style={{ width: `${pct}%` }} />
+        <div className={`h-full transition-all duration-300 ${done ? 'bg-green-600' : 'bg-brand-600'}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
 }
+
+/** How long "Done 100%" stays up after an edit finishes, before the page moves on. The PC
+ *  saw the bar go from "Saving 92%" straight to gone on a 35 minute shiur (2026-11-19). */
+export const DONE_HOLD_MS = 1500;

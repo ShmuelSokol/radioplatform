@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import EditProgressBar from './EditProgressBar';
+import EditProgressBar, { DONE_HOLD_MS } from './EditProgressBar';
 import { newProgressId } from '../../api/assets';
 import { Link } from 'react-router-dom';
 import { useEnhancePresets, useEnhanceAsset, useEnhancePreview, useRestoreOriginal, useAutoEnhance } from '../../hooks/useAssets';
@@ -33,6 +33,7 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
   const restoreMutation = useRestoreOriginal();
   const autoEnhanceMutation = useAutoEnhance();
   const [progressId, setProgressId] = useState<string | null>(null);
+  const [finishing, setFinishing] = useState(false);  // "Done 100%" held a moment
 
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [enhancePending, setEnhancePending] = useState(false);
@@ -116,12 +117,16 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
     setProgressId(pid);
     autoEnhanceMutation.mutate({ id: assetId, progressId: pid }, {
       onSuccess: (result) => {
-        setEnhancePending(true);
-        setAiReasons(result.reasons);
-        setStatusMsg(null);
-        onEnhanceComplete?.();
+        setFinishing(true);
+        setTimeout(() => {
+          setFinishing(false);
+          setEnhancePending(true);
+          setAiReasons(result.reasons);
+          setStatusMsg(null);
+          onEnhanceComplete?.();
+        }, DONE_HOLD_MS);
       },
-      onError: () => setStatusMsg('AI enhancement failed'),
+      onError: () => setStatusMsg('Smart Enhance failed'),
     });
   };
 
@@ -136,7 +141,7 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
         </div>
         {aiReasons && aiReasons.length > 0 && (
           <div className="bg-blue-50 border border-blue-200 rounded p-3 mb-4">
-            <p className="text-xs font-medium text-blue-800 mb-1">AI applied these optimizations:</p>
+            <p className="text-xs font-medium text-blue-800 mb-1">Smart Enhance applied these changes:</p>
             <ul className="text-xs text-blue-700 space-y-0.5 list-disc list-inside">
               {aiReasons.map((r, i) => <li key={i}>{r}</li>)}
             </ul>
@@ -173,17 +178,17 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
         )}
       </div>
 
-      {/* AI Auto-Enhance */}
+      {/* Smart Enhance (was AI Auto-Enhance) */}
       {canEdit && (
         <button
           onClick={handleAutoEnhance}
-          disabled={autoEnhanceMutation.isPending}
+          disabled={autoEnhanceMutation.isPending || finishing}
           className="w-full mb-3 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50"
         >
-          {autoEnhanceMutation.isPending ? <><Spinner className="mr-1" />Analyzing &amp; Enhancing...</> : 'AI Auto-Enhance'}
+          {autoEnhanceMutation.isPending ? <><Spinner className="mr-1" />Analyzing &amp; Enhancing...</> : 'Smart Enhance'}
         </button>
       )}
-      <EditProgressBar progressId={progressId} active={autoEnhanceMutation.isPending} label="AI Auto-Enhance" />
+      <EditProgressBar progressId={progressId} active={autoEnhanceMutation.isPending || finishing} done={finishing} label="Smart Enhance" />
 
       {/* Preset buttons */}
       <div className="flex flex-wrap gap-2 mb-3">

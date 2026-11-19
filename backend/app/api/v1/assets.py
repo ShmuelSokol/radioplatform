@@ -5,7 +5,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -363,10 +363,13 @@ async def _save_album_art(asset_id: str, file_data: bytes, filename: str) -> str
                     pass
 
 
-async def _run_bulk_auto_trim(job_id: str, asset_ids: list[str], threshold_db: float, min_silence: float):
-    """Background task: auto-detect and trim leading/trailing silence for each asset."""
+async def _run_bulk_auto_trim(job_id: str, asset_ids: list[str], threshold_db: float, min_silence: float,
+                              middle_gap_over: float = 0.0, keep_gap: float = 0.75):
+    """Background task: trim leading/trailing silence of each asset and, when
+    `middle_gap_over` > 0, shorten every gap in the middle longer than that to
+    `keep_gap` seconds (Shmuel 2026-11-19: "Yes also in middle")."""
     from app.db.session import async_session_factory
-    from app.services.silence_service import detect_silence, trim_audio, get_audio_duration
+    from app.services.silence_service import EDGE, detect_silence, remove_regions, trim_audio, get_audio_duration
     from app.services.storage_service import download_file, upload_file as upload_storage, generate_asset_key
 
     job = _bulk_trim_jobs[job_id]
@@ -410,14 +413,29 @@ async def _run_bulk_auto_trim(job_id: str, asset_ids: list[str], threshold_db: f
                 if regions and abs(regions[-1]["end"] - total_duration) < 0.05:
                     trim_end = regions[-1]["start"]
 
+                # Long gaps in the middle, shortened to keep_gap (not cut to nothing)
+                middle = [
+                    r for r in regions
+                    if middle_gap_over > 0 and r["start"] > EDGE and r["end"] < total_duration - EDGE
+                    and r["end"] - r["start"] > max(middle_gap_over, keep_gap + 0.01)
+                ]
+
                 # If no meaningful trim needed, skip
-                if trim_start < 0.05 and abs(trim_end - total_duration) < 0.05:
+                if not middle and trim_start < 0.05 and abs(trim_end - total_duration) < 0.05:
                     job["skipped"] += 1
                     job["processed"] += 1
                     continue
 
-                # Trim
-                trimmed_data, new_duration = await asyncio.to_thread(trim_audio, data, trim_start, trim_end)
+                if middle:
+                    edges = [{"start": 0.0, "end": trim_start}] if trim_start >= 0.05 else []
+                    if abs(trim_end - total_duration) >= 0.05:
+                        edges.append({"start": trim_end, "end": total_duration})
+                    trimmed_data, new_duration = await asyncio.to_thread(
+                        remove_regions, data, edges + middle, None, keep_gap)
+                    job["gaps_shortened"] = job.get("gaps_shortened", 0) + len(middle)
+                else:
+                    # Start and end only: an MP3 is cut without re-encoding
+                    trimmed_data, new_duration = await asyncio.to_thread(trim_audio, data, trim_start, trim_end)
 
                 # Upload trimmed file
                 new_key = generate_asset_key("trimmed.mp3")
@@ -428,8 +446,11 @@ async def _run_bulk_auto_trim(job_id: str, asset_ids: list[str], threshold_db: f
                 if "original_file_path" not in extra:
                     extra["original_file_path"] = asset.file_path
                 trim_entry = {"from": asset.file_path, "to": new_key, "trim_start": trim_start, "trim_end": trim_end, "auto": True}
+                if middle:
+                    trim_entry.update(middle_gaps=[[r["start"], r["end"]] for r in middle], keep_gap=keep_gap)
                 extra["trim_history"] = [*(extra.get("trim_history") or []), trim_entry]  # new list: an in-place append is not saved
                 extra.pop("silence_regions", None)
+                extra.pop("audio_analysis", None)  # end and crossfade points belong to the old audio
 
                 asset.file_path = new_key
                 asset.duration = new_duration
@@ -629,10 +650,12 @@ async def bulk_auto_trim(
         "trimmed": 0,
         "skipped": 0,
         "errors": 0,
+        "gaps_shortened": 0,
     }
 
     await db.commit()  # end the read transaction: the job runs for a long time
-    _run_detached(_run_bulk_auto_trim(job_id, asset_ids, body.threshold_db, body.min_silence))
+    _run_detached(_run_bulk_auto_trim(job_id, asset_ids, body.threshold_db, body.min_silence,
+                                      body.middle_gap_over, body.keep_gap))
     return {"job_id": job_id}
 
 
@@ -1265,6 +1288,9 @@ async def trim_asset_endpoint(
 
 class RemoveSilenceRequest(BaseModel):
     regions: list[dict]
+    # Seconds of each gap in the middle to leave in (0 = cut it all). Start and end
+    # silence always goes completely.
+    keep_gap: float = Field(0.0, ge=0, le=10)
 
 
 @router.post("/{asset_id}/remove-silence", response_model=AssetResponse)
@@ -1290,7 +1316,8 @@ async def remove_silence_endpoint(
         data = await _download_asset_data(file_path)
         try:
             new_data, new_duration = await asyncio.to_thread(
-                remove_regions, data, body.regions, job_progress.reporter(progress_id, 0.05, 0.9))
+                remove_regions, data, body.regions, job_progress.reporter(progress_id, 0.05, 0.9),
+                body.keep_gap)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
@@ -1306,7 +1333,8 @@ async def remove_silence_endpoint(
     extra = dict(asset.metadata_extra or {})
     if "original_file_path" not in extra:
         extra["original_file_path"] = asset.file_path
-    entry = {"from": asset.file_path, "to": new_key, "removed": [[a, b] for a, b in merge_regions(body.regions)]}
+    entry = {"from": asset.file_path, "to": new_key, "removed": [[a, b] for a, b in merge_regions(body.regions)],
+             "keep_gap": body.keep_gap}
     extra["trim_history"] = [*(extra.get("trim_history") or []), entry]
     extra.pop("silence_regions", None)
     extra.pop("audio_analysis", None)  # end and crossfade points belong to the old audio
