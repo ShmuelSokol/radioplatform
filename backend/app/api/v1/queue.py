@@ -1701,6 +1701,19 @@ async def _get_queue_impl(station_id, limit, db):
                 blackout_ends[bo_start] = bo_end
                 blackout_names[bo_start] = w.name
 
+    # Holiday items in season (services/holiday_music.py): the queue row says which
+    # holiday, so the operator sees exactly where they air
+    holiday_of: dict[str, str] = {}
+    try:
+        from app.models.station import Station
+        from app.services.holiday_music import holidays_for_assets
+
+        station_row = await db.get(Station, station_id)
+        if station_row is not None:
+            holiday_of = await holidays_for_assets(db, station_row, {e.asset_id for e in entries})
+    except Exception:
+        logger.exception("Holiday tags failed for station %s", station_id)
+
     entries_data = []
     queue_duration = 0.0
     in_silence_block = False
@@ -1782,6 +1795,8 @@ async def _get_queue_impl(station_id, limit, db):
         }
         if is_silence and current_blackout_name:
             d["blackout_name"] = current_blackout_name
+        if str(e.asset_id) in holiday_of:
+            d["holiday"] = holiday_of[str(e.asset_id)]
         entries_data.append(d)
 
     return {

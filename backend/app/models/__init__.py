@@ -41,6 +41,7 @@ from app.models.spot_schedule import SpotSchedule
 from app.models.sponsorship_rules import SponsorshipRules
 from app.models.spot_recording import SpotRecording
 from app.models.program_block import ProgramBlock
+from app.models.holiday_music import HolidayItem, HolidaySetting
 
 from app.models.scheduler_lease import SchedulerLease
 from app.models.site_release import SiteRelease
@@ -90,6 +91,7 @@ __all__ = [
     "SiteRelease",
     "SpotRecording",
     "ProgramBlock",
+    "HolidayItem", "HolidaySetting",
     "BugReport",
     "HsSoftened",
     "StationBlockedAsset",

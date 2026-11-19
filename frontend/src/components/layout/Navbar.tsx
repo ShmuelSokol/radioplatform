@@ -107,6 +107,7 @@ export default function Navbar() {
       links: [
         { to: '/admin/schedules', label: 'Schedules', color: 'hover:text-orange-300' },
         { to: '/admin/program-blocks', label: 'Program Blocks', color: 'hover:text-amber-300' },
+        { to: '/admin/holiday-music', label: 'Holiday Music', color: 'hover:text-amber-300' },
         { to: '/admin/schedule-check', label: 'Schedule Check', color: 'hover:text-amber-300' },
         { to: '/admin/rules', label: 'Rules', color: 'hover:text-purple-300' },
         { to: '/admin/holidays', label: 'Blackouts', color: 'hover:text-red-300' },

@@ -31,7 +31,8 @@ async def simulate(export_path, start: datetime, hours: float, stations: list[st
                    overrides: dict | None = None, quiet: bool = True, daf_every_day: bool = True,
                    quiet_pass: float = 3.0, restarts: int = 0, seed_value: int = 1,
                    events: list | None = None, blocks: dict | None = None,
-                   extra_assets: list[dict] | None = None, regenerate_windows: bool = False):
+                   extra_assets: list[dict] | None = None, regenerate_windows: bool = False,
+                   holiday_items: list[dict] | None = None):
     """`events`: [(when, async fn(sim))] run at their moment (a scenario's hand on the
     station); `blocks`: {block id: fields} changed in the export before it is loaded."""
     export = load_export(export_path)
@@ -48,7 +49,7 @@ async def simulate(export_path, start: datetime, hours: float, stations: list[st
         blocks.update(extra_blocks or {})
         await seed(db, export, start, days=int(hours // 24) + 2, stations=keep, config_overrides=overrides,
                    block_overrides=blocks, extra_assets=extra_assets,
-                   regenerate_windows=regenerate_windows)
+                   regenerate_windows=regenerate_windows, holiday_items=holiday_items)
         return [uuid.UUID(s) for s in keep]
 
     wall = time.monotonic()

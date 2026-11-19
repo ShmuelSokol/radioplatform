@@ -69,3 +69,5 @@ engine at random moments, half of them within seconds of a quarter-hour mark.
 
 The site writes a play-log row when the *next* item starts. The item on air at the end of
 a run, and an item a restart cut at 0 s, have no row; the play-log check leaves them out.
+
+Holiday lists: `simulate(..., holiday_items=[{holiday, asset_id, station_id}])` (with the items' assets in `extra_assets`); `regenerate_windows=True` makes Shabbos and Yom Tov windows. Scenarios in `tests/test_holiday_sim.py`, see [holiday-music](holiday-music.md).

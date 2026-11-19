@@ -37,7 +37,7 @@ API: `GET/PUT /playlists/generation`, `POST /playlists/generation/regenerate`.
 
 Minimum vote: `Asset.vote` is a staff-set whole number (0 = unrated), edited on the song's page and shown in the library list beside "Last played". `playlist_generation.min_vote` (0 = off) keeps songs under that vote out of every draw. A type where NO song reaches the minimum (jingles, usually unrated) is drawn as if there were no minimum, and the preview says so; otherwise a minimum would silence the type. Listener ratings (`SongRating`) are a separate thing and do not feed this.
 
-Not built yet: jingle groups with counts, seasonal and parsha types switched by the calendar, "reset sacks".
+Not built yet: jingle groups with counts, parsha types switched by the calendar, "reset sacks". Holiday songs and shiurim before and during each holiday: [holiday-music](holiday-music.md).
 
 Test note: the draw is random, so `tests/test_playlist_generation.py` seeds `random`; in its tiny library some orders legitimately reuse a queued song to keep the artist rule.
 

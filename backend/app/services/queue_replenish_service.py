@@ -23,6 +23,7 @@ from app.models.asset import (
     fit_for_random_pick,
     in_category,
     not_contract_audio,
+    not_holiday_only,
     not_placeholder,
 )
 from app.models.play_log import PlayLog
@@ -78,6 +79,8 @@ class QueueReplenishService:
         self.replaced = 0
         # Station IDs between items in the rule fill (set up on first use)
         self._sprinkle = None
+        # Holiday items in place of ordinary ones (set up on first use)
+        self._holiday = None
 
     async def _load_automation_config(self) -> None:
         """Load the station's automation_config JSONB."""
@@ -766,7 +769,7 @@ class QueueReplenishService:
     async def _find_assets_for_rule(self, rule: ScheduleRule) -> Sequence[Asset]:
         query = select(Asset).where(Asset.asset_type == rule.asset_type)
         if rule.category:
-            query = query.where(in_category(rule.category), not_placeholder(), not_contract_audio())
+            query = query.where(in_category(rule.category), not_placeholder(), not_contract_audio(), not_holiday_only())
         else:
             query = query.where(fit_for_random_pick())
         if self.exclude_ids:
@@ -933,7 +936,7 @@ class QueueReplenishService:
 
             query = select(Asset).where(Asset.asset_type == asset_type)
             if category:
-                query = query.where(in_category(category), not_placeholder(), not_contract_audio())
+                query = query.where(in_category(category), not_placeholder(), not_contract_audio(), not_holiday_only())
             else:
                 query = query.where(fit_for_random_pick())
             # Only exclude on first pass; allow repeats on subsequent passes
@@ -962,6 +965,7 @@ class QueueReplenishService:
             for asset in self._in_turn(candidates) if in_turn else candidates:
                 if filled >= shortfall or (in_turn and batch_count >= run):
                     break
+                asset = await self._holiday_instead(asset)
                 dur = asset.duration or DEFAULT_DURATION
                 self.max_pos += 1
                 await self._enqueue_asset(asset, self.max_pos)
@@ -986,6 +990,32 @@ class QueueReplenishService:
                 break
 
         logger.info("Total filled %.1fs of %s content in %d passes", filled, asset_type, passes)
+
+    async def _holiday_instead(self, asset: Asset) -> Asset:
+        """Rule fill (All Day Stories): before and during a holiday, now and then an
+        item from the holiday's list instead of this one (same kind: a story or
+        shiur for a story, a song for a song). See services/holiday_music.py."""
+        if self._holiday is False:
+            return asset
+        from app.services.holiday_music import HolidayMix
+        from app.services.playlist_generator_service import on_air_seconds
+
+        if self._holiday is None:
+            self._holiday = False
+            now = datetime.now(timezone.utc)
+            start, _ = await self._air_timeline(now)
+            mix = await HolidayMix.for_station(self.db, await self._station(), start)
+            if mix is None:
+                return asset
+            self._holiday = (mix, [start])
+        mix, at = self._holiday
+        got = mix.pick(asset.asset_type, at[0])
+        chosen = asset
+        if got is not None:
+            chosen = await self.db.get(Asset, got[0].id) or asset
+        meta = chosen.metadata_extra if isinstance(chosen.metadata_extra, dict) else None
+        at[0] += timedelta(seconds=on_air_seconds(chosen.duration, meta))
+        return chosen
 
     async def _station_id_after(self, asset: Asset) -> float:
         """Rule fill (All Day Stories): after each item, a station ID when one is

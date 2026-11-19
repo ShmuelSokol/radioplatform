@@ -84,7 +84,8 @@ def load_export(path: str | Path) -> dict:
 
 async def seed(db, export: dict, start: datetime, days: int = 2, stations: set[str] | None = None,
                config_overrides: dict | None = None, block_overrides: dict | None = None,
-               extra_assets: list[dict] | None = None, regenerate_windows: bool = False) -> dict:
+               extra_assets: list[dict] | None = None, regenerate_windows: bool = False,
+               holiday_items: list[dict] | None = None) -> dict:
     """Write the export into an empty database. Returns {station_id: name}."""
     keep = set(stations or NAMES)
     for s in export["stations"]:
@@ -112,6 +113,14 @@ async def seed(db, export: dict, start: datetime, days: int = 2, stations: set[s
                      category=a.get("category"), duration=a["duration"],
                      file_path=f"https://cdn.example.com/audio/{a['id']}.mp3",
                      metadata_extra=({"audio_analysis": a["analysis"]} if a.get("analysis") else None)))
+    await db.flush()
+    from app.models.holiday_music import HolidayItem
+
+    for h in holiday_items or []:
+        # {"holiday": "chanukah", "asset_id": ..., "station_id": None}: a holiday list (holiday music)
+        db.add(HolidayItem(id=uuid.uuid4(), holiday=h["holiday"], asset_id=uuid.UUID(h["asset_id"]),
+                           station_id=uuid.UUID(h["station_id"]) if h.get("station_id") else None,
+                           all_year=bool(h.get("all_year"))))
     await db.flush()
     _add_announcements(db, start, days)
     await db.flush()
@@ -155,14 +164,22 @@ async def seed(db, export: dict, start: datetime, days: int = 2, stations: set[s
             db.add(_row(SpotSchedule, s))
     if regenerate_windows:
         # Windows as the backend makes them today (the export holds what was stored then)
-        from app.services.shabbos_service import generate_shabbos_windows
+        from app.services.shabbos_service import (
+            generate_shabbos_windows,
+            generate_yom_tov_windows,
+            merge_overlapping_windows,
+        )
         from tests.sim.checks import PLACES
 
         tz_of = {s["id"]: s["timezone"] for s in export["stations"]}
         for sid in sorted(keep):
             _, lat, lon, _ = PLACES[tz_of[sid]]
             first = (start - timedelta(days=1)).date()
-            for w in generate_shabbos_windows(lat, lon, tz_of[sid], first, first + timedelta(days=days + 2), [sid]):
+            last = first + timedelta(days=days + 2)
+            for w in merge_overlapping_windows(
+                generate_shabbos_windows(lat, lon, tz_of[sid], first, last, [sid])
+                + generate_yom_tov_windows(lat, lon, tz_of[sid], first, last, [sid])
+            ):
                 db.add(HolidayWindow(id=uuid.uuid4(), name=w["name"],
                                      start_datetime=datetime.fromisoformat(w["start_datetime"]).astimezone(UTC),
                                      end_datetime=datetime.fromisoformat(w["end_datetime"]).astimezone(UTC),
