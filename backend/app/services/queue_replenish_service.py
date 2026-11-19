@@ -98,7 +98,10 @@ class QueueReplenishService:
         try:
             changed = await drop_misplaced(self.db, self.station_id)
             # and the next ID forward when moves and pass-overs left it late (12-20 min apart)
-            changed += await pull_late_id(self.db, self.station_id)
+            from app.services.playlist_generator_service import id_settings_for
+
+            if id_settings_for(getattr(self, "automation_config", None)).enabled:  # no extra read when IDs are off
+                changed += await pull_late_id(self.db, self.station_id)
             if changed:
                 await self.db.commit()
         except Exception:
