@@ -172,6 +172,15 @@ a timed spot on the second, Play Now, play-next, and a 50 s backend outage. Next
 song and then the emergency folder played; afterwards nothing was replayed.
 Not tested: real Icecast listeners at scale, real iPhone Safari on the stream.
 
+## Asks, short items and restarts (2026-11-19)
+- `request.dynamic` calls `next_request` on every frame (about 25 a second) while a track plays and the queue is empty; `retry_delay` only holds while nothing plays. radio.liq keeps its own `ask_after`: an empty (204) or failed answer waits 1.5 s, and a flush, Next, live change or skip asks at once.
+- An answer to an ask that was in flight across a flush is dropped and asked again (`flush_count`): it was how a parked station ID still aired at 03:46Z on Jerusalem.
+- `/next` now returns `seconds`. For an item under 12 s (station IDs, time checks, sponsor tags) the engine fetches and downloads the item after it at once, in a thread, and adds it to the main lane. Before, the follow-up was asked only when the short item started, and a download longer than the item played emergency music (Jerusalem 03:46:43Z and 04:00:13Z).
+- If the follow-up is still downloading when the short item ends, the hold lane gives quiet (at most 6 s after the hand-over, `handed_loading()`) instead of emergency music. The harness case `short_item_before_slow_file` (2 s and 9 s items, 4 s download) checks it.
+- Emergency copies are named after the asset (`<asset id>.mp3`), so the folder holds one copy per item.
+- A shiur or story that starts after the time check was handed to the engine (in the last 45 s before it) is still paused and resumed: the pause rule looks at what is on air until the item's second, not only at hand-over (simulator, Stories 11:00, cut with 33 min left).
+- Engine restart during a shiur: the first `/next` after a fresh start queues a resume entry at the point it reached (`_resume_after_restart`), so the shiur carries on instead of being lost. Timed items the engine missed raise one alert per pass, not one each.
+
 ## Old path
 
 `liquidsoap_client.py` / `LIQUIDSOAP_*` (telnet push) is the earlier attempt and must stay off:
@@ -442,3 +451,13 @@ outgoing track's tags once more), logged as "showed again for a moment; ignored"
 journal for that break showed one plain crossfade and no hold or timed line, so this
 crossfade path is the likely cause. Start reports are not logged by the engine unless the
 backend is unreachable.
+
+## The FM feed is the engine's stream (2026-11-19)
+
+The FM feed must carry the whole station at all times: automation between shows,
+host and callers during shows, and never drop. That is the playout engine's stream
+(and, in the BMG room, the same engine on the local box: [local-fm-box](local-fm-box.md)).
+The backend's own Icecast source (`icecast_service.py`, "Start the FM feed",
+`ICECAST_HOST`) carried only the live host's microphone and dropped between shows;
+it was never configured in production and is retired. `/icecast/{id}/start` and
+`/stop` answer 410; `/icecast/status` names the engine's streams.

@@ -28,6 +28,7 @@ from sqlalchemy.orm import joinedload
 _FIELD = re.compile(r'(\w+)="((?:[^"\\]|\\.)*)"')
 NEXT_RETRY = 2.0  # radio.liq retries an empty /next after a moment
 PROTO = 5
+HOLD_SECONDS = 8.0
 
 
 def parse_uri(uri: str) -> dict:
@@ -79,6 +80,9 @@ class FakeEngine:
     group: list = field(default_factory=list)  # timed items of the group on air, after the current
     ask_next_at: float | None = None
     commands: list = field(default_factory=list)
+    # None: the engine talks to the backend itself (the stream server). Else a local FM
+    # box's relay stands between them (tests/sim/offline.py): .next(given), .started(...)
+    backend: object = None
 
     @property
     def sid(self) -> str:
@@ -214,19 +218,25 @@ class FakeEngine:
         now = self.sim.t
         if self.cued is not None:
             return
-        async with self.sim.session() as db:
-            got = await playout_engine.handle_next(db, self.station_id, list(self.given[:5]),
-                                                   proto=PROTO, engine_live_on=False)
+        if self.backend is not None:
+            got = await self.backend.next(list(self.given[:5]))
+        else:
+            async with self.sim.session() as db:
+                got = await playout_engine.handle_next(db, self.station_id, list(self.given[:5]),
+                                                       proto=PROTO, engine_live_on=False)
         if got is None:
             self.ask_next_at = now + NEXT_RETRY
-            if self.on_air is None:
+            if self.on_air is None and any(w.at - now <= HOLD_SECONDS for w in self.timed):
+                pass  # radio.liq's hold lane: quiet for up to 8 s before a loaded timed item
+            elif self.on_air is None:
                 # nothing on air and nothing to play: the emergency music
                 self.on_air = Segment(self.sid, None, "emergency", now, None, "emergency music")
                 self.sim.log.append(self.on_air)
             return
         eid = got["entry_id"]
-        self.given.insert(0, eid)
-        del self.given[8:]
+        if eid:
+            self.given.insert(0, eid)
+            del self.given[8:]
         item = await self.sim.item_for(eid, "main", got["uri"])
         if item is None:
             self.ask_next_at = now + NEXT_RETRY
@@ -247,8 +257,11 @@ class FakeEngine:
         self.on_air, self.on_air_item = seg, item
         self.sim.log.append(seg)
         self.sim.schedule(seg.end, self.sid, "end")
-        async with self.sim.session() as db:
-            await playout_engine.handle_started(db, self.station_id, item.entry_id, item.lane, at=now)
+        if self.backend is not None:
+            await self.backend.started(item.entry_id, item.lane, now)
+        else:
+            async with self.sim.session() as db:
+                await playout_engine.handle_started(db, self.station_id, item.entry_id, item.lane, at=now)
         if item.lane == "main" and self.cued is None:
             await self.ask_next(start_if_idle=False)
 
@@ -270,10 +283,16 @@ def _dt(epoch: float) -> datetime:
 async def item_from_db(db, entry_id: str, lane: str, uri: str) -> Item | None:
     from app.models.queue_entry import QueueEntry
     import uuid as _uuid
-    row = (await db.execute(
+    row = None if not entry_id else (await db.execute(
         select(QueueEntry).options(joinedload(QueueEntry.asset)).where(QueueEntry.id == _uuid.UUID(entry_id))
     )).unique().scalar_one_or_none()
+    if row is None and entry_id:
+        # deleted on the site since the box got its plan: the box still has the file
+        f = parse_uri(uri)
+        return Item(entry_id, lane, f, float(f.get("sim_length") or 240.0))
     fields = parse_uri(uri)
+    if not entry_id:
+        return Item("", lane, fields, 60.0)  # the box's own silence file during a blackout
     if row is None or row.asset is None:
         return None
     length = float(row.asset.duration or 0.0)

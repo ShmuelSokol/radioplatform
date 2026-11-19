@@ -155,7 +155,7 @@ radioplatform/
 | holidays | holidays.py | /holidays |
 | sponsors | sponsors.py | /sponsors (CRUD; `/clients`, `/{id}/account`, `/{id}/plays`, `/{id}/missed-plays`: the client database, see `wiki/sponsor-accounts.md`; delete refused with contracts or plays) |
 | channels | channels.py | /channels |
-| icecast | icecast.py | /icecast |
+| icecast | icecast.py | /icecast: retired 2026-11-19 (the backend's own FM source); `GET /status` names the engine's streams, start and stop answer 410. The FM feed is the playout engine's stream |
 | analytics | analytics.py | /analytics |
 | playlists | playlists.py | /playlists (the list is readable by every staff role, so a schedule's blocks can name their playlist; everything else manager only) |
 | sponsor_portal | sponsor_portal.py | /sponsor-portal |
@@ -208,7 +208,6 @@ radioplatform/
 | weather_service.py | OpenWeatherMap API (current + 3-day forecast) |
 | weather_spot_service.py | Weather/time announcement generation + caching; stores uploaded daily weather spots per region (station `automation_config.weather_region`, default lakewood; ElevenLabs is the fallback for the default region only) |
 | sun_service.py | Sunrise/sunset calculations (astral) |
-| icecast_service.py | Icecast OTA broadcast source client |
 | email_service.py | Resend transactional email (campaign updates, invoices, payments) |
 | ai_email_service.py | Claude API-powered email drafting for manager outreach |
 | copy_review_service.py | Checks a sponsor's proposed wording against the sponsorship rules in force (Claude API, keyword fallback) |
@@ -431,10 +430,6 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 | `SUPABASE_URL` | Supabase project URL | For storage |
 | `SUPABASE_SERVICE_KEY` | Supabase service role key | For storage |
 | `SUPABASE_STORAGE_BUCKET` | Storage bucket name (default: "audio") | For storage |
-| `ICECAST_HOST` | Icecast server hostname (empty to disable) | For OTA |
-| `ICECAST_PORT` | Icecast server port (default: 8000) | For OTA |
-| `ICECAST_SOURCE_PASSWORD` | Icecast source password (no default; empty or "hackme" = nothing streams) | For OTA |
-| `ICECAST_MOUNT` | Icecast mount point (default: /live) | For OTA |
 | `STRIPE_SECRET_KEY` | Stripe secret key (empty to disable) | For billing |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret | For billing |
 | `STRIPE_PRICE_ID` | Stripe price ID | For billing |
@@ -453,6 +448,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 | `LIQUIDSOAP_ENABLED` | Enable Liquidsoap (remote VPS) | For streaming |
 | `LIQUIDSOAP_HOST` | VPS hostname for Liquidsoap telnet | For streaming |
 | `LIQUIDSOAP_TELNET_PORT` | Liquidsoap telnet port (default: 1234) | For streaming |
+| `ICECAST_HOST`, `ICECAST_PORT`, `ICECAST_SOURCE_PASSWORD`, `ICECAST_MOUNT` | Unused since the backend's own FM source was retired (kept so old settings still load) | No |
 | `ICECAST_STREAM_URL` | Stream base URL (e.g., https://stream.kbrlive.com/live); an engine station streams at `<base>-<station id>` | For streaming |
 | `PLAYOUT_ENGINE_ENABLED` | Let the playout engine drive the listed stations (default false) | For the engine |
 | `PLAYOUT_ENGINE_STATION_ID` | Comma-separated stations the engine plays (one engine each; setup.sh prints the list) | For the engine |

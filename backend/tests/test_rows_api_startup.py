@@ -177,7 +177,6 @@ async def test_api_serves_when_resume_and_scheduler_fail_at_startup(monkeypatch)
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="found 2026-11-19: scheduler failing to start at boot is only a log warning; no alert is raised, so stations silently never advance")
 async def test_scheduler_failing_at_startup_raises_an_alert(monkeypatch, db_session: AsyncSession):
     """V1-113 (second half): staff must hear about it."""
     from app.models.alert import Alert
