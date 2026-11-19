@@ -223,7 +223,7 @@ function QueuePanel(p: Props) {
           if (inBlock) tone += ' qn-row-block';
 
           return (
-            <div key={entry.id} data-testid="queue-row" data-entry-id={entry.id}>
+            <div key={entry.id} data-testid="queue-row" data-entry-id={entry.id} data-nav-id={`queue-${entry.id}`}>
               {isArmed && (
                 <div className="flex items-center gap-2 px-3 h-10 bg-[#00ffff] text-black text-sm font-bold" data-testid="insert-marker">
                   <span className="text-lg leading-none">↳</span>

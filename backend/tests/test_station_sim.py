@@ -49,12 +49,10 @@ async def test_main_top_of_the_hour_into_the_daf_yomi(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "Reproduction (2026-11-19 simulator): sponsorship breaks at :15/:30/:45/:00 are queued "
-    "inside the 8 PM Daf Yomi when the shiur's block is queued in the same pass as the breaks "
-    "(talk_windows only sees shiurim already in the queue). Reported to the sponsorship thread."))
 async def test_no_sponsorship_inside_the_daf_yomi(tmp_path):
-    result = await _run(tmp_path, datetime(2026, 11, 18, 19, 58, tzinfo=NY), 0.35, ["main"])
+    """Main 7:40 to 8:46 PM: the Daf block is queued in the same pass as the sponsor breaks
+    around it; none may land inside it (PR 406: the blocks' own shiurim count)."""
+    result = await _run(tmp_path, datetime(2026, 11, 18, 19, 40, tzinfo=NY), 1.1, ["main"])
     assert result.checks_run["no sponsorship inside a shiur or story"] >= 1
     assert not result.failed("no sponsorship inside a shiur or story")
 

@@ -5,6 +5,7 @@ import { TIME_SLOTS, WIDE_DAYPARTS, updateSpotSchedule, type Daypart, type SpotS
 import { useStations } from '../../hooks/useStations';
 import { useEscape } from '../../hooks/useEscape';
 import Spinner from '../Spinner';
+import { contractTotals, length, perDayText, runText } from './contractTotals';
 
 /**
  * Edit a running (or past) contract: which spot, which station, which days,
@@ -74,6 +75,17 @@ export default function ContractEditor({ contract, sponsorId, onClose }: {
   const [error, setError] = useState('');
   const [warnings, setWarnings] = useState<string[] | null>(null);
 
+  const shape = {
+    days_of_week: days.join(','),
+    dayparts: dayparts.join(','),
+    plays_per_daypart: perPart,
+    fixed_times: mode === 'exact' ? [...times, ...(newTime ? [newTime] : [])].join(',') || null : null,
+    start_date: start || null,
+    end_date: end || null,
+  };
+  const totals = contractTotals(shape);
+  const spotSeconds = account?.spots?.find((s) => s.asset_id === assetId)?.duration ?? null;
+
   const save = useMutation({
     mutationFn: (data: Partial<SpotScheduleInput>) => updateSpotSchedule(contract.id, data),
     onSuccess: (saved) => {
@@ -130,6 +142,23 @@ export default function ContractEditor({ contract, sponsorId, onClose }: {
           <button type="button" onClick={onClose} className="min-h-[40px] px-3 border rounded-lg text-sm">Close</button>
         </div>
 
+        {!warnings && (
+          <div className="sticky top-0 z-10 -mx-4 sm:-mx-6 px-4 sm:px-6 py-2 bg-blue-50 border-y border-blue-200" role="status" aria-live="polite" data-testid="contract-summary">
+            <p className="text-lg font-semibold" data-testid="summary-per-day">
+              {mode === 'exact' && !totals.perDay ? 'No times yet' : `Plays ${perDayText(totals)}`}
+            </p>
+            {mode === 'spread' && totals.slots > 0 && (
+              <p className="text-sm">{perPart} in each of {totals.slots} {totals.slots === 1 ? 'slot' : 'slots'}</p>
+            )}
+            <p className="text-sm" data-testid="summary-run">{runText(shape, totals)}</p>
+            {spotSeconds ? (
+              <p className="text-sm" data-testid="summary-length">
+                Each play {length(spotSeconds)}, {length(spotSeconds * totals.perDay)} of air a day
+              </p>
+            ) : null}
+          </div>
+        )}
+
         {warnings ? (
           <div className="space-y-3">
             <p className="text-green-700 font-medium" role="status" data-testid="contract-saved">Saved. The coming plays were planned again.</p>
@@ -179,12 +208,27 @@ export default function ContractEditor({ contract, sponsorId, onClose }: {
                     {[...TIME_SLOTS, ...WIDE_DAYPARTS.filter((w) => dayparts.includes(w.key))].map((p) => (
                       <button key={p.key} type="button" aria-pressed={dayparts.includes(p.key)} className={chip(dayparts.includes(p.key))} onClick={() => setDayparts(toggle(dayparts, p.key))}>
                         {p.label} <span className="ml-1.5 text-xs opacity-75">{p.hours}</span>
+                        {dayparts.includes(p.key) && <span className="ml-1.5 text-xs font-semibold">× {perPart}</span>}
                       </button>
                     ))}
                   </div>
-                  <label className="flex items-center gap-2 text-sm">Plays in each slot
-                    <input type="number" min={1} max={12} value={perPart} onChange={(e) => setPerPart(Math.max(1, Math.min(12, Number(e.target.value) || 1)))} className="w-20 px-2 py-1 border rounded-lg" />
-                  </label>
+                  <div className="flex flex-wrap items-center gap-3 text-sm">
+                    <label className="flex items-center gap-2">Plays in each slot
+                      <input type="number" min={1} max={12} value={perPart} onChange={(e) => setPerPart(Math.max(1, Math.min(12, Number(e.target.value) || 1)))} className="w-20 px-2 py-1 border rounded-lg" aria-label="Plays in each slot" />
+                    </label>
+                    {/* A day's total as its own control: each ticked slot gets an equal share */}
+                    <label className="flex items-center gap-2">Plays a day
+                      <select
+                        aria-label="Plays a day"
+                        className="px-2 py-1 border rounded-lg"
+                        value={totals.perDay}
+                        disabled={!dayparts.length}
+                        onChange={(e) => setPerPart(Math.max(1, Math.round(Number(e.target.value) / Math.max(1, dayparts.length))))}
+                      >
+                        {Array.from({ length: 12 }, (_, i) => (i + 1) * Math.max(1, dayparts.length)).map((n) => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    </label>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-2">

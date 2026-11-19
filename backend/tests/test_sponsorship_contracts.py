@@ -302,7 +302,11 @@ async def test_rotations_never_draw_contract_audio(
                            date.today() + timedelta(days=1))
     free_spot = Asset(id=uuid.uuid4(), title="Station promo", file_path="s/promo.mp3",
                       duration=20.0, asset_type="spot", category="spots")
-    db_session.add(free_spot)
+    # a loose copy of the contract's audio (same title, tied to nothing): Main's old
+    # "Sponsor Ad Every 30min" rule drew such copies on 2026-11-18
+    loose_copy = Asset(id=uuid.uuid4(), title=assets[0].title.upper(), file_path="s/copy.mp3",
+                       duration=20.0, asset_type="spot", category="spots")
+    db_session.add_all([free_spot, loose_copy])
     await db_session.commit()
 
     random_pick = (await db_session.execute(
@@ -313,6 +317,7 @@ async def test_rotations_never_draw_contract_audio(
     for ids in (random_pick, by_category):
         got = {str(i) for i in ids}
         assert str(assets[0].id) not in got
+        assert str(loose_copy.id) not in got
         assert str(free_spot.id) in got
         # audio no contract uses yet is still an ordinary spot
         assert str(assets[1].id) in got
@@ -431,7 +436,11 @@ async def test_audio_swapped_out_of_its_contract_is_never_filler(
     assert r.status_code == 200, r.text
     free_spot = Asset(id=uuid.uuid4(), title="Station promo", file_path="s/promo.mp3",
                       duration=20.0, asset_type="spot", category="spots")
-    db_session.add(free_spot)
+    # a loose copy of the contract's audio (same title, tied to nothing): Main's old
+    # "Sponsor Ad Every 30min" rule drew such copies on 2026-11-18
+    loose_copy = Asset(id=uuid.uuid4(), title=assets[0].title.upper(), file_path="s/copy.mp3",
+                       duration=20.0, asset_type="spot", category="spots")
+    db_session.add_all([free_spot, loose_copy])
     await db_session.commit()
 
     random_pick = (await db_session.execute(

@@ -1,3 +1,4 @@
+import { totalsLine } from '../../components/sponsors/contractTotals';
 import { useEffect, useMemo, useState } from 'react';
 import ContractEditor from '../../components/sponsors/ContractEditor';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -341,6 +342,7 @@ function ContractLine({ c, listen, account }: { c: ClientContract; listen: Retur
       <td className="px-3 py-2">
         <div>{c.asset_title}</div>
         {c.name && <div className="text-xs text-gray-500 font-normal">{c.name}</div>}
+        <div className="text-xs text-gray-700 font-normal mt-1" data-testid="contract-totals">{totalsLine(c, c.duration)}</div>
       </td>
       <td className="px-3 py-2" data-label="Status">
         <StatusPill status={c.state} label={CONTRACT_STATE_LABEL[c.state]} />

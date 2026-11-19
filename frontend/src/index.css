@@ -178,3 +178,22 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; a
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
 }
+
+/* Back to where you were (components/layout/BackNav.tsx): the row and control last
+   tapped light up when you come back to a page, then keep a quiet outline (lib/navMemory.ts). */
+@keyframes nav-return-flash {
+  0%, 55% { box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.45); background-color: rgba(250, 204, 21, 0.28); }
+  100% { box-shadow: 0 0 0 4px rgba(250, 204, 21, 0); }
+}
+.nav-return-mark {
+  outline: 2px solid #facc15 !important;
+  outline-offset: -2px;
+  scroll-margin: 96px;
+}
+.nav-return-flash {
+  outline: 3px solid #facc15 !important;
+  animation: nav-return-flash 2.4s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-return-flash { animation: none; }
+}
