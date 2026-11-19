@@ -432,6 +432,25 @@ async def reconcile_block_entries(
     )
     removed = 0
     queued_at: set[datetime] = set()
+    talks_token = None
+    if rebuild and pending:
+        from app.services.spot_schedule_service import TALKS_BEFORE_REBUILD, talk_windows
+
+        talks_token = TALKS_BEFORE_REBUILD.set(
+            await talk_windows(db, station, station_tz(station.timezone), now)
+        )
+    try:
+        return await _reconcile_blocks(
+            db, station, station_id, blocks, pending, rebuild, now, earliest, removed, queued_at
+        )
+    finally:
+        if talks_token is not None:
+            TALKS_BEFORE_REBUILD.reset(talks_token)
+
+
+async def _reconcile_blocks(
+    db: AsyncSession, station, station_id, blocks, pending, rebuild, now, earliest, removed, queued_at
+) -> dict | None:
     for entry in pending:
         at = as_utc(entry.preempt_at).replace(second=0, microsecond=0)
         if (rebuild or not blocks) and at > earliest:

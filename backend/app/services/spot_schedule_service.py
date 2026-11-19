@@ -14,6 +14,7 @@ them (source="ad_slot" + preempt_at), so the player treats them the same way.
 """
 
 import logging
+from contextvars import ContextVar
 import uuid
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
@@ -66,6 +67,11 @@ SPONSOR_GAP = timedelta(minutes=60)
 # A soft break this close to a shiur's end waits for it anyway (long_items), so it
 # does not interrupt and stays usable.
 TALK_TAIL = timedelta(minutes=5)
+# Talk windows read before a block rebuild deleted the queued shiurim it is about
+# to queue again (see program_block_service.reconcile_block_entries).
+TALKS_BEFORE_REBUILD: ContextVar[list[tuple[datetime, datetime]] | None] = ContextVar(
+    "talks_before_rebuild", default=None
+)
 # Never add/remove a slot this close to air time — the player may be picking it up.
 SAFETY_MARGIN = timedelta(minutes=2)
 
@@ -755,7 +761,12 @@ async def plan_for_station(
             select(Asset.id, Asset.duration).where(Asset.id.in_({s.asset_id for s in schedules}))
         )
         durations = {str(r[0]): float(r[1]) for r in rows.all() if r[1]}
-    quiet = await talk_windows(db, station, tz, now) if breaks else []
+    quiet: list[tuple[datetime, datetime]] = []
+    if breaks:
+        # A rebuild has just deleted the queued block entries, the shiur among them,
+        # so its own list from before the delete is the true one (Main 2026-11-18:
+        # a sponsorship queued at 8:15 inside the Daf Yomi after a rebuild).
+        quiet = TALKS_BEFORE_REBUILD.get() or await talk_windows(db, station, tz, now)
     placements, unplaced = plan_spots(
         schedules,
         tz,
