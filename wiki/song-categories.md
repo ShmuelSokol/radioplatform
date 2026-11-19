@@ -33,7 +33,9 @@ Built as ordinary playlists and weekly blocks by the scripts in project files
 `holiday-music/shabbos/` (backup and `--undo`): "Erev Shabbos - <playlist>" copies with
 every second music step = shabbos, on Thursday 6 PM-midnight and Friday 6 AM-10 PM;
 "Motzei Shabbos opening" (sunset +72 to +102 min, Saturday) then "Motzei Shabbos hot mix"
-(to midnight). A weekly block beats a daily one at the same priority (`block_rank`).
+(to midnight). The Shabbos blocks are priority 1, one above the daily ones: an explicit override, so
+`alert_service.detect_schedule_conflicts` raises no overlap warning (it warns only for
+blocks of equal priority; a weekly block would win the tie anyway, `block_rank`).
 Each run of a block starts its playlist at the first step (`cursor["<block>@run"]` in
 `playlist_generator_service.generate`); before, the cursor carried on from the block's last
 run, so Motzei Shabbos could open on a hot song. A redraw inside the same run carries on.

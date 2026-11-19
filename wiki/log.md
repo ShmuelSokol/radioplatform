@@ -465,3 +465,4 @@ UPDATE 2026-11-19 holiday-music.md a holiday list or settings change in season r
 UPDATE 2026-11-19 holiday-music.md rest per holiday item now 3 h song / 24 h story or shiur (was 2 h / 6 h; two-story list aired each 4x a day)
 INGEST 2026-11-19 song-categories.md songs in several categories (asset_categories via in_category), mix-only shabbos/motzei_shabbos, holiday lists vs categories, NY sun blocks use Lakewood when the station has no coordinates
 UPDATE 2026-11-19 playlist-generation.md song-categories.md each run of a block starts its playlist at step 1 (cursor carried over from the last run, Motzei Shabbos opened on a hot song in the simulator)
+UPDATE 2026-11-19 song-categories.md overlap warnings skip blocks of different priority (explicit override); Erev/Motzei Shabbos blocks are priority 1
