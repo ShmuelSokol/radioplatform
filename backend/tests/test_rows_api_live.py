@@ -45,14 +45,19 @@ async def test_second_host_socket_takes_over_the_show(ws_app, db_session):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="found 2026-11-19: a second host audio socket does not replace the first: the first tab's mic frames still go to listeners and it is never told it was taken over")
 async def test_first_host_socket_is_no_longer_heard_and_is_told(ws_app, db_session):
     """V1-149: after the second tab opens, the first tab's frames are not heard and the
     first socket is told (a message or a close)."""
     station, show, listener, first, second = await _two_hosts(ws_app, db_session)
+    # The first page is told as soon as the second one is the show's host (the second
+    # socket signs in and loads the show first, so this waits for that moment)
+    assert await first.expect_close(timeout=3.0) == 4011
+    while not listener.outbox.empty():
+        await listener.receive()
     await first.send_bytes(pcm(300))
     assert await listener.nothing(0.2), "the first host's mic is still heard"
-    msg = await first.receive(timeout=0.5)
-    assert msg["type"] in ("websocket.send", "websocket.close")
+    # ... and the show goes on with the second page: nobody was told it is off air
+    await second.send_bytes(pcm(400))
+    assert await listener.receive_bytes() == pcm(400)
     for ws in (second, first, listener):
         await ws.disconnect()
