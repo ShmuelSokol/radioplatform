@@ -255,7 +255,6 @@ def test_time_announcement_names_the_brand():
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="found 2026-11-19: the generated time announcement always says 'W M D I 107.9, the highest frequency' (the FM call sign), also for a Jerusalem or web-only station")
 async def test_generated_time_announcement_is_per_station(db_session: AsyncSession):
     """V1-120: a station in another region (Jerusalem) with no uploaded clip must not
     announce the FM station's call sign."""
@@ -270,7 +269,45 @@ async def test_generated_time_announcement_is_per_station(db_session: AsyncSessi
          patch("app.services.weather_spot_service.generate_tts", tts):
         await get_or_create_weather_spot_assets(db_session, "2026-11-19T15", "jerusalem")
     assert tts.await_args_list, "no time announcement was generated"
-    assert "107.9" not in tts.await_args_list[0].args[0]
+    said = tts.await_args_list[0].args[0]
+    assert "107.9" not in said and "W M D I" not in said and "Lakewood" not in said, said
+    assert said.startswith("The time is 3 PM on Radio"), said
+
+
+def test_generated_time_text_keeps_the_call_sign_only_in_lakewood():
+    """V1-120 fix: Lakewood (default region) keeps "W M D I 107.9"; any other region names only the brand."""
+    from datetime import datetime
+
+    from app.services.weather_spot_service import _build_time_text
+
+    at = datetime(2026, 11, 19, 15, 30)
+    assert "W M D I 107.9" in _build_time_text(at)
+    assert "W M D I 107.9" in _build_time_text(at, region="lakewood")
+    other = _build_time_text(at, region="jerusalem")
+    assert "107.9" not in other and "W M D I" not in other and other.startswith("The time is 3:30 PM on Radio")
+
+
+@pytest.mark.asyncio
+async def test_generated_time_clip_of_one_region_is_not_reused_by_another(db_session: AsyncSession):
+    """V1-120 fix: the generated clip is kept per region, so Jerusalem never plays Lakewood's
+    "W M D I 107.9" clip made for the same slot (and the other way round)."""
+    from app.services.weather_spot_service import get_or_create_weather_spot_assets
+
+    tts = AsyncMock(return_value=(b"tts", 3.0))
+    with patch("app.services.audio_analysis_service.normalize_audio_loudness", side_effect=lambda b: b), \
+         patch("app.services.weather_spot_service.upload_to_supabase", new_callable=AsyncMock,
+               side_effect=lambda data, path: f"https://storage.test/{path}"), \
+         patch.object(settings, "ELEVENLABS_API_KEY", "k"), patch.object(settings, "ELEVENLABS_VOICE_ID", "v"), \
+         patch.object(settings, "OPENWEATHERMAP_API_KEY", ""), \
+         patch("app.services.weather_spot_service.generate_tts", tts):
+        lakewood, _ = await get_or_create_weather_spot_assets(db_session, "2026-11-19T15", "lakewood")
+        jerusalem, _ = await get_or_create_weather_spot_assets(db_session, "2026-11-19T15", "jerusalem")
+        again, _ = await get_or_create_weather_spot_assets(db_session, "2026-11-19T15", "jerusalem")
+    assert lakewood and jerusalem and lakewood.id != jerusalem.id
+    assert again.id == jerusalem.id, "the region's own clip is reused for its slot"
+    assert lakewood.file_path != jerusalem.file_path
+    texts = [c.args[0] for c in tts.await_args_list]
+    assert len(texts) == 2 and "107.9" in texts[0] and "107.9" not in texts[1], texts
 
 
 # -------------------------------------------------------------- FM feed (V2-116)

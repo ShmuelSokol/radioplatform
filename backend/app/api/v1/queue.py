@@ -3024,13 +3024,12 @@ async def preview_weather(
     )
     from app.services.weather_service import get_current_weather
 
-    time_asset, weather_asset = await get_or_create_weather_spot_assets(
-        db, slot_key, await weather_region_for_station(db, station_id)
-    )
+    region = await weather_region_for_station(db, station_id)
+    time_asset, weather_asset = await get_or_create_weather_spot_assets(db, slot_key, region)
     await db.commit()
 
     # Build text for display
-    time_text = _build_time_text(eastern_now)
+    time_text = _build_time_text(eastern_now, region=region)
     try:
         weather_data = await get_current_weather()
         weather_text = _build_weather_text(weather_data)

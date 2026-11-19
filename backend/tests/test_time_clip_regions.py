@@ -49,7 +49,7 @@ async def test_regions_keep_their_own_clips(client: AsyncClient, auth_headers: d
 
 
 @pytest.mark.asyncio
-async def test_station_plays_its_regions_clip_else_the_default(db_session: AsyncSession):
+async def test_station_plays_only_its_regions_clip(db_session: AsyncSession):
     from app.services.weather_spot_service import get_or_create_weather_spot_assets
 
     old = Asset(id=uuid.uuid4(), title="Time Announcement - 15:00", file_path="lk15", asset_type="jingle",
@@ -68,7 +68,9 @@ async def test_station_plays_its_regions_clip_else_the_default(db_session: Async
         t_jm16, _ = await get_or_create_weather_spot_assets(db_session, "2026-11-16T16", "jerusalem")
     assert t_jm.id == jm.id
     assert t_lk.id == old.id                 # Lakewood never plays Jerusalem's clip
-    assert t_jm16.id == old16.id             # no Jerusalem clip for 16:00 yet: the shared one
+    # No Jerusalem clip for 16:00: never Lakewood's (it says "one oh seven nine, Lakewood", V1-120);
+    # a generated one without the call sign, or nothing
+    assert t_jm16 is None or t_jm16.id != old16.id
 
 
 @pytest.mark.asyncio

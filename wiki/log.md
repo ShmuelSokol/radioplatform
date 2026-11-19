@@ -438,6 +438,7 @@ INGEST 2026-11-19 spot-schedules.md automation_config.sponsorships_wait_for_talk
 UPDATE 2026-11-19 spot-schedules.md a soft item due while a paused story waits plays after the resume, not in the time check's pause (_resume_before_soft)
 UPDATE 2026-11-19 spot-schedules.md block_talk_windows: a block's own shiur counts before it is queued (Daf block queued in the same pass as the breaks); loose copies of contract audio (same title) never drawn at random (old "Sponsor Ad Every 30min" rules)
 INGEST 2026-11-19 spot-schedules.md contract totals (plays a day, days and plays over the dates, spot length) in Edit contract, client contract rows and Spot Schedule: components/sponsors/contractTotals.ts
+UPDATE 2026-11-19 hourly-slots.md time clips no longer fall back to the Lakewood set for another region; generated time text names W M D I 107.9 only for Lakewood (V1-120)
 INGEST 2026-11-19 back-navigation.md Back line on staff pages (BackNav.tsx), per-tab history notes keyed by history.state.idx (lib/navMemory.ts), useNavState for page state, tapped row lit on return, deleted pages skipped via api/client.ts DELETE hook
 UPDATE 2026-11-19 playlist-generation.md station IDs: air-time guard (station_id_guard.py) passes over an ID after a break/spoken item or near a break; soft breaks move at air time
 UPDATE 2026-11-19 playlist-generation.md station IDs: drop_misplaced tidies waiting IDs beside breaks after each top-up; queue page estimates use on-air lengths
