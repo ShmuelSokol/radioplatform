@@ -365,6 +365,9 @@ async def station_day(db: AsyncSession, station: Station, now: datetime | None =
             "asset": {
                 "id": str(a.id), "title": a.title, "artist": a.artist, "asset_type": a.asset_type,
                 "category": a.category, "duration": a.duration,
+                # a sponsor's recording placed by a program block (source "block", no spots
+                # category) is only known as a sponsorship by this link (Main 2026-11-19)
+                "sponsor_id": str(a.sponsor_id) if a.sponsor_id else None,
             },
             "sponsor_name": sponsor_of.get(str(a.id)),
         })

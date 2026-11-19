@@ -93,6 +93,9 @@ ONE_MOMENT_CATEGORIES = ("weather_spot", "time_announcement")
 NEVER_RANDOM_CATEGORIES = (
     "do_not_play", "test", "tests", "testing", "carlebach", "block_only", "kids",
     "kids_car_summer", "kids_car_year",
+    # The shofar (or whatever airs at candle lighting) and other Erev Shabbos items:
+    # only the station's Shabbos ending plays them (services/shabbos_ending.py)
+    "shabbos_ending",
 )
 
 

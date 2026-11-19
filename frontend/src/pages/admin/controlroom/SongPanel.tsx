@@ -16,11 +16,13 @@ export interface SongTarget {
   source?: string | null;
   /** Show the item's own options even for a sponsorship spot */
   itemOptions?: boolean;
+  /** Known to be a sponsorship play (a row of the Sponsors list), whatever its source */
+  sponsorship?: boolean;
 }
 
 /** A sponsorship spot opens the Sponsor panel instead of the song options. */
 export function isSponsorship(t: SongTarget): boolean {
-  return isSponsorSpot(t.source, t.asset);
+  return !!t.sponsorship || isSponsorSpot(t.source, t.asset);
 }
 
 interface Props {

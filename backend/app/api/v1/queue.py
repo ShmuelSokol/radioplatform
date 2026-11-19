@@ -24,7 +24,15 @@ from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.models.asset import Asset, fit_for_random_pick, stored_analysis
 from app.models.play_log import PlayLog
-from app.models.queue_entry import QueueEntry, aired_from, hard_timed, is_soft_timed, mark_started, resume_offset
+from app.models.queue_entry import (
+    RESUME_PREFIX,
+    QueueEntry,
+    aired_from,
+    hard_timed,
+    is_soft_timed,
+    mark_started,
+    resume_offset,
+)
 from app.models.user import User
 from app.schemas.queue import (
     QueueAdd,
@@ -378,6 +386,37 @@ async def _skip_placeholders(db: AsyncSession, station_id) -> None:
     await skip_lapsed_sponsorships(db, station_id)
 
 
+async def _resume_before_soft(db: AsyncSession, station_id, entry: QueueEntry) -> QueueEntry:
+    """A soft timed item that is due while a paused shiur or story waits to carry on
+    plays after it, not in its pause: soft means "after the item on air", and a soft
+    item still soft at this point was meant to wait for the shiur's end (less than
+    five minutes left, or a sponsorship on a station where sponsorships wait). The
+    simulator caught a 10:45 sponsorship airing in the 11:00 time check's pause of a
+    story on All Day Stories (2026-11-19). Hard items still go first."""
+    from app.services import long_items
+
+    if not is_soft_timed(entry):
+        return entry
+    res = await db.execute(
+        select(QueueEntry, Asset)
+        .join(Asset, QueueEntry.asset_id == Asset.id)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.source.like(f"{RESUME_PREFIX}%"),
+            QueueEntry.position < entry.position,
+        )
+        .order_by(QueueEntry.position)
+        .limit(1)
+    )
+    row = res.first()
+    # Only a shiur or story: the rest of a song a live show paused still comes after
+    # the sponsorship that waited for the show (test_live_delay)
+    if row is None or not long_items.is_long_form(row[1]):
+        return entry
+    return row[0]
+
+
 async def _pick_next_pending(
     db: AsyncSession, station_id, now_utc: datetime, silence_only: bool = False
 ) -> QueueEntry | None:
@@ -419,7 +458,7 @@ async def _pick_next_pending(
     )
     entry = ad_result.scalar_one_or_none()
     if entry:
-        return entry
+        return await _resume_before_soft(db, station_id, entry)
     # A timed item due in a moment starts now instead of waiting for the clock: the
     # song before it often ends a few seconds early, and waiting left that much quiet
     # air (heard live: 3.3 s before a block at 08:35:00). Starting the next song
@@ -438,7 +477,7 @@ async def _pick_next_pending(
     )
     entry = soon.scalar_one_or_none()
     if entry:
-        return entry
+        return await _resume_before_soft(db, station_id, entry)
     from sqlalchemy.orm import joinedload
 
     from app.services.station_id_guard import must_wait

@@ -241,6 +241,7 @@ radioplatform/
 | rds_service.py | RDS line now: clock-based weighted rotation, sponsor line while their spot airs, Latin-only text (Hebrew dropped), 8/64 limits, play log of encoder fetches (see `wiki/rds-feed.md`) |
 | sponsor_accounts.py | Sponsors as clients: status from contract dates, spots by stage of the flow, plays per contract, the as-run log (see `wiki/sponsor-accounts.md`) |
 | sponsor_delivery.py | What a sponsor was promised against what aired: missed plays of the last 14 days and coming plays with no room or moved, for `GET /sponsor-portal/missed-plays` (see `wiki/spot-schedules.md`) |
+| shabbos_ending.py | Last song before Shabbos: the station's chosen song back-timed to end exactly at candle lighting (the blackout's start), the item after it (the shofar) first in the silence group, timed items cleared out of its way; `automation_config.shabbos_ending` (see `wiki/shabbos-ending.md`) |
 | station_blocks.py | "Not on this station": the per-station list of items a station does not play, the subquery every pick uses (`blocked_asset_ids`) and block/undo with removal of that station's waiting copies |
 | emergency_alerts.py | The emergency override: sends an alert to each station (engine `/alert`, or WS `emergency_alert` to browser players), takes the engine's start/end reports into the log, drops hard items due during it, alert + ntfy on each (see `wiki/emergency-alerts.md`) |
 | eas_tones.py | Finds EAS attention signal and SAME bursts in a recording, so a staff upload with them is refused |
@@ -528,6 +529,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-compact.mjs
 
 # The Sponsors client list and client page at desktop and phone sizes (real backend with clients that have a running contract and plays)
 cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMIN_PASSWORD=... node e2e/sponsor-clients.mjs
+
+# Stations page: "Last song before Shabbos" (song and item at candle lighting from a library search, saves and keeps other settings), desktop and iPhone
+cd frontend && BASE_URL=http://localhost:4313 node e2e/shabbos-ending-setting.mjs
 
 # Program Blocks page: "Only part of the year" season pickers (fake backend, desktop and iPhone)
 cd frontend && BASE_URL=http://localhost:4173 node e2e/program-block-season.mjs

@@ -8,6 +8,11 @@
 #     | bash -s -- [stations] [stream-domain] [backend-url]
 #
 # stations: "all" (default: every station the backend lists) or comma-separated ids.
+# Name every station that has an engine: one left out has its engine removed.
+#
+# KBR_RESTART_ONLY=<id>[,<id>]: restart only these engines now, even when the script
+# changed for all of them (one station first, the others later: run again without it).
+# The others keep running the old script until their own restart.
 #
 # At the end it prints the settings the backend needs. No password is ever written
 # to the repository; they are generated here and stay on this machine.
@@ -17,6 +22,7 @@ STATIONS="${1:-all}"
 DOMAIN="${2:-stream.kbrlive.com}"
 BACKEND_URL="${3:-https://api.kbrlive.com/api/v1}"
 REF="${KBR_SETUP_REF:-main}"
+RESTART_ONLY="$(echo "${KBR_RESTART_ONLY:-}" | tr ',' ' ')"
 RAW="https://raw.githubusercontent.com/ShmuelSokol/radioplatform/${REF}/infra/streaming"
 ENV_FILE=/etc/kbr-engine/env
 STATION_DIR=/etc/kbr-engine/stations
@@ -234,6 +240,11 @@ for PAIR in $PORTS; do
   if [ "$ENG_SUM" = "$(cat "$APPLIED/$SID" 2>/dev/null)" ] && [ "$ICE_RESTARTED" = no ] \
      && systemctl is-active --quiet "kbr-engine@$SID"; then
     echo "Engine $SID: unchanged, left running"
+    continue
+  fi
+  if [ -n "$RESTART_ONLY" ] && ! case " $RESTART_ONLY " in *" $SID "*) true;; *) false;; esac; then
+    # Not now: it keeps the old script; a later run without KBR_RESTART_ONLY restarts it
+    echo "Engine $SID: changed but left running (KBR_RESTART_ONLY), restart it later"
     continue
   fi
   systemctl restart "kbr-engine@$SID"

@@ -215,7 +215,7 @@ export interface StationDayPlay {
   source: string;
   at: string;
   local_time: string;
-  asset: { id: string; title: string; artist: string | null; asset_type: string; category: string | null; duration: number | null };
+  asset: { id: string; title: string; artist: string | null; asset_type: string; category: string | null; duration: number | null; sponsor_id?: string | null };
   sponsor_name: string | null;
 }
 export interface StationDay {

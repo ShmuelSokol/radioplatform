@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
 from sqlalchemy import inspect as sa_inspect
@@ -83,7 +83,8 @@ def load_export(path: str | Path) -> dict:
 
 
 async def seed(db, export: dict, start: datetime, days: int = 2, stations: set[str] | None = None,
-               config_overrides: dict | None = None, block_overrides: dict | None = None) -> dict:
+               config_overrides: dict | None = None, block_overrides: dict | None = None,
+               extra_assets: list[dict] | None = None, regenerate_windows: bool = False) -> dict:
     """Write the export into an empty database. Returns {station_id: name}."""
     keep = set(stations or NAMES)
     for s in export["stations"]:
@@ -105,6 +106,12 @@ async def seed(db, export: dict, start: datetime, days: int = 2, stations: set[s
                      category=a["category"], duration=a["duration"],
                      file_path=f"https://cdn.example.com/audio/{a['id']}.mp3",
                      metadata_extra={"cues": a.get("cues") or {}} if a.get("cues") else None))
+    for a in extra_assets or []:
+        # Items a scenario needs that the export lacks, with real analysis if given
+        db.add(Asset(id=uuid.UUID(a["id"]), title=a["title"], asset_type=a.get("asset_type", "music"),
+                     category=a.get("category"), duration=a["duration"],
+                     file_path=f"https://cdn.example.com/audio/{a['id']}.mp3",
+                     metadata_extra=({"audio_analysis": a["analysis"]} if a.get("analysis") else None)))
     await db.flush()
     _add_announcements(db, start, days)
     await db.flush()
@@ -146,10 +153,25 @@ async def seed(db, export: dict, start: datetime, days: int = 2, stations: set[s
         if (s.get("station_id") is None or s["station_id"] in keep) and s["sponsor_id"] in sponsor_ids \
                 and s["asset_id"] in asset_ids:
             db.add(_row(SpotSchedule, s))
-    for h in export["holiday_windows"]:
-        affected = (h.get("affected_stations") or {}).get("station_ids") or []
-        if not affected or set(affected) & keep:
-            db.add(_row(HolidayWindow, h))
+    if regenerate_windows:
+        # Windows as the backend makes them today (the export holds what was stored then)
+        from app.services.shabbos_service import generate_shabbos_windows
+        from tests.sim.checks import PLACES
+
+        tz_of = {s["id"]: s["timezone"] for s in export["stations"]}
+        for sid in sorted(keep):
+            _, lat, lon, _ = PLACES[tz_of[sid]]
+            first = (start - timedelta(days=1)).date()
+            for w in generate_shabbos_windows(lat, lon, tz_of[sid], first, first + timedelta(days=days + 2), [sid]):
+                db.add(HolidayWindow(id=uuid.uuid4(), name=w["name"],
+                                     start_datetime=datetime.fromisoformat(w["start_datetime"]).astimezone(UTC),
+                                     end_datetime=datetime.fromisoformat(w["end_datetime"]).astimezone(UTC),
+                                     is_blackout=True, affected_stations=w["affected_stations"], reason=w["reason"]))
+    else:
+        for h in export["holiday_windows"]:
+            affected = (h.get("affected_stations") or {}).get("station_ids") or []
+            if not affected or set(affected) & keep:
+                db.add(_row(HolidayWindow, h))
     await db.commit()
     return {k: NAMES[k] for k in keep}
 

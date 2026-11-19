@@ -44,6 +44,8 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [emergency-alerts](emergency-alerts.md) — EAS: what the certified box does vs our override (engine alert lane, device API, line input on the FM box), the 47 CFR 11.45 tone guard, log page
 - [local-fm-box](local-fm-box.md) — Feeding FM from the transmitter room: the engine on a local box with a relay that keeps it on air with no internet (plan + library on disk); stages and gaps
 - [look-at-the-screen-tests](look-at-the-screen-tests.md) — the browser guard, the walk of every page and control on three stations, the station isolation sweep
+- [blackout-window-generation](blackout-window-generation.md) — Shabbos/Yom Tov windows: the rule, and how regenerate corrects stored ones without touching hand edits
+- [shabbos-ending](shabbos-ending.md) — last song before Shabbos back-timed to end at candle lighting, the shofar, then the silence (per-station setting)
 - [station-simulator](station-simulator.md) — the real scheduling/playout decisions on a virtual clock with a fake engine: whole broadcast days in minutes, rules checked over the play log
 - [engine-harness](engine-harness.md) — run the real Liquidsoap engine locally with tones and check what was heard and when
 - [live-shows](live-shows.md) — how a live show goes on air without a broadcast server: mic relay, automation pause/resume, hard stop

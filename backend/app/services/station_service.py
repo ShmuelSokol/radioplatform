@@ -25,6 +25,90 @@ def window_covers_station(window: HolidayWindow, station_id) -> bool:
     return str(station_id) in [str(i) for i in ids]
 
 
+# A stored window further than this from the computed times is corrected
+GENERATED_TOLERANCE = timedelta(seconds=60)
+# A stored window of the same name this close to the computed start is the same Shabbos
+# or Yom Tov (the next one of the same name is days away)
+SAME_WINDOW = timedelta(hours=3)
+# created_at and updated_at this close together: nobody edited the row since it was made
+UNTOUCHED = timedelta(seconds=5)
+
+
+def _aware(t: datetime) -> datetime:
+    return t if t.tzinfo else t.replace(tzinfo=UTC)
+
+
+def _apart(stored: datetime, computed: datetime) -> timedelta:
+    """How far a stored time is from a computed one. Postgres gives the stored time with
+    its zone; SQLite (the tests) gives back the clock time the generator wrote, with no
+    zone, so it is compared with the computed clock time."""
+    if stored.tzinfo is None:
+        return abs(stored - computed.replace(tzinfo=None))
+    return abs(stored - computed)
+
+
+def _only_station(window: HolidayWindow, station_id) -> bool:
+    affected = window.affected_stations
+    ids = affected.get("station_ids") if isinstance(affected, dict) else None
+    return ids is not None and [str(i) for i in ids] == [str(station_id)]
+
+
+async def store_generated_windows(db: AsyncSession, station: Station, windows: list[dict],
+                                  default_reason=None) -> tuple[int, int, int]:
+    """Save computed Shabbos and Yom Tov windows for one station: (created, updated, skipped).
+
+    A window already stored for this station (same name, start within 3 hours) is not
+    made twice. When its times differ from the computed ones (the candle-lighting rule
+    changed: Jerusalem went from 18 to 40 minutes on 2026-11-19 and 58 stored windows
+    kept the late start) it is corrected, but only when it is safe to say the generator
+    owns it: it has not started yet, it belongs to this station alone, and nobody has
+    edited it since it was made. Anything else is left as it is.
+
+    A window of another station does not count as the same one: matching on name and
+    time alone left a second station in the same area with no Shabbos at all.
+    """
+    now = datetime.now(UTC)
+    created = updated = skipped = 0
+    for w in windows:
+        w_start = datetime.fromisoformat(w["start_datetime"])
+        w_end = datetime.fromisoformat(w["end_datetime"])
+        found = (await db.execute(select(HolidayWindow).where(
+            HolidayWindow.name == w["name"],
+            HolidayWindow.start_datetime >= w_start - SAME_WINDOW,
+            HolidayWindow.start_datetime <= w_start + SAME_WINDOW,
+        ))).scalars().all()
+        mine = [d for d in found if window_covers_station(d, station.id)]
+        if not mine:
+            reason = w.get("reason") or (default_reason(w["name"]) if callable(default_reason) else default_reason)
+            db.add(HolidayWindow(
+                name=w["name"], start_datetime=w_start, end_datetime=w_end,
+                is_blackout=w["is_blackout"], affected_stations=w.get("affected_stations"),
+                reason=reason or "Manual",
+            ))
+            created += 1
+            continue
+        skipped += 1
+        if len(mine) != 1:
+            continue
+        old = mine[0]
+        off = max(_apart(old.start_datetime, w_start), _apart(old.end_datetime, w_end))
+        if off <= GENERATED_TOLERANCE:
+            continue
+        untouched = abs(_aware(old.updated_at) - _aware(old.created_at)) <= UNTOUCHED
+        began = w_start <= now or _apart(old.start_datetime, now) == timedelta(0) or (
+            old.start_datetime.tzinfo is not None and old.start_datetime <= now)
+        if began or not _only_station(old, station.id) or not untouched:
+            continue
+        logger.info("Blackout window %r of station %s corrected: start %s -> %s, end %s -> %s",
+                    old.name, station.id, old.start_datetime, w_start, old.end_datetime, w_end)
+        old.start_datetime, old.end_datetime = w_start, w_end
+        # still the generator's own row: the next run may correct it again
+        old.created_at = old.updated_at = now
+        skipped -= 1
+        updated += 1
+    return created, updated, skipped
+
+
 async def auto_generate_holidays_for_station(db: AsyncSession, station: Station, months_ahead: int = 13) -> int:
     """Generate Shabbos + Yom Tov blackout windows for a station. Returns count of created windows."""
     from app.services.shabbos_service import (
@@ -52,33 +136,9 @@ async def auto_generate_holidays_for_station(db: AsyncSession, station: Station,
     )
     all_windows = merge_overlapping_windows(shabbos + yom_tov)
 
-    created = 0
-    for w in all_windows:
-        w_start = datetime.fromisoformat(w["start_datetime"])
-        # Skip if a window with same name that covers THIS station starts within 1 hour.
-        # A window of another station does not count: matching on name and time alone
-        # left a second station in the same area with no Shabbos at all.
-        dup_stmt = select(HolidayWindow).where(
-            HolidayWindow.name == w["name"],
-            HolidayWindow.start_datetime >= w_start - timedelta(hours=1),
-            HolidayWindow.start_datetime <= w_start + timedelta(hours=1),
-        )
-        dup_result = await db.execute(dup_stmt)
-        if any(window_covers_station(d, station.id) for d in dup_result.scalars().all()):
-            continue
+    created, updated, _skipped = await store_generated_windows(db, station, all_windows)
 
-        record = HolidayWindow(
-            name=w["name"],
-            start_datetime=w_start,
-            end_datetime=datetime.fromisoformat(w["end_datetime"]),
-            is_blackout=w["is_blackout"],
-            affected_stations=w.get("affected_stations"),
-            reason=w.get("reason", "Manual"),
-        )
-        db.add(record)
-        created += 1
-
-    if created > 0:
+    if created or updated:
         await db.flush()
 
     # Ensure silence asset exists

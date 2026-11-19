@@ -220,6 +220,19 @@ def test_a_skip_is_checked_and_repeated_once():
     assert "skip_main()" in liq[liq.index("def skip_on_air("):liq.index('control("/skip"') if 'control("/skip"' in liq else len(liq)]
 
 
+def test_setup_can_restart_one_station_first():
+    """2026-11-19: a new engine script went to Jerusalem first, but setup.sh restarts every
+    changed engine and removes engines for stations not named, so it was done by hand.
+    KBR_RESTART_ONLY restarts only the named engines; the others keep running and are
+    restarted by a later run (their applied sum is not written)."""
+    sh = _read("setup.sh")
+    assert "KBR_RESTART_ONLY" in sh
+    loop = sh[sh.index('for PAIR in $PORTS; do'):sh.index("# HTTPS needs the domain")]
+    skip = loop.index('if [ -n "$RESTART_ONLY" ]')
+    assert skip < loop.index('systemctl restart "kbr-engine@$SID"')
+    assert "continue" in loop[skip:loop.index('systemctl restart "kbr-engine@$SID"')]
+
+
 def test_no_secret_in_infra_files():
     """V1-24: nothing that looks like a generated secret (48 hex chars) is committed."""
     for f in INFRA.iterdir():
