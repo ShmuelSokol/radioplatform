@@ -98,6 +98,7 @@ class Relay:
         self.engine_instance: str | None = None
         self.last_plan_at = 0.0
         self.hello_owed = False
+        self._catching = threading.Lock()
         self.spool_path = self.dir / "spool.jsonl"
         # Emergency alert reports (engine proto 6) made while the line was down, sent when
         # it is back: the alert itself never waits on us, the log on the site catches up
@@ -259,7 +260,34 @@ class Relay:
             self.hello_owed = True
             return 200, b'{"ok":true,"relay":"offline"}'
 
+    def reports_owed(self) -> bool:
+        return self.hello_owed or (self.spool_path.is_file() and self.spool_path.stat().st_size > 0)
+
+    def catch_up_soon(self) -> threading.Thread | None:
+        """Send the kept start reports in the background (one catch-up at a time)."""
+        if not self._catching.acquire(blocking=False):
+            return None
+
+        def run():
+            try:
+                self.catch_up()
+            except Exception:
+                log.exception("catch up")
+            finally:
+                self._catching.release()
+
+        t = threading.Thread(target=run, daemon=True, name="catch_up")
+        t.start()
+        return t
+
     def next(self, query: str) -> tuple[int, bytes]:
+        if self.reports_owed():
+            # The line is back but the site does not yet know what aired offline: it would
+            # hand out again what the box already played (the 6 PM time check aired again
+            # at 6:24 PM, simulator 2026-11-19). Keep playing from the local plan until
+            # the kept reports have gone up.
+            self.catch_up_soon()
+            return self.offline_next()
         try:
             status, data = self._call("GET", "/next" + (f"?{query}" if query else ""))
         except Offline:

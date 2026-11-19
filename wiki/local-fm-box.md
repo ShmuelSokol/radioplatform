@@ -276,3 +276,6 @@ the same run failed with 0.0 s of host heard.
 
 Related: [streaming-architecture](streaming-architecture.md), [engine-harness](engine-harness.md),
 [rds-feed](rds-feed.md).
+
+## Line back: reports before asks (2026-11-19)
+While kept start reports (or an owed hello) wait in the spool, the relay answers the engine from its local plan and sends the reports in the background (`catch_up_soon`). Only when they are up does it ask the site for the next item again. Before, it asked the site first, and the site handed out again what had already aired offline: in the simulator the 6 PM time check aired a second time at 6:24 PM, and 17 songs were repeated after a 16-hour outage.

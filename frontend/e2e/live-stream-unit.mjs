@@ -10,11 +10,7 @@
  * KNOWN_BUGS lists checks expected to fail (XFAIL); a pass there prints XPASS and fails,
  * like pytest's xfail(strict=True).
  */
-const KNOWN_BUGS = {
-  'F-ENGINE2-26 HLS that stops advancing without an error is retried or falls back':
-    'found 2026-11-19: after playing starts, a stalled HLS stream (segments no longer written) is never retried '
-    + 'and never falls back to the plain stream; the listener sits in silence',
-};
+const KNOWN_BUGS = {};
 
 // ── fake clock ───────────────────────────────────────────────────────────────
 let now = 0;
@@ -222,6 +218,35 @@ for (const bad of [
   await flush();
   const recovered = audio.srcs.length > 1 || audio.plays > 1;
   check('F-ENGINE2-26 HLS that stops advancing without an error is retried or falls back', recovered, audio.srcs.join(' '));
+}
+
+// F-ENGINE2-26: reloaded once, then the plain stream if it is still stuck
+{
+  const { audio } = fresh();
+  await flush();
+  audio.emit('playing');
+  audio.currentTime = 5;
+  audio.emit('stalled');
+  advance(6500);
+  await flush();
+  check('F-ENGINE2-26 a stalled HLS stream is loaded again first', audio.srcs.join(' ') === `${HLS} ${HLS}`, audio.srcs.join(' '));
+  advance(6500);
+  await flush();
+  check('F-ENGINE2-26 still stuck: the plain stream', audio.srcs.at(-1) === LIVE && audio.srcs.length === 3, audio.srcs.join(' '));
+}
+
+// F-ENGINE2-26: a short wait that recovers by itself changes nothing
+{
+  const { audio } = fresh();
+  await flush();
+  audio.emit('playing');
+  audio.currentTime = 5;
+  audio.emit('waiting');
+  advance(1000);
+  audio.currentTime = 6.5;
+  advance(6000);
+  await flush();
+  check('F-ENGINE2-26 a wait that recovers is left alone', audio.srcs.length === 1, audio.srcs.join(' '));
 }
 
 console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed');

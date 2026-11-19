@@ -345,8 +345,6 @@ async def test_stream_server_outage_one_alert_one_push_and_it_closes(db_session,
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="found 2026-11-19: a dead-air alert ('Nothing on air') stays "
-                   "open after music is back; only the drift alert closes by itself")
 async def test_dead_air_alert_closes_when_music_is_back(db_session, monkeypatch):
     """V3-54 (dead air): one alert for the spell, and it closes when something plays again."""
     _pushes(monkeypatch)

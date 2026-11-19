@@ -29,6 +29,7 @@
 .qn-site [class~="bg-gray-800/30"]{background-color:var(--qn-face)}
 .qn-site [class~="bg-gray-800/40"]{background-color:var(--qn-face)}
 .qn-site [class~="bg-gray-800/80"]{background-color:var(--qn-face)}
+.qn-site [class~="bg-gray-800/90"]{background-color:var(--qn-face)}
 .qn-site [class~="bg-gray-900"]{background-color:var(--qn-face)}
 .qn-site [class~="bg-gray-950"]{background-color:var(--qn-face)}
 .qn-site [class~="bg-green-900"]{background-color:#dcfce7}
