@@ -14,6 +14,11 @@
 # changed for all of them (one station first, the others later: run again without it).
 # The others keep running the old script until their own restart.
 #
+# KBR_BROADCAST_SOUND=<id>[,<id>] | all | none: which engines run the broadcast sound
+# chain (leveler, three bands, limiter; KBR_PROCESSING=broadcast); the others run the
+# light one. Unset: every engine keeps what it had (light for a new one). One station
+# first (KBR Jerusalem), the others once Shmuel has listened.
+#
 # At the end it prints the settings the backend needs. No password is ever written
 # to the repository; they are generated here and stay on this machine.
 set -euo pipefail
@@ -23,6 +28,8 @@ DOMAIN="${2:-stream.kbrlive.com}"
 BACKEND_URL="${3:-https://api.kbrlive.com/api/v1}"
 REF="${KBR_SETUP_REF:-main}"
 RESTART_ONLY="$(echo "${KBR_RESTART_ONLY:-}" | tr ',' ' ')"
+BROADCAST_SOUND="$(echo "${KBR_BROADCAST_SOUND-}" | tr ',' ' ')"
+BROADCAST_SOUND_SET="${KBR_BROADCAST_SOUND+yes}"
 RAW="https://raw.githubusercontent.com/ShmuelSokol/radioplatform/${REF}/infra/streaming"
 ENV_FILE=/etc/kbr-engine/env
 STATION_DIR=/etc/kbr-engine/stations
@@ -108,6 +115,17 @@ WANTED=""
 PORTS=""
 while IFS='|' read -r SID SNAME; do
   [ -n "$SID" ] || continue
+  # The station's sound chain: as asked (KBR_BROADCAST_SOUND), else what it had
+  if [ "$BROADCAST_SOUND_SET" = yes ]; then
+    case " $BROADCAST_SOUND " in
+      *" all "*|*" $SID "*) PROCESSING=broadcast ;;
+      *) PROCESSING=light ;;
+    esac
+  else
+    PROCESSING="$( [ -f "$STATION_DIR/$SID.env" ] && grep -E '^KBR_PROCESSING=' "$STATION_DIR/$SID.env" | head -1 | cut -d= -f2- || true)"
+    PROCESSING="${PROCESSING:-light}"
+  fi
+  echo "Engine $SID: sound chain $PROCESSING"
   cat > "$STATION_DIR/$SID.env" <<SENV
 KBR_STATION_ID=${SID}
 KBR_STATION_NAME="${SNAME}"
@@ -115,6 +133,7 @@ KBR_CONTROL_PORT=${PORT}
 KBR_ICECAST_MOUNT=/live-${SID}
 KBR_HLS_DIR=/var/lib/kbr-engine/hls/${SID}
 KBR_EMERGENCY_DIR=/var/lib/kbr-engine/emergency/${SID}
+KBR_PROCESSING=${PROCESSING}
 SENV
   # Each station keeps its own emergency music (copies of its last 40 songs). With one
   # shared folder a second station would have fallen back to the first one's songs. A new

@@ -15,6 +15,13 @@ export interface TransportAudio {
   audioReady: boolean;
   /** Listen was pressed and the sound is on its way (the server stream is connecting). */
   starting?: boolean;
+  /** Sound was on here and stopped: the stream is reconnecting by itself, or the
+   *  browser needs a tap to play again. */
+  trouble?: 'reconnecting' | 'blocked' | null;
+  /** The station is on air and this device plays none of it. */
+  silentHere?: boolean;
+  /** Where the meters come from: the engine's measure of the air, this page's player, or nothing yet. */
+  meterSource?: 'air' | 'local' | 'none';
   /** The Listen button: switch sound on here. Must run inside the tap. */
   initAudio: () => void;
   volume: number;
@@ -97,7 +104,8 @@ function VuBar({ level, label, small = false }: { level: number; label: string; 
 function SmallMeters({ l, r, ready, className = '' }: { l: number; r: number; ready: boolean; className?: string }) {
   return (
     <div className={`flex flex-col justify-center gap-1 min-w-[48px] ${className}`} aria-hidden="true" data-testid="vu-meters"
-      title={ready ? 'Level of the station' : 'Tap anywhere to see levels'}>
+      data-meter-source={ready ? 'on' : 'none'}
+      title={ready ? 'Level of the station on air' : 'Tap anywhere to see levels'}>
       <VuBar level={l} label="LEFT" small />
       <VuBar level={r} label="RIGHT" small />
     </div>
@@ -229,11 +237,23 @@ export default function TransportBar(p: Props) {
   const soundControl = (size: 'desk' | 'phone' | 'land') => {
     const big = size !== 'desk';
     if (!audio.audioReady) {
+      // Not heard here: the button says why, so a silent screen never looks like it plays
+      // (Shmuel, 2026-11-19: "why did stream stop?" while this computer was playing nothing)
+      const label = audio.starting ? <>🔊 Starting…<span className="sr-only"> Listen</span></>
+        : audio.trouble === 'reconnecting' ? <>🔊 Reconnecting…<span className="sr-only"> Listen</span></>
+        : audio.trouble === 'blocked' ? <>🔇 {size === 'desk' ? 'Sound stopped: tap to resume' : 'Tap to resume'}<span className="sr-only"> Listen</span></>
+        : audio.silentHere ? <>🔇 {size === 'desk' ? 'Not playing here: Listen' : 'Silent here: Listen'}</>
+        : '🔊 Listen';
+      const title = audio.trouble === 'reconnecting' ? 'The connection to the stream dropped. Reconnecting by itself; tap to try now.'
+        : audio.trouble === 'blocked' ? 'The browser stopped the sound on this device. One tap turns it back on.'
+        : audio.silentHere ? 'The station is on air, but this device is not playing it. Tap to hear it here.'
+        : 'Hear the station on this device';
       return (
-        <button type="button" onClick={audio.initAudio} title="Hear the station on this device"
+        <button type="button" onClick={audio.initAudio} title={title}
           data-testid={audio.starting ? 'listen-starting' : 'listen-here'} data-listen-button
-          className={`qn-btn cr-listen shrink-0 font-bold ${big ? 'h-11 min-w-[128px] px-3 text-base' : 'h-8 px-2.5 text-xs'}`}>
-          {audio.starting ? <>🔊 Starting…<span className="sr-only"> Listen</span></> : '🔊 Listen'}
+          data-silent={audio.trouble ?? (audio.silentHere ? 'silent' : undefined)}
+          className={`qn-btn cr-listen shrink-0 font-bold ${audio.trouble === 'blocked' || audio.silentHere ? 'cr-listen-alert' : ''} ${big ? 'h-11 min-w-[128px] px-3 text-base' : 'h-8 px-2.5 text-xs whitespace-nowrap'}`}>
+          {label}
         </button>
       );
     }
@@ -296,7 +316,7 @@ export default function TransportBar(p: Props) {
             <div className={`qn-digits text-[28px] ${remainingCls}`} data-testid="remaining">{remainingText}</div>
           </div>
           {p.introSeconds > 0 && intro}
-          <SmallMeters l={audio.vuL} r={audio.vuR} ready={audio.audioReady} className="flex-1 mx-1" />
+          <SmallMeters l={audio.vuL} r={audio.vuR} ready={audio.meterSource !== 'none'} className="flex-1 mx-1" />
           <div className="leading-none shrink-0 text-right">
             <div className="qn-lcd-label">Clock</div>
             <div className="qn-digits text-base"><Clock tz={p.stationTz} /></div>
@@ -379,15 +399,15 @@ export default function TransportBar(p: Props) {
           <div className="qn-lcd-label">On air</div>
           <div className={`qn-digits text-2xl lg:text-[34px] ${p.isPlaying ? '' : '!text-green-900'}`}>{fmtDur(p.elapsed)}<span className="text-base lg:text-xl opacity-70"> / {fmtDur(p.duration)}</span></div>
         </div>
-        <div className="hidden lg:flex flex-1 min-w-[160px] max-w-[420px] flex-col gap-1" aria-hidden="true" data-testid="vu-meters"
-          title={audio.audioReady ? 'Level of what you are hearing' : 'Press Listen to see levels'}>
+        <div className="hidden lg:flex flex-1 min-w-[160px] max-w-[420px] flex-col gap-1" aria-hidden="true" data-testid="vu-meters" data-meter-source={audio.meterSource ?? 'none'}
+          title={audio.meterSource === 'air' ? 'Level of what is on air, measured at the stream server' : audio.meterSource === 'local' ? 'Level of the station' : 'Click anywhere on the page for levels'}>
           <VuBar level={audio.vuL} label="LEFT" />
           <VuBar level={audio.vuR} label="RIGHT" />
           <div className="flex justify-between pl-10 text-[9px] italic text-cyan-200 leading-none">
             <span>-40</span><span>-30</span><span>-24</span><span>-18</span><span>-12</span><span>-9</span><span>-6</span><span>-3</span><span>0</span>
           </div>
         </div>
-        <SmallMeters l={audio.vuL} r={audio.vuR} ready={audio.audioReady} className="flex-1 lg:hidden max-w-[360px] ml-auto max-[374px]:hidden" />
+        <SmallMeters l={audio.vuL} r={audio.vuR} ready={audio.meterSource !== 'none'} className="flex-1 lg:hidden max-w-[360px] ml-auto max-[374px]:hidden" />
         {p.liveShow && (
           <Link to={`/admin/live/${p.liveShow.id}/host`}
             data-testid="live-badge"

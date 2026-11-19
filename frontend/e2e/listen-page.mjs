@@ -27,6 +27,7 @@ import { allowEverywhere } from './lib/guard.mjs';
 // Provoked on purpose; anything else the screen or console shows fails the run (e2e/lib/guard.mjs)
 allowEverywhere(/Could not save your rating|Please log in again|Raffle is not active|Cannot reach the server right now/, 'rating, raffle and the server are made to fail to see each message');
 allowEverywhere(/nocors.*blocked by CORS policy|blocked by CORS policy.*nocors/, 'a stream without CORS is served to check the player copes');
+allowEverywhere(/warning toast: Reconnecting…/, 'the stream is cut on purpose; the page says so while it connects again');
 import { startStreamServer } from './lib/stream-server.mjs';
 
 const BASE = process.env.BASE_URL || 'http://localhost:4311';
@@ -841,11 +842,14 @@ async function streamMode(browser, stream) {
   await sleep(200);
   check(`${tag}: Mute silences the stream`, (await el()).volume === 0);
   await page.getByRole('button', { name: 'Unmute' }).click();
-  // V1-131: the engine or Icecast restarts and closes the stream: the page carries on with a plain element that reconnects
+  // V1-131: the engine or Icecast restarts and closes the stream: the page connects again by
+  // itself and keeps the short-delay Media Source player (2026-11-19: it used to switch to a
+  // plain element, which then ended for good at the next drop; e2e/stream-keeps-playing.mjs)
   const connects = stream.stats.connects;
+  const t0 = await page.evaluate(() => document.querySelector('audio').currentTime);
   stream.dropAll();
-  const back = await timeUntil(page, `() => { const a = document.querySelector('audio'); return a.src.startsWith('http') && !a.paused && a.currentTime > 0.2; }`, 8000);
-  check(`${tag}: a closed stream reconnects on a plain element (V1-131)`, back >= 0 && stream.stats.connects > connects, `${back} ms, ${stream.stats.connects - connects} new connections`);
+  const back = await timeUntil(page, `() => { const a = document.querySelector('audio'); return a.src.startsWith('blob:') && !a.paused && a.currentTime > ${t0} + 1.5; }`, 8000);
+  check(`${tag}: a closed stream reconnects by itself (V1-131)`, back >= 0 && stream.stats.connects > connects, `${back} ms, ${stream.stats.connects - connects} new connections`);
   await stopBtn(page).click();
   await sleep(300);
   await listenBtn(page).click();
