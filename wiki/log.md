@@ -443,5 +443,6 @@ UPDATE 2026-11-19 hourly-slots.md time clips no longer fall back to the Lakewood
 INGEST 2026-11-19 back-navigation.md Back line on staff pages (BackNav.tsx), per-tab history notes keyed by history.state.idx (lib/navMemory.ts), useNavState for page state, tapped row lit on return, deleted pages skipped via api/client.ts DELETE hook
 UPDATE 2026-11-19 playlist-generation.md station IDs: air-time guard (station_id_guard.py) passes over an ID after a break/spoken item or near a break; soft breaks move at air time
 UPDATE 2026-11-19 playlist-generation.md station IDs: drop_misplaced tidies waiting IDs beside breaks after each top-up; queue page estimates use on-air lengths
+UPDATE 2026-11-19 playlist-generation.md station IDs: shortest automatic ID 4 s -> 1.5 s once both engines run the radio.liq that fetches ahead
 INGEST 2026-11-19 blackout-window-generation.md regenerate now corrects a stored window whose computed times changed (future, this station only, never edited); SQLite returns zone-less clock times
 UPDATE 2026-11-19 control-room.md Sponsors list rows always open the Sponsor panel (SongTarget.sponsorship); station-day sends asset.sponsor_id: a block-placed sponsor recording with no spots category opened the song options on Main

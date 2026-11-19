@@ -126,18 +126,22 @@ async def test_not_sooner_than_the_shortest_gap_after_the_last_id(db_session: As
 
 
 @pytest.mark.asyncio
-async def test_an_id_under_four_seconds_never_airs_or_gets_queued(db_session: AsyncSession):
-    """Jerusalem 2026-11-19: after a 1.8 s ID the engine played its emergency file."""
+@pytest.mark.parametrize("seconds,airs", [(1.2, False), (1.8, True)])
+async def test_a_nearly_empty_id_never_airs_or_gets_queued(db_session: AsyncSession, seconds, airs):
+    """Floor 1.5 s: the parked IDs (1.78 to 2.32 s) air again since the engine fetches
+    ahead during short items; a nearly empty file never does."""
     from app.services.playlist_generator_service import _Library
 
     station_id, id_entry, song_entry = await _setup(db_session, "song", None)
     jingle = (await db_session.execute(
         select(Asset).join(QueueEntry, QueueEntry.asset_id == Asset.id).where(QueueEntry.id == id_entry))).scalar_one()
-    jingle.duration = 1.8
+    jingle.duration = seconds
     await db_session.commit()
-    assert (await _pick_next_pending(db_session, station_id, datetime.now(UTC))).id == song_entry
+    picked = await _pick_next_pending(db_session, station_id, datetime.now(UTC))
+    assert picked.id == (id_entry if airs else song_entry)
     pool = await _Library(db_session, station_id, set()).pool("jingle", "station_id")
-    assert pool and all(r.duration >= 4.0 for r in pool)
+    assert pool and all(r.duration >= 1.5 for r in pool)
+    assert any(r.id == jingle.id for r in pool) == airs
 
 
 @pytest.mark.asyncio

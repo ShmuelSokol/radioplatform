@@ -11,7 +11,7 @@ automatically queued ID is passed over, for good, when
 - the item before it (the one on air now) is not a programme item (a break, a time
   check, a sponsorship, another jingle...), or
 - a timed item is due within the station's `clear_minutes` of it, or
-- it is shorter than MIN_STATION_ID_SECONDS (4 s), or
+- it is shorter than MIN_STATION_ID_SECONDS (1.5 s), or
 - the last ID aired less than the station's `min_minutes` ago.
 
 Passing one over only makes the gap to the next ID longer. The browser path marks it
