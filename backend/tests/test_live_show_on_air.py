@@ -141,3 +141,45 @@ async def test_a_dead_listener_is_dropped():
     await relay.audio("st-1", b"\x00\x00")
     assert relay.listeners["st-1"] == {ok}
     assert ok.bytes == [b"\x00\x00"]
+
+
+# ---------- one station, one show (review tests, 2026-11-19) ----------
+
+async def _two_shows(db):
+    station = Station(id=uuid.uuid4(), name="Main", timezone="America/New_York",
+                      automation_config={"live_delay_seconds": 0})
+    db.add(station)
+    await db.flush()
+    now = datetime.now(UTC)
+    first = LiveShow(id=uuid.uuid4(), station_id=station.id, title="Morning show", status=LiveShowStatus.SCHEDULED,
+                     scheduled_start=now, scheduled_end=now + timedelta(hours=1))
+    second = LiveShow(id=uuid.uuid4(), station_id=station.id, title="Another", status=LiveShowStatus.SCHEDULED,
+                      scheduled_start=now, scheduled_end=now + timedelta(hours=1))
+    db.add_all([first, second])
+    await db.commit()
+    return station, first, second
+
+
+async def test_a_second_show_cannot_start_on_a_station_that_is_live(client, auth_headers, db_session):
+    station, first, second = await _two_shows(db_session)
+    assert (await client.post(f"/api/v1/live-shows/{first.id}/start", headers=auth_headers)).status_code == 200
+    r = await client.post(f"/api/v1/live-shows/{second.id}/start", headers=auth_headers)
+    assert r.status_code == 409 and "Morning show" in r.json()["detail"]
+    # ... nor by its host opening the microphone (the audio socket starts a scheduled show)
+    assert await live_show_service.start_if_scheduled(db_session, second.id) is False
+    await db_session.refresh(second)
+    await db_session.refresh(first)
+    assert second.status == LiveShowStatus.SCHEDULED and first.status == LiveShowStatus.LIVE
+    # The same show started again is still fine, and after the first ends the second starts
+    assert (await client.post(f"/api/v1/live-shows/{first.id}/start", headers=auth_headers)).status_code == 200
+    await live_show_service.end_show(db_session, first.id)
+    await db_session.commit()
+    assert (await client.post(f"/api/v1/live-shows/{second.id}/start", headers=auth_headers)).status_code == 200
+
+
+async def test_a_show_left_live_past_its_end_does_not_lock_the_station(client, auth_headers, db_session):
+    station, first, second = await _two_shows(db_session)
+    first.status = LiveShowStatus.LIVE
+    first.scheduled_end = datetime.now(UTC) - timedelta(minutes=5)
+    await db_session.commit()
+    assert (await client.post(f"/api/v1/live-shows/{second.id}/start", headers=auth_headers)).status_code == 200

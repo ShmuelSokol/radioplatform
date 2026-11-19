@@ -772,6 +772,7 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
     taken_over = True
     record = False
     filler_id = None
+    busy = False
     try:
         async for db in get_async_session():
             from app.models.station import Station
@@ -786,6 +787,10 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
                 if started:
                     await db.commit()
                 await db.refresh(show)
+                from app.models.live_show import LiveShowStatus as _St
+                from app.services.live_show_service import other_live_show
+                if show.status == _St.SCHEDULED and await other_live_show(db, show) is not None:
+                    busy = True
                 station_row = await db.get(Station, show.station_id)
                 if station_row is not None:
                     await db.refresh(station_row)
@@ -811,6 +816,10 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
         logger.error("Audio WS: could not load or start show %s: %s", show_id, e)
     if station_id is None:
         await websocket.close(code=4004)
+        return
+    if busy:
+        # Another show is live on the station: this host does not go on air beside it
+        await websocket.close(code=4010)
         return
     if started:
         await broadcast_show_event(show_id, "show_started", {"show_id": show_id})
