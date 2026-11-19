@@ -67,6 +67,9 @@ SPONSOR_GAP = timedelta(minutes=60)
 # A soft break this close to a shiur's end waits for it anyway (long_items), so it
 # does not interrupt and stays usable.
 TALK_TAIL = timedelta(minutes=5)
+# Breaks this close are neighbours (a quarter hour apart): one sponsor in both is
+# heard back to back, which is worth one extra sponsorship in a break to avoid.
+NEIGHBOUR = timedelta(minutes=20)
 def talk_tier(b: "Break", quiet: "list[tuple[datetime, datetime]] | None") -> int:
     """0: the break is outside every shiur or story (or in its last few minutes, where
     a soft break waits for the end anyway). 1: a hard break inside one: the shiur pauses
@@ -446,6 +449,10 @@ def plan_spots(
                     nearest = min(abs(b.local - t) for t in times)
                     return max(0.0, (gap - nearest).total_seconds())
 
+                def next_to_own(b: Break, sched) -> int:
+                    times = aired_at.get(str(sched.sponsor_id), ())
+                    return int(any(abs(b.local - t) < NEIGHBOUR for t in times))
+
                 def place(order: list[tuple], commit: bool) -> tuple[list, list]:
                     """Seat the plays in this order; without `commit` the room is put back."""
                     saved = (
@@ -473,7 +480,10 @@ def plan_spots(
                         chosen = min(
                             open_,
                             key=lambda ib: (
-                                ib[1].capacity - room[ib[1].local],  # sponsorships already there
+                                # sponsorships already there; the break right next to the
+                                # sponsor's own play counts one more, so one sponsor is not
+                                # heard back to back while another break is about as empty
+                                ib[1].capacity - room[ib[1].local] + next_to_own(ib[1], sched),
                                 near_own(ib[1], sched, plays),  # same sponsor too close
                                 id(sched) in holding.get(ib[1].local, ()),
                                 (ib[0] - idx) % n,  # nearest after its aim
@@ -966,7 +976,7 @@ def settle_today(
             b = min(
                 pool,
                 key=lambda b: (
-                    held.get(b.local, 0),
+                    held.get(b.local, 0) + any(abs(b.local - t) < NEIGHBOUR for t in others),
                     min((abs(b.local - t) for t in others), default=gap) < gap,
                     b.local,
                 ),
