@@ -48,3 +48,18 @@ the background by `CONCURRENT_INDEXES` in `app/main.py`) and one statement that 
 three indexed lookups. A new time-window read on `queue_entries` needs an index too.
 
 The two indexes are built in the background after start (`CONCURRENT_INDEXES`). The build retries a refused connection or a failed build, and every start logs `Indexes in place: ...` (or `INDEXES MISSING ...` as an error), so the log answers whether they exist. An index that already exists logs no `Built index` line.
+
+## Outside watch (off every Kol B'ramah machine)
+
+Air watch runs inside the backend, so it cannot report the backend itself being down; the
+PC's `kbr_247_watch.py` misses whatever happens while the PC is off, asleep or at the
+login screen. `.github/workflows/outside-watch.yml` is the backstop: every 5 minutes
+(GitHub may run it a few minutes late) `.github/scripts/outside_watch.py` checks
+`/health` and, for each station `/playout-status` lists as `mode: "server"`, that the
+engine answers and its stream (`stream.kbrlive.com/live-<id>`) sends audio. A failure is
+rechecked 30 s later. State lives in an open issue titled "Outside watch: the station is
+failing a check": opened with an ntfy push, a comment + push at most every 30 minutes
+while failing, closed with one "OK again" push. It does not check silence (blackouts are
+silent on purpose). The ntfy topic is the repo Actions secret `NTFY_TOPIC`; without it the
+issue still opens but nothing is pushed. The run stays green on a failure so GitHub does
+not email every 5 minutes.
