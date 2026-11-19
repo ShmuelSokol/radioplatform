@@ -142,7 +142,7 @@ async function transportEnd(browser) {
     && await p2.locator('[data-testid=next-fade]').first().isDisabled() && await p2.locator('[data-testid=loop]').first().isDisabled());
   const ms = await timeClick(p2, p2.getByRole('button', { name: '▶ Start' }), `() => document.body.innerText.includes('Starting…')`);
   check(`${tag}: Start shows Starting… at once (S-1)`, ms >= 0 && ms < 150, `${ms} ms`);
-  await p2.getByText('PLAYING').waitFor({ timeout: 4000 }).catch(() => {});
+  await p2.getByText('PLAYING', { exact: true }).waitFor({ timeout: 4000 }).catch(() => {});
   check(`${tag}: Start calls /queue/start and goes on air`, writes(st2, /\/queue\/start$/).length === 1 && /PLAYING/.test(await headerText(p2)));
   await c2.close();
 

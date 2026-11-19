@@ -1,6 +1,9 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useMayChange } from '../../../hooks/useMayChange';
 import { clockTime, isSponsorSpot, clockTimeSec, dayKey, fmtAgo, fmtDur, fmtHMS, useMediaQuery, weekdayShort } from './shared';
+import { ColumnHeads, useColumnWidths } from './columns';
+import type { ColumnDef } from './columns';
+import type { Origin } from './origin';
 
 export interface QueueRow {
   id: string;
@@ -14,6 +17,7 @@ export interface QueueRow {
   hard_by?: string | null;       // soft item's limit: the song fades if still on air then
   blackout_name?: string;
   holiday?: string;              // a holiday item in its season (Holiday Music page)
+  block_id?: string | null;      // automatic song: the schedule block it was drawn for
   asset: {
     id: string; title: string; artist: string | null; duration: number | null;
     asset_type: string; category: string | null;
@@ -44,7 +48,27 @@ interface Props {
   lastPlayed?: Record<string, string | null>;
   /** Open the quick actions for a row's song (category, do not play, details) */
   onSong?: (row: QueueRow) => void;
+  /** Why a row is in the queue (its playlist, or what else put it there) */
+  origin?: (row: QueueRow) => Origin;
+  /** Open the Why panel for a row */
+  onWhy?: (row: QueueRow) => void;
 }
+
+// The desktop log's columns. Every width can be dragged or double-clicked to fit
+// (columns.tsx); Title gives up room first when the panel is narrow. Defaults are
+// tight, so Song type and Playing from sit next to the title, not at the far right
+// (Shmuel 2026-11-19: the columns were "pulled so far apart").
+const COLS: ColumnDef[] = [
+  { id: 'time', label: 'Time', width: 104, min: 48 },
+  { id: 'len', label: 'Length', width: 48, min: 34 },
+  { id: 'title', label: 'Title', width: 440, min: 120, shrink: true },
+  { id: 'type', label: 'Song type', width: 96, min: 40,
+    title: 'The song\'s category (its song type): what playlist steps pick by. Change it from the Song button.' },
+  { id: 'from', label: 'Playing from', width: 160, min: 50,
+    title: 'The playlist (or what else) put it in the queue. Click an entry to see exactly why it is there.' },
+  { id: 'last', label: 'Last played', width: 78, min: 40 },
+];
+const FROM_H = 30;        // the "Playing from" line on top of a tapped row's buttons (touch)
 
 // Only the rows on screen (plus a margin) are drawn, so the list scrolls the
 // same with 50 items or 15,000. That needs every row to have a known height:
@@ -56,7 +80,7 @@ interface Props {
 const ROW_DESKTOP = 26;   // lg:h-[26px]
 const ROW_TOUCH = 40;     // h-10
 const MARKER_H = 40;      // h-10
-const ACTIONS_H = 61;     // h-[61px]
+const ACTIONS_H = 61;     // h-[61px], plus FROM_H when the row says where it is from
 const OVERSCAN = 30;      // extra rows drawn above and below, so a fast fling rarely outruns the redraw
 const STEP = 6;           // redraw only after scrolling this many rows
 
@@ -77,13 +101,20 @@ function QueuePanel(p: Props) {
   const isDesktop = useMediaQuery('(min-width: 1024px)');
     const rowH = isDesktop ? ROW_DESKTOP : ROW_TOUCH;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const headRef = useRef<HTMLDivElement>(null);
+  const colApi = useColumnWidths('kbr-cr-queue-cols', COLS);
+  const col = (id: string) => (isDesktop ? colApi.cell(COLS.find(c => c.id === id) as ColumnDef) : undefined);
+  // The headings sit above the scroll area: leave room for its scrollbar on the right,
+  // so the columns line up with the rows whatever the browser's scrollbar width
+  // (17 px on Windows, none on a Mac). "Type" sat off its column on Shmuel's PC.
+  const [gutter, setGutter] = useState(0);
   const [firstRow, setFirstRow] = useState(0);   // top of the window, in steps of STEP rows
   const [viewH, setViewH] = useState(800);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const measure = () => setViewH(el.clientHeight || 800);
+    const measure = () => { setViewH(el.clientHeight || 800); setGutter(Math.max(0, el.offsetWidth - el.clientWidth)); };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(measure);
@@ -140,8 +171,9 @@ function QueuePanel(p: Props) {
   // The insert marker and the action bar add height to one row each.
   const armedIdx = p.insertBeforeId ? p.entries.findIndex(e => e.id === p.insertBeforeId) : -1;
   const selIdx = selectedId ? p.entries.findIndex(e => e.id === selectedId && e.status !== 'playing') : -1;
+  const actionsH = ACTIONS_H + (p.origin ? FROM_H : 0);
   const offsetOf = (i: number) =>
-    i * rowH + (armedIdx >= 0 && armedIdx < i ? MARKER_H : 0) + (selIdx >= 0 && selIdx < i ? ACTIONS_H : 0);
+    i * rowH + (armedIdx >= 0 && armedIdx < i ? MARKER_H : 0) + (selIdx >= 0 && selIdx < i ? actionsH : 0);
   const padTop = offsetOf(start);
   const padBottom = offsetOf(n) - offsetOf(end);
   const today = dayKey(Date.now(), p.stationTz);
@@ -173,14 +205,14 @@ function QueuePanel(p: Props) {
           ))}
         </select>
       </div>
-      <div className="hidden lg:flex shrink-0 h-[18px] items-stretch qn-log-head text-[11px] leading-[18px] pr-3" aria-hidden="true">
-        <span className="w-7 shrink-0" />
-        <span className="w-[124px] shrink-0">Time</span>
-        <span className="w-12 shrink-0">Length</span>
-        <span className="flex-1">Title</span>
-        <span className="hidden xl:block w-28 shrink-0">Type</span>
-        <span className="hidden xl:block w-20 shrink-0">Last played</span>
-      </div>
+      {isDesktop && (
+        <div ref={headRef} role="row" data-testid="queue-head"
+          className="flex shrink-0 h-[18px] items-stretch qn-log-head text-[11px] leading-[18px] select-none"
+          style={{ paddingRight: gutter + 12 }}>
+          <span className="w-[30px] shrink-0 !shadow-none" aria-hidden="true" />
+          <ColumnHeads cols={COLS.filter(c => c.id !== 'from' || p.origin)} api={colApi} rowsRef={scrollRef} headRef={headRef} name="queue" />
+        </div>
+      )}
 
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain" onScroll={onScroll} data-testid="queue-scroll">
         {n === 0 && (
@@ -216,6 +248,7 @@ function QueuePanel(p: Props) {
             ? `Scheduled silence: ${entry.blackout_name}`
             : a?.title ?? 'Unknown item';
           const lp = a?.id ? p.lastPlayed?.[a.id] : null;
+          const origin = p.origin?.(entry);
 
           let tone = 'qn-row';
           if (isCur) tone = 'qn-row-cur';
@@ -272,13 +305,13 @@ function QueuePanel(p: Props) {
                   </button>
                 )}
 
-                <span className="w-[62px] lg:w-[124px] shrink-0 tabular-nums text-[13px] leading-tight lg:whitespace-nowrap lg:overflow-hidden" data-testid="air-time">
+                <span className="w-[62px] lg:w-auto lg:px-1 shrink-0 tabular-nums text-[13px] leading-tight lg:whitespace-nowrap lg:overflow-hidden" data-testid="air-time" data-col="time" style={col('time')}>
                   {start.time}
                   <span className="block lg:inline lg:ml-1 text-[10px] opacity-70 whitespace-nowrap">{start.sub}</span>
                 </span>
-                <span className="hidden lg:block w-12 shrink-0 tabular-nums text-[13px]">{fmtDur(a?.duration)}</span>
+                <span className="hidden lg:block px-1 shrink-0 tabular-nums text-[13px] overflow-hidden whitespace-nowrap" data-col="len" style={col('len')}>{fmtDur(a?.duration)}</span>
 
-                <span className="flex-1 min-w-0 leading-tight">
+                <span className="flex-1 lg:flex-none min-w-0 leading-tight lg:px-1" data-col="title" style={col('title')}>
                   <span data-testid="row-title" className={`block truncate text-[15px] lg:text-[13px] ${isSilence ? 'text-red-400' : ''}`}>
                     {isSponsor && a && (p.onSong ? (
                       <button type="button" data-testid="row-sponsor"
@@ -320,14 +353,27 @@ function QueuePanel(p: Props) {
                   </span>
                 </span>
 
-                <span className="hidden xl:block w-28 shrink-0 truncate text-[13px]" title={a?.asset_type}>{a?.category || a?.asset_type}</span>
-                <span className="hidden xl:block w-20 shrink-0 text-[13px] tabular-nums" title={lp ? new Date(lp).toLocaleString() : 'Not played recently'}>
+                <span className="hidden lg:block px-1 truncate text-[13px]" data-col="type" style={col('type')} data-testid="row-type"
+                  title={a?.category ? `Song type (category): ${a.category} · kind: ${a.asset_type}` : `No category · kind: ${a?.asset_type ?? ''}`}>{a?.category || a?.asset_type}</span>
+                {origin && (
+                  <span className="hidden lg:block px-1 min-w-0" data-col="from" style={col('from')}>
+                    {p.onWhy ? (
+                      <button type="button" data-testid="row-from"
+                        onClick={(e) => { e.stopPropagation(); p.onWhy?.(entry); }}
+                        title={`${origin.title}. Click to see why it is in the queue.`}
+                        className="block max-w-full !min-h-0 truncate text-left text-[13px] font-bold text-[#7fe0ff] hover:underline">
+                        {origin.short}
+                      </button>
+                    ) : <span className="block truncate text-[13px]" data-testid="row-from">{origin.short}</span>}
+                  </span>
+                )}
+                <span className="hidden lg:block px-1 text-[13px] tabular-nums overflow-hidden whitespace-nowrap" data-col="last" style={col('last')} title={lp ? new Date(lp).toLocaleString() : 'Not played recently'}>
                   {fmtAgo(lp)}
                 </span>
                 <span className="lg:hidden w-11 shrink-0 text-right tabular-nums text-sm">{fmtDur(a?.duration)}</span>
 
                 {/* Desktop quick actions */}
-                <span className={`hidden lg:flex absolute right-28 top-1/2 -translate-y-1/2 gap-0.5 px-0.5 bg-[#c0c0c0] text-black shadow-lg ${isSel || isCur ? '' : 'opacity-0 pointer-events-none [@media(hover:hover)]:pointer-events-auto'} group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto`} data-testid="row-quick" onClick={(e) => e.stopPropagation()}>
+                <span className={`hidden lg:flex absolute right-2 top-1/2 -translate-y-1/2 gap-0.5 px-0.5 bg-[#c0c0c0] text-black shadow-lg ${isSel || isCur ? '' : 'opacity-0 pointer-events-none [@media(hover:hover)]:pointer-events-auto'} group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto`} data-testid="row-quick" onClick={(e) => e.stopPropagation()}>
                   {a && !isSilence && p.onSong && (
                     <button type="button" onClick={() => p.onSong?.(entry)} title={isSponsor ? 'Sponsorship: sponsor, contract, plays' : 'Song: category, do not play, details'}
                       aria-label={`${isSponsor ? 'Sponsorship' : 'Song actions'} for ${title}`} data-testid="row-song" className="qn-btn px-1 h-5 text-[10px]">{isSponsor ? 'Spot' : 'Song'}</button>
@@ -343,6 +389,14 @@ function QueuePanel(p: Props) {
               </div>
 
               {/* Touch-friendly actions for the selected row */}
+              {isSel && !isCur && !readOnly && origin && (
+                <button type="button" data-testid="row-from-touch" onClick={() => p.onWhy?.(entry)} disabled={!p.onWhy}
+                  className="w-full flex items-center gap-1.5 px-2 h-[30px] !min-h-0 bg-[#dcdcdc] text-black text-[13px] text-left border-t border-[#808080]">
+                  <span className="shrink-0 font-normal">Playing from:</span>
+                  <span className="flex-1 min-w-0 truncate font-bold">{origin.short}</span>
+                  {p.onWhy && <span className="shrink-0 text-[12px] underline">Why ›</span>}
+                </button>
+              )}
               {isSel && !isCur && !readOnly && (
                 <div className="flex items-stretch gap-1.5 sm:gap-2 px-2 py-2 h-[61px] bg-[#c0c0c0] border-b border-[#808080]" data-testid="row-actions">
                   <button type="button" onClick={() => { p.onArmInsert(entry.id); setSelectedId(null); }}

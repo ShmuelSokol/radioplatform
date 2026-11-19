@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../../api/client';
 import { useAssets } from '../../hooks/useAssets';
@@ -27,11 +27,20 @@ export default function ScheduleBlocks() {
     enabled: !!scheduleId,
   });
 
+  // ?block=<id>: opened from "Why it is in the queue" in the control room: that block is
+  // open, scrolled to and lit
+  const [params] = useSearchParams();
+  const litBlock = params.get('block');
   const { data: blocks, isLoading } = useQuery<ScheduleBlock[]>({
     queryKey: ['schedule-blocks', scheduleId],
     queryFn: async () => { const r = await apiClient.get('/schedules/blocks', { params: { schedule_id: scheduleId } }); return r.data; },
     enabled: !!scheduleId,
   });
+
+  useEffect(() => {
+    if (!litBlock || !blocks?.some(b => b.id === litBlock)) return;
+    document.querySelector(`[data-block-id="${litBlock}"]`)?.scrollIntoView?.({ block: 'start' });
+  }, [litBlock, blocks]);
 
   const { data: stationsData } = useStations();
   const scheduleStation = (stationsData?.stations ?? []).find((s: any) => s.id === schedule?.station_id);
@@ -48,7 +57,7 @@ export default function ScheduleBlocks() {
 
   const [showBlockForm, setShowBlockForm] = useState(false);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
-  const [expandedBlock, setExpandedBlock] = useState<string | null>(null);
+  const [expandedBlock, setExpandedBlock] = useState<string | null>(litBlock);
   const emptyBlock = (): CreateScheduleBlockData => ({
     schedule_id: scheduleId || '',
     name: '',
@@ -412,7 +421,8 @@ export default function ScheduleBlocks() {
       <div className="space-y-4">
         {blocks?.length === 0 && <p className="text-gray-500 text-center py-8">No blocks yet. Create one to get started.</p>}
         {blocks?.map(block => (
-          <div key={block.id} className="bg-white rounded-lg shadow-md overflow-hidden">
+          <div key={block.id} data-block-id={block.id} data-nav-id={`block-${block.id}`}
+            className={`bg-white rounded-lg shadow-md overflow-hidden ${litBlock === block.id ? 'ring-2 ring-yellow-400' : ''}`}>
             <div className="p-4 flex justify-between items-center cursor-pointer hover:bg-gray-50"
               onClick={() => setExpandedBlock(expandedBlock === block.id ? null : block.id)}>
               <div>

@@ -258,7 +258,7 @@ radioplatform/
 
 ### Pages
 **Admin** (`frontend/src/pages/admin/`):
-- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, not on this station, do not play on any station, details), Sponsors tab (today's sponsorships on the station; rows carry a SPONSOR tag) and a Sponsor panel instead for a sponsorship spot (sponsor, contracts, today's and coming plays with Skip, missed plays, Pause contract, links). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
+- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, not on this station, do not play on any station, details), queue and library columns the operator drags or double-clicks to fit, a "Playing from" column with a Why panel (playlist, block and step a song was drawn for, or what else queued it), Sponsors tab (today's sponsorships on the station; rows carry a SPONSOR tag) and a Sponsor panel instead for a sponsorship spot (sponsor, contracts, today's and coming plays with Skip, missed plays, Pause contract, links). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
 - Stations.tsx — Station management (incl. "Omer count on the hour")
 - Assets.tsx — Audio asset management
 - AssetUpload.tsx — File upload
@@ -560,6 +560,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/program-block-season.mjs
 
 # Played list and RDS log: start times to the second on each station's clock, three stations, desktop and iPhone (fake backend)
 cd frontend && BASE_URL=http://localhost:4173 node e2e/played-seconds.mjs
+
+# Queue and library columns (drag, double-click to fit, kept, lined up with a 17 px scrollbar) and "Why it is in the queue" (playlist, block, step, links), three stations, desktop, car screen, iPhone
+cd frontend && BASE_URL=http://localhost:4173 node e2e/queue-columns.mjs
 
 # The control room's Song panel (category, not on this station, do not play, details) on desktop and phone sizes
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs

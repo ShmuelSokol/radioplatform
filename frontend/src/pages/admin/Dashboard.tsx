@@ -28,6 +28,8 @@ import TransportBar, { TransportButtons } from './controlroom/TransportBar';
 import type { TransportProps } from './controlroom/TransportBar';
 import { REPORT_BUG_EVENT } from '../../components/BugReporter';
 import QueuePanel from './controlroom/QueuePanel';
+import WhyPanel from './controlroom/WhyPanel';
+import { useQueueOrigins } from './controlroom/origin';
 import SongPanel, { isSponsorship } from './controlroom/SongPanel';
 import type { SongTarget } from './controlroom/SongPanel';
 import SponsorPanel from './controlroom/SponsorPanel';
@@ -231,9 +233,19 @@ export default function Dashboard() {
     setKeptSong(t ? { station: stationId ?? null, target: t } : null);
   }, [setKeptSong, stationId]);
   const openRowSong = useCallback((row: QueueRow) => {
-    if (row.asset) setSongTarget({ asset: row.asset, onAir: row.status === 'playing', source: row.source ?? null });
+    if (row.asset) setSongTarget({ asset: row.asset, onAir: row.status === 'playing', source: row.source ?? null, entryId: row.id });
   }, [setSongTarget]);
   const closeSong = useCallback(() => setSongTarget(null), [setSongTarget]);
+  // "Why is this in the queue?" for one row: its playlist and schedule block, or what else
+  // put it there. Kept with this visit, so Back from the playlist page opens it again.
+  const originOf = useQueueOrigins(stationId);
+  const [keptWhy, setKeptWhy] = useNavState<{ station: string | null; entry: string } | null>('why', null);
+  const whyRow = keptWhy && keptWhy.station === (stationId ?? null) ? queueEntries.find((e) => e.id === keptWhy.entry) ?? null : null;
+  const openWhy = useCallback((row: QueueRow) => {
+    setKeptSong(null);
+    setKeptWhy({ station: stationId ?? null, entry: row.id });
+  }, [setKeptWhy, setKeptSong, stationId]);
+  const closeWhy = useCallback(() => setKeptWhy(null), [setKeptWhy]);
   // Keep today's Sponsors list read the whole time the room is open (every minute), so the tab
   // paints its rows at once: a one-off background read was not used on the first paint live
   // (2026-11-18, "Loading…" still flashed). Same query key as SponsorsToday.
@@ -992,6 +1004,8 @@ export default function Dashboard() {
       onReorder={reorder}
       lastPlayed={lastPlayedMap?.last_played}
       onSong={openRowSong}
+      origin={originOf}
+      onWhy={openWhy}
     />
   );
   const hotButtons = (wide: boolean, bar = false) => (
@@ -1094,7 +1108,17 @@ export default function Dashboard() {
       )}
       {songTarget && (songTarget.itemOptions || !stationId || !isSponsorship(songTarget)) && (
         <SongPanel target={{ ...songTarget, onAir: !!nowAsset && nowAsset.id === songTarget.asset.id }} stationId={stationId ?? null} stationName={station?.name ?? null} canEdit={isManager(user?.role)}
+          why={(() => {
+            const row = songTarget.entryId ? queueEntries.find((e) => e.id === songTarget.entryId) : undefined;
+            return row ? { short: originOf(row).short, open: () => openWhy(row) } : undefined;
+          })()}
           onClose={closeSong} onToast={songToast} />
+      )}
+      {whyRow && !songTarget && (
+        <WhyPanel row={whyRow} origin={originOf(whyRow)} stationTz={stationTz}
+          canOpen={(path) => canAccess(user?.role, path)}
+          onSong={whyRow.asset ? () => { closeWhy(); openRowSong(whyRow); } : undefined}
+          onClose={closeWhy} />
       )}
 
       <TransportBar {...transport} landscape={phoneLandscape}
