@@ -213,6 +213,7 @@ INGEST 2026-11-19 station-simulator.md virtual-clock station simulator (tests/si
 INGEST 2026-11-16 release-pickup.md A screen whose code file vanished still showed "The site was updated" right after leaving Listen: the stale-code reload honoured the 2-min audio grace, but leaving Listen had stopped the sound. Now only sound playing at that moment (checked 300 ms later, after the old screen unmounts) blocks the reload. Browser check: e2e/site-release step 5.
 INGEST 2026-11-16 control-room.md meters are RMS dBFS (-40..0, red above -8) with ballistics; mute and Listen never change them
 
+UPDATE 2026-11-19 station-simulator.md year-plan test (no simulation), real play-log checker (tests/sim/playlog.py), local FM box offline runs with the real relay (tests/sim/offline.py), quiet-pass speed-up
 INGEST 2026-11-16 operator-actions.md placeholders (NEVER_AUTO_TITLES) are skipped at pick time from every automatic source (_skip_placeholders); short or timed items hand over 0.3 s before their end, not at half their length
 INGEST 2026-11-16 control-room.md Listen is remembered across reloads (localStorage kbr-cr-listen); first click turns sound back on
 INGEST 2026-11-18 control-room.md iPhone: sound may start only in click/keydown (not touchstart/pointerdown); with Listen remembered no tap ever gave sound; header shows a labelled Listen button until sound is live; stream starts in the tap via lib/liveStream; e2e/control-room-iphone-sound.mjs with IOS_SOUND_POLICY
@@ -404,6 +405,7 @@ INGEST 2026-11-18 live-shows.md phone callers join the show's own mixer over a T
 INGEST 2026-11-18 live-shows.md sponsorships and was-soft items due during a live show go back to soft and play first after it (soft_items_wait_for_show, QueueEntry.was_soft, take_back_timed); take-over deletes older resume@ entries of the paused item (story replayed 3 times on Jerusalem)
 INGEST 2026-11-18 control-room.md finding the Sponsor panel: SPONSOR › tag on queue rows (min-h-0 button, rows stay one line) and the Sponsors tab (SponsorsToday.tsx, GET /spot-schedules/station-day)
 INGEST 2026-11-18 streaming-architecture.md start reports taken one at a time per station and an exact repeat ignored: two at once wrote the previous item's play log twice (Main 20:31Z sponsorship counted twice)
+UPDATE 2026-11-19 streaming-architecture.md the FM feed is the engine's stream; the backend's own Icecast source (icecast_service, /icecast start) is retired
 UPDATE 2026-11-18 control-room.md sponsorship rule tightened (weather report no longer tagged), station-day query uses indexes, panel shows today's not-aired plays at once
 INGEST 2026-11-18 live-shows.md engine holds two items during a show; a flush empties both but its given list forgets one, so the paused story's second part was closed unplayed after a held sponsorship (show_preloaded, flushed_unplayed, _not_dropped_by_a_flush)
 INGEST 2026-11-18 spot-schedules.md three-hour time slots beside the broad dayparts (planned narrowest first, reports stay broad) and least-full leveling over a slot's breaks: every break gets 3 before any gets a 4th
@@ -427,6 +429,7 @@ INGEST 2026-11-19 audio-engine.md checklist player rows: e2e/player-rows.mjs (ha
 INGEST 2026-11-19 engine-harness.md harness engine_rows (checklist rows V1-3/12/12h/14/16, F-ENGINE2-10/11): proxy counts /next asks (stack.next_asks) and can answer 204 (next_empty); found a 204 while a song plays is asked ~25/s (retry_delay only holds for errors and on emergency music); emergency folder needs chmod 777 in the harness (engine runs as nobody); frontend/e2e/live-stream-unit.mjs runs liveStream.ts in Node with a fake audio element
 UPDATE 2026-11-19 spot-schedules.md never a sponsorship inside a shiur or one sponsor within 20 min (rules, not preferences); paused shiur (resume@ entry) is a talk window; _SponsorGuard last check before queueing block sponsorships
 UPDATE 2026-11-19 bug-reports.md a lifted 🐞 appears above any dialog that covers every 🐞 (hit-tested twice a second, free spot), e2e/bug-everywhere.mjs
+UPDATE 2026-11-19 station-simulator.md scenarios with events and restarts; play-log row is written when the next item starts
 INGEST 2026-11-19 spot-schedules.md automation_config.sponsorships_wait_for_talks: sponsorship-only groups wait for a story's end (All Day Stories)
 UPDATE 2026-11-19 spot-schedules.md block_talk_windows: a block's own shiur counts before it is queued (Daf block queued in the same pass as the breaks); loose copies of contract audio (same title) never drawn at random (old "Sponsor Ad Every 30min" rules)
 INGEST 2026-11-19 spot-schedules.md contract totals (plays a day, days and plays over the dates, spot length) in Edit contract, client contract rows and Spot Schedule: components/sponsors/contractTotals.ts

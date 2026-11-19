@@ -76,7 +76,7 @@ Checks: `tests/test_live_recording.py` (a dumped 1000 Hz "curse" must not be in 
 ## Gotchas
 - `useLiveShowWS` reconnected after the page was left (the cleanup's `close()` fired `onclose`): a second socket listed every caller twice on the Host Console. The cleanup now clears `onclose`, and `caller_queued` ignores a call it already has.
 - Each scheduler pass ends with a rollback. Anything `_check_station` changes must be committed there. The hard stop was undone this way and repeated every 3 s.
-- Icecast is still pushed to when `ICECAST_HOST` is set (the playout-engine server), but nothing depends on it.
+- The backend no longer pushes the host to an Icecast source of its own (retired 2026-11-19; the stream is the engine's, see [streaming-architecture](streaming-architecture.md)).
 - If the host closes the page without ending the show, listeners hear silence until the show is ended or reaches its hard stop.
 
 Checks: `tests/test_live_show_on_air.py` and `tests/test_live_show_lifecycle.py`. A browser check (fake mic → Listen page) was run by hand on 2026-11-16.
