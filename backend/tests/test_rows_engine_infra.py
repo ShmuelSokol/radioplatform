@@ -32,11 +32,16 @@ def _block(text: str, start: str) -> str:
     return text[i:m.end()]
 
 
+def _asks(liq: str) -> str:
+    """The backend ask (ask_backend) and the lane's callback around it (next_request)."""
+    return _block(liq, "def rec ask_backend() =") + _block(liq, "def next_request() =")
+
+
 def test_given_ids_and_flush_hand_back_the_preloaded_entry():
     """V1-2: /next carries the last 5 handed ids, newest first; /flush forgets the
     pre-loaded id (the head of `given`) unless it is the one that already aired."""
     liq = _liq()
-    nxt = _block(liq, "def next_request() =")
+    nxt = _asks(liq)
     assert 'handed = string.concat(separator=",", given())' in nxt
     assert "/next?given=#{handed}" in nxt
     # newest first, at most five
@@ -54,10 +59,12 @@ def test_main_lane_retries_every_2_s_gives_a_download_120_s_and_preloads_one():
     asks again after retry_delay; 120 s per track; exactly one pre-loaded."""
     liq = _liq()
     assert re.search(r'request\.dynamic\(id="main", prefetch=1, retry_delay=2\., timeout=120\., next_request\)', liq)
-    nxt = _block(liq, "def next_request() =")
-    # anything but 200 -> null (no track), and an unreachable backend too
+    nxt = _asks(liq)
+    # anything but 200 -> no track, and an unreachable backend too; either waits 1.5 to
+    # 2 s before the next ask (the lane itself asks every frame while a track plays)
     assert "if resp.status_code == 200 then" in nxt
-    assert nxt.count("null()") == 2 and "catch err do" in nxt
+    assert "ask_after := time() + 1.5" in nxt and "catch err do" in nxt
+    assert "if time() < ask_after() or following() then" in nxt
 
 
 def test_start_report_dedupe():
@@ -80,7 +87,7 @@ def test_start_report_failure_is_only_logged():
     rep = _block(liq, "def report_to_backend(entry, lane, title) =")
     assert "try" in rep and 'log.important("started: backend unreachable: #{err}")' in rep
     assert "thread.run(fast=false, post)" in rep
-    assert "?given=#{handed}" in _block(liq, "def next_request() =")
+    assert "?given=#{handed}" in _asks(liq)
 
 
 def test_control_port_token_post_only_and_local():
@@ -121,13 +128,13 @@ def test_every_track_change_is_reported_and_the_emergency_folder_fills_itself():
     liq = _liq()
     assert "program.on_metadata(report_started)" in liq
     assert "program.on_track(report_started)" in liq
-    keep = _block(liq, "def keep_for_emergency(played) =")
+    keep = _block(liq, "def keep_for_emergency(played, asset) =")
     assert "emergency_keep = 40" in liq
     assert 'part = dest ^ ".part"' in keep
     assert re.search(r"cp -f .*part.* && mv -f .*part.*dest", keep)
     assert "tail -n +#{emergency_keep + 1}" in keep
     started = _block(liq, "def send_started(m) =")
-    assert 'if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"]) end' in started
+    assert 'if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"], m["kbr_asset"]) end' in started
     assert liq.count("keep_for_emergency(") == 2  # the definition and that one call
 
 

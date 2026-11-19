@@ -203,7 +203,7 @@ def test_each_station_has_its_own_emergency_music():
     assert "KBR_EMERGENCY_DIR" in station_env
     assert "-maxdepth 1 -type f -name '*.mp3' -exec cp -n {} \"$EMERG/\"" in sh
     liq = _read("radio.liq")
-    assert 'if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"]) end' in liq
+    assert 'if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"], m["kbr_asset"]) end' in liq
 
 
 def test_a_skip_is_checked_and_repeated_once():

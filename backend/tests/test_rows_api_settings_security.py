@@ -220,7 +220,6 @@ async def test_public_playout_status_lists_engine_stations(client: AsyncClient, 
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="found 2026-11-19: /playout-status asks each engine one after another (3 s timeout each), so with engines down the public call takes 3 s x engines, far over S-4's 300 ms")
 async def test_playout_status_asks_engines_at_the_same_time(client: AsyncClient, db_session: AsyncSession, engines,
                                                             monkeypatch):
     """V1-146: the engines must be asked together, so the call takes one timeout at most."""

@@ -982,6 +982,36 @@ async def test_long_item_rule_runs_once_per_shiur_and_time_check(client, db_sess
 
 
 @pytest.mark.asyncio
+async def test_a_shiur_that_starts_after_the_time_check_was_handed_over_still_resumes(client, db_session, eng):
+    """Simulator 2026-11-19 (All Day Stories, 11:00): the time check was handed to the
+    engine while a song was on air, so the pause rule had nothing to pause. A story
+    started in the seconds before the hour and was cut with 33 minutes left, never to
+    resume. The rule looks again at what is on air until the time check's second."""
+    station, _, engine, _ = eng
+    st = await db_session.get(Station, station.id)
+    st.automation_config = {"timed_during_long_items": "pause"}
+    song = await _add(db_session, station, title="Song", duration=200.0, kind="music", position=0)
+    shiur = await _add(db_session, station, title="Mussaf", duration=2000.0, kind="shiur", position=1)
+    await _next(client, station)
+    await _on_air(client, station, song.id)
+    clock = await _add(db_session, station, title="Time", duration=8.0, kind="time", position=50,
+                       timing_mode="hard", preempt_at=datetime.now(UTC) + timedelta(seconds=30))
+    await playout_engine.tick(db_session, st)
+    assert [c["id"] for c in engine.timed()] == [str(clock.id)]
+    # The story goes on air 20 s before the hour, after the hand-over
+    await _next(client, station, given=str(song.id))
+    await _on_air(client, station, shiur.id)
+    await playout_engine.tick(db_session, st)
+    pending = (await db_session.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station.id, QueueEntry.status == "pending")
+        .execution_options(populate_existing=True)
+    )).scalars().all()
+    assert len([e for e in pending if e.asset_id == shiur.asset_id]) == 1
+    # Handed over once only
+    assert [c["id"] for c in engine.timed()] == [str(clock.id)]
+
+
+@pytest.mark.asyncio
 async def test_a_failed_long_item_rule_still_hands_over_the_time_check(client, db_session, eng, monkeypatch):
     """F-ENGINE2-22/24: a database error inside the long-item rule left the session failed,
     so the rest of the tick (handing the time check to the engine) failed too. The tick
@@ -997,6 +1027,67 @@ async def test_a_failed_long_item_rule_still_hands_over_the_time_check(client, d
     monkeypatch.setattr(playout_engine, "_apply_long_item_rule", broken)
     await playout_engine.tick(db_session, st)
     assert [c["id"] for c in engine.timed()] == [str(clock.id)]
+
+
+@pytest.mark.asyncio
+async def test_an_engine_restart_during_a_shiur_carries_it_on(client, db_session, eng):
+    """Simulator 2026-11-19: the engine restarted 10 minutes into a 60-minute shiur (a
+    deployment or a crash); the shiur was lost with 48 minutes left. After the restart the
+    engine's first item is the shiur from where it was cut, once."""
+    station, _, _, _ = eng
+    st, shiur, _ = await _shiur_on_air(client, db_session, station, "pause")
+    assert (await client.post(f"/api/v1/playout/{station.id}/hello", headers=HEADERS,
+                              json={"proto": 6})).status_code == 200
+    r = await _next(client, station)
+    assert r.status_code == 200
+    first = await _fresh(db_session, uuid.UUID(r.json()["entry_id"]))
+    assert first.asset_id == shiur.asset_id
+    assert 500 < resume_offset(first) < 620
+    # Asked again (the item after it): no second resume entry
+    r2 = await _next(client, station, given=r.json()["entry_id"])
+    pending = (await db_session.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station.id, QueueEntry.status == "pending")
+        .execution_options(populate_existing=True)
+    )).scalars().all()
+    assert not [e for e in pending if e.asset_id == shiur.asset_id and str(e.id) != r.json()["entry_id"]]
+    assert r2.status_code in (200, 204)
+
+
+@pytest.mark.asyncio
+async def test_an_engine_restart_during_a_song_queues_nothing_extra(client, db_session, eng):
+    """Only a shiur or story carries on after a restart; a song is not played again."""
+    station, entries, _, _ = eng
+    await _next(client, station)
+    await _on_air(client, station, entries[0].id)
+    assert (await client.post(f"/api/v1/playout/{station.id}/hello", headers=HEADERS,
+                              json={"proto": 6})).status_code == 200
+    r = await _next(client, station)
+    assert r.status_code == 200 and r.json()["entry_id"] != str(entries[0].id)
+    assert r.json()["entry_id"] == str(entries[1].id)
+
+
+@pytest.mark.asyncio
+async def test_many_timed_items_missing_the_engine_raise_one_alert(client, db_session, eng, monkeypatch):
+    """Simulator 2026-11-19: the engine could not be reached at candle lighting and every
+    one of 306 queued Silence rows alerted on every pass (30,600 alert calls in 5 minutes).
+    All the items missed in a pass make one alert, and an item alerts only once."""
+    station, _, engine, _ = eng
+    calls = []
+
+    async def record(db, station_id, state, title, message, force=False):
+        calls.append(message)
+
+    monkeypatch.setattr(playout_engine, "_alert", record)
+    engine.ok = False
+    st = await db_session.get(Station, station.id)
+    due = datetime.now(UTC) - timedelta(seconds=1)
+    for i in range(30):
+        await _add(db_session, station, title=f"Silence {i}", duration=60.0, kind="silence",
+                   position=100 + i, timing_mode="hard", preempt_at=due)
+    for _ in range(3):
+        await playout_engine.tick(db_session, st)
+    assert len(calls) == 1
+    assert "and 29 more" in calls[0]
 
 
 # ── Restart (B-JOB-95/96/97, B-MODE-16) ──────────────────────────────────────
@@ -1632,6 +1723,28 @@ async def test_a_moment_of_emergency_music_raises_no_alert(client, db_session, e
     await _on_air(client, station, "", lane="emergency")
     await asyncio.sleep(0.3)
     assert raised == [str(station.id)]
+
+
+@pytest.mark.asyncio
+async def test_the_emergency_music_alert_is_kept(client, db_session, eng, monkeypatch):
+    """Harness engine_rows 2026-11-19: the alert for lasting emergency music was logged
+    and then gone from the alerts table about 25 s later: its own session only flushed
+    it, so closing the session rolled it back."""
+    import asyncio
+
+    import app.db.session as db_session_module
+    from app.models.alert import Alert
+    from tests.conftest import TestSessionLocal
+
+    station, _, _, _ = eng
+    monkeypatch.setattr(db_session_module, "async_session_factory", TestSessionLocal)
+    monkeypatch.setattr(playout_engine, "EMERGENCY_ALERT_AFTER", 0.05)
+    await _on_air(client, station, "", lane="emergency")
+    await asyncio.sleep(0.4)
+    async with TestSessionLocal() as other:
+        rows = (await other.execute(select(Alert).where(
+            Alert.title == playout_engine.EMERGENCY_ALERT_TITLE))).scalars().all()
+    assert len(rows) == 1 and not rows[0].is_resolved
 
 
 @pytest.mark.asyncio

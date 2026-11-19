@@ -114,28 +114,99 @@ live_asked = ref(0.)
 def live_wanted() =
   live_on() or live_asked() > 0.
 end
-def next_request() =
-  try
-    handed = string.concat(separator=",", given())
-    resp = http.get(headers=auth_headers, timeout=8.,
-                    "#{backend_url}/playout/#{station_id}/next?given=#{handed}&proto=#{engine_proto}&live=#{if live_wanted() then 1 else 0 end}")
-    if resp.status_code == 200 then
-      let json.parse (data : {uri : string, entry_id : string}) = resp
+# No ask before this moment. While a song plays the music lane calls next_request on
+# every frame (25 a second) until it holds the next item; retry_delay only spaces the
+# asks while nothing plays. An empty answer (204) was asked again 20 to 25 times a
+# second, each a database read on the backend (harness engine_rows, 2026-11-19). After
+# an empty answer or an error the next ask waits 1.5 s; a flush, a Next or a live
+# change asks at once.
+ask_after = ref(0.)
+# Counts flushes. An ask that was on its way when the queue changed comes back with the
+# item the backend meant before the change: queued after the flush, it aired instead of
+# the Play next item (Jerusalem 03:46:43Z 2026-11-19, a station ID). Such an answer is
+# dropped and the backend asked again at once.
+flush_count = ref(0)
+# When the backend last handed us an item (see hold_open: quiet while it loads)
+handed_at = ref(0.)
+# Items shorter than this get the item after them fetched at once (see ask_backend)
+short_item = 12.
+# Fetching the item after a short one: the music lane does not ask meanwhile, or the
+# two answers could land in the queue in the wrong order
+following = ref(false)
+# main_requests.add, set once the music lane exists (it is built from next_request)
+add_main = ref(fun (_) -> false)
+def rec ask_backend() =
+  flushes = flush_count()
+  handed = string.concat(separator=",", given())
+  resp = http.get(headers=auth_headers, timeout=8.,
+                  "#{backend_url}/playout/#{station_id}/next?given=#{handed}&proto=#{engine_proto}&live=#{if live_wanted() then 1 else 0 end}")
+  if resp.status_code == 200 then
+    let json.parse (data : {uri : string, entry_id : string, seconds : float?}) = resp
+    if flushes != flush_count() then
+      log.important("next: the queue changed while asking (entry #{data.entry_id} is out of date); asking again")
+      "stale"
+    else
       log.important("next: backend gave entry #{data.entry_id}")
       given := list.prefix(5, data.entry_id :: given())
-      request.create(data.uri)
-    else
+      handed_at := time()
+      ask_after := 0.
+      # A short item (a 2 s station ID) is over before the next song's file is here,
+      # if that is only asked for when the short item starts: 2 to 3 s of emergency
+      # music (Jerusalem 03:46Z and 04:00Z 2026-11-19). The item after it is fetched
+      # now, into the queue behind it.
+      secs = null.get(default=0., data.seconds)
+      if secs > 0. and secs < short_item then
+        following := true
+        thread.run(fast=false, fun () -> begin
+          before = flush_count()
+          follow = ask_backend()
+          if follow != "" and follow != "stale" then
+            r = request.create(follow)
+            # Downloaded first (request.resolve), so the queue only ever holds it whole
+            if request.resolve(timeout=120., r) and before == flush_count() then
+              log.important("next: fetched the item after a #{secs} s item in advance")
+              f = add_main()
+              ignore(f(r))
+            else
+              log.important("next: the item after a short one was not kept (queue changed or no file)")
+              request.destroy(r)
+            end
+          end
+          following := false
+        end)
+      end
+      data.uri
+    end
+  else
+    ask_after := time() + 1.5
+    ""
+  end
+end
+def next_request() =
+  def ask() = ask_backend() end
+  if time() < ask_after() or following() then
+    null()
+  else
+    try
+      uri = ref(ask())
+      tries = ref(1)
+      while uri() == "stale" and tries() < 3 do
+        uri := ask()
+        tries := tries() + 1
+      end
+      if uri() == "" or uri() == "stale" then null() else request.create(uri()) end
+    catch err do
+      log.important("next: backend unreachable: #{err}")
+      ask_after := time() + 2.
       null()
     end
-  catch err do
-    log.important("next: backend unreachable: #{err}")
-    null()
   end
 end
 
 # A long song is a big download: give it time to arrive (it is fetched while the song
 # before it plays)
 main_requests = request.dynamic(id="main", prefetch=1, retry_delay=2., timeout=120., next_request)
+add_main := fun (r) -> main_requests.add(r)
 # When the music lane last began reading a new item (before `cross` has buffered its
 # start and called transition()). skip_main() uses it to tell a skip that took (the next
 # item is on its way) from one that only ended a transition.
@@ -418,9 +489,18 @@ emergency = mksafe(emergency)
 # does not arrive still ends in emergency music, not dead air.
 # Also open for a few seconds after a live show ends, while the first item loads.
 live_release = ref(0.)
+# The backend handed us an item that has not started and is not loaded yet: the item
+# before it was too short to cover the download (a 2 s station ID before a song,
+# Jerusalem 03:46:46Z 2026-11-19, 2 s of emergency music). Quiet while it loads, at
+# most 6 s after it was handed out.
+def handed_loading() =
+  list.hd(default="", given()) != last_main_entry() and list.length(main_requests.queue()) == 0
+    and time() - handed_at() < 6.
+end
 def hold_open() =
   left = timed_group_at() - time()
   (timed_pending() > 0 and left < 8. and left > -2.) or time() < live_release() or time() < start_quiet_until()
+    or handed_loading()
 end
 hold = switch(id="hold_gate", track_sensitive=false, [(hold_open, blank(id="hold"))])
 
@@ -637,6 +717,8 @@ def skip_on_air(~seconds) =
   end
   asked = time()
   def rec wait() =
+    # The backend may have had nothing a moment ago: while Next waits, ask every 0.5 s
+    if ask_after() > time() + 0.5 then ask_after := time() + 0.5 end
     if on_air_lane() != "main" or main_loaded() or time() - asked > skip_wait then
       if time() - asked > 0.05 then
         log.important("skip: waited #{time() - asked} s for the next item's file")
@@ -716,9 +798,12 @@ end
 # if the backend cannot be reached the station plays its own music, not silence. It
 # was empty on the server (2026-11-17), which would have meant dead air.
 emergency_keep = 40
-def keep_for_emergency(played) =
+def keep_for_emergency(played, asset) =
   if played != "" and file.exists(played) then
-    dest = "#{emergency_dir}/" ^ path.basename(played)
+    # One copy per item, named after it (the download's own name is new every time, so
+    # a song played twice took two of the 40 places, harness engine_rows 2026-11-19)
+    name = if asset != "" then "#{asset}.mp3" else path.basename(played) end
+    dest = "#{emergency_dir}/" ^ name
     # Copied under a temporary name first, so the playlist never sees half a file
     part = dest ^ ".part"
     cmd = "cp -f #{process.quote(played)} #{process.quote(part)} && mv -f #{process.quote(part)} #{process.quote(dest)} && cd #{process.quote(emergency_dir)} && ls -1t | tail -n +#{emergency_keep + 1} | tr '\\n' '\\000' | xargs -0 -r rm -f --"
@@ -797,6 +882,8 @@ def send_started(m) =
     else
       if time() < live_release() or time() < start_quiet_until() then
         log.important("hold: quiet while the next item loads (engine start, Next or end of a live show)")
+      elsif handed_loading() then
+        log.important("hold: quiet while the next item loads (the item before it was shorter than its download)")
       else
         log.important("hold: quiet until the timed item due in #{left} s")
       end
@@ -818,7 +905,7 @@ def send_started(m) =
       start_quiet_until := 0.
     end
     report_to_backend(entry, lane, m["title"])
-    if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"]) end
+    if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"], m["kbr_asset"]) end
   end
 end
 
@@ -900,6 +987,7 @@ end)
 # until that item is loaded, so no emergency music fills in.
 control("/live", fun (req) -> begin
   let json.parse (body : {on : bool}) = req.body()
+  ask_after := 0.
   if body.on and not live_wanted() then
     log.important("live: show starts; the music plays on until its audio is here")
     live_asked := time()
@@ -946,6 +1034,8 @@ end)
 
 # Drop the pre-loaded next track (the queue changed) and ask the backend again
 control("/flush", fun (_) -> begin
+  flush_count := flush_count() + 1
+  ask_after := 0.
   main_requests.set_queue([])
   # The pre-loaded entry will not air after all: forget that it was handed to us
   if given() != [] and list.hd(default="", given()) != last_main_entry() then

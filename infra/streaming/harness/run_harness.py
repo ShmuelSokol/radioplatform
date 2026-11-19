@@ -66,6 +66,8 @@ TONES = {
     "song6": (770, 40, "music", None),
     "time": (1500, 6, "jingle", "time_announcement"),
     "announce": (1700, 6, "jingle", "block_only"),
+    # a 2 s station ID (Jerusalem's J1 and J3 are 1.7 to 2.3 s)
+    "id2": (1850, 2, "jingle", "block_only"),
     "weather": (2000, 8, "spot", "weather_spot"),
     "shiur": (300, 150, "shiur", "block_only"),
     "story": (350, 150, "story", None),
@@ -1055,6 +1057,42 @@ async def sc_operator_next_overtakes_commit(h: Harness) -> None:
             await db.execute(text("DROP TRIGGER IF EXISTS kbr_slow_manual ON queue_entries"))
             await db.commit()
     heard = h.heard(t_start, time.time() - 1)
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+
+
+async def sc_short_item_before_slow_file(h: Harness, item: str = "id2", delay: float = 4.0) -> None:
+    """Jerusalem 03:46:46Z and 04:00:14Z 2026-11-19: a 2 s station ID aired, and the
+    song after it was still downloading when the ID ended: 2 to 3 s of emergency music.
+    The engine fetches the item after a short one as soon as the short one is handed
+    over, so it follows at once or after a short quiet hold: no emergency music, no
+    silence over 1 s."""
+    name = f"short_item_before_slow_file[{item}]"
+    await wait_music(h)
+    await h.clear_pending()
+    h.stack.slow_files["story.mp3"] = delay
+    try:
+        await h.queue([(item, {}), ("story", {}), ("song5", {})])
+        await asyncio.sleep(delay + 4)
+        pressed = time.time()
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        t = await h.wait_on_air("story", 30)
+    finally:
+        h.stack.slow_files.pop("story.mp3", None)
+    await asyncio.sleep(4)
+    heard = h.heard(pressed - 2, time.time() - 1)
+    h.print_timeline(heard, pressed)
+    names = [n for _, n in timeline(heard)]
+    short = tone_name(TONES[item][0])
+    after = names[names.index(short) + 1:] if short in names else []
+    h.check(name, t is not None and short in names, f"the short item and then the slow one aired ({names})")
+    # After the Next the short item and the one after it are handed out afresh, so a
+    # download longer than the short item itself can leave a quiet hold (under 1 s,
+    # checked below): never emergency music or another item in between
+    between = after[:after.index(tone_name(TONES["story"][0]))] if tone_name(TONES["story"][0]) in after else after
+    h.check(name, tone_name(TONES["story"][0]) in after and all(n == "silence" for n in between),
+            f"the slow item follows the short one, only a quiet hold in between: {names}")
     gap, _ = longest_silence(heard)
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
     await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
@@ -2899,9 +2937,17 @@ async def sc_engine_rows(h: Harness) -> None:
     log(f"    empty answers after Next: {len(early)} asks in the first 3 s, {len(late)} from 20 to 30 s")
     h.print_timeline(h.heard(t0, time.time() - 1), t0)
     blog = backend_log()
-    h.check(name, "Engine started -> entry=- lane=emergency" in blog
-            and f"Alert created: [critical] {EMERGENCY_ALERT_TITLE}" in blog,
-            "F-ENGINE2-10 the emergency files were reported (no entry, lane emergency) and raised the alert")
+    from sqlalchemy import select
+
+    from app.db.engine import async_session_factory
+    from app.models.alert import Alert
+
+    async with async_session_factory() as db:
+        kept = (await db.execute(select(Alert).where(
+            Alert.title == EMERGENCY_ALERT_TITLE, Alert.station_id == STATION_ID))).scalars().all()
+    # Read from the alerts table: the row used to be rolled back after the log line (fixed 2026-11-19)
+    h.check(name, "Engine started -> entry=- lane=emergency" in blog and len(kept) >= 1,
+            f"F-ENGINE2-10 the emergency files were reported (no entry, lane emergency) and raised the alert ({len(kept)} row(s))")
     h.check(name, len(early) <= 6, f"V1-12h asks while Next waits stay slow ({len(early)} asks in 3 s)")
     h.check(name, len(late) <= 7, f"V1-3 on emergency music a 204 is asked again every 2 s ({len(late)} asks in 10 s)")
     gap, _ = longest_silence(h.heard(t0 + 20, time.time() - 1))
@@ -4570,6 +4616,8 @@ SCENARIOS = {
     "two_groups_20s_apart": lambda h: sc_two_groups(h, 20.0),
     "play_now_before_hard_item": sc_play_now_before_hard_item,
     "play_now_next_before_hard_item": lambda h: sc_play_now_before_hard_item(h, next_during=True),
+    "short_item_before_slow_file": sc_short_item_before_slow_file,
+    "short_item_6s_before_slow_file": lambda h: sc_short_item_before_slow_file(h, "announce", 9.0),
     "backend_unreachable": sc_backend_unreachable,
     "local_box_commands": sc_local_box_commands,
     "local_box_offline": sc_local_box_offline,
