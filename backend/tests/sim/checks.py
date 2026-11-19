@@ -354,7 +354,7 @@ def sponsor_spacing(res: Result, ctx: Context):
 
 def station_ids(res: Result, ctx: Context):
     """Station IDs 12 to 20 minutes apart (plus one song), never two spoken items in a
-    row with an ID, never within 3 minutes of a break, and only the station's own IDs."""
+    row with an ID, never within the station's clear_minutes (default 3) of a break, and only the station's own IDs."""
     check = "station IDs spaced, own, clear of breaks"
     res.checks_run.setdefault(check, 0)
     for sid, rows in _per_station(res.rows).items():
@@ -362,6 +362,8 @@ def station_ids(res: Result, ctx: Context):
         if not cfg.get("enabled"):
             continue
         own = cfg.get("category") or "station_id"
+        # the station's own clear_minutes (Main and Stories use 1 since 2026-11-19)
+        clear = float(cfg.get("clear_minutes", ID_CLEAR_OF_BREAK_MINUTES))
         ids = [r for r in rows if r.is_id and r.timing_mode is None]
         for r in [x for x in rows if x.is_id]:
             _count(res, check)
@@ -382,7 +384,7 @@ def station_ids(res: Result, ctx: Context):
                     _add(res, check, r, r.local_start, f"ID next to {x.label()}")
             breaks = [x for x in rows if x.timing_mode in ("hard", "soft") and x.preempt_at is not None]
             for x in breaks:
-                if abs(x.start - r.start) < ID_CLEAR_OF_BREAK_MINUTES * 60 and x is not r:
+                if abs(x.start - r.start) < clear * 60 and x is not r:
                     _add(res, check, r, r.local_start, f"ID {abs(x.start - r.start) / 60:.1f} min from break {x.label()}")
                     break
 
