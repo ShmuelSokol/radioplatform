@@ -980,6 +980,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("Scheduler engine started")
     except Exception as e:
         logger.warning(f"Scheduler engine failed to start: {e}")
+        # Stations would never advance with nobody told (V1-113): raise an alert
+        try:
+            import app.db.engine as _db_engine
+            from app.models.alert import AlertSeverity, AlertType
+            from app.services.alert_service import create_alert
+
+            async with _db_engine.async_session_factory() as _db:
+                await create_alert(
+                    _db, AlertType.SYSTEM, AlertSeverity.CRITICAL,
+                    title="Scheduler did not start",
+                    message=f"The scheduler engine failed to start after a restart ({e}). "
+                            "Stations on the browser player will not advance until the backend restarts.",
+                )
+                await _db.commit()
+        except Exception as alert_error:
+            logger.warning(f"Scheduler start alert failed: {alert_error}")
 
     # Items with no length break timing; measure them in the background
     import asyncio as _asyncio
