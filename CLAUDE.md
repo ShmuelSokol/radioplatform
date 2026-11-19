@@ -567,7 +567,7 @@ cd frontend && (npx vite preview --port 4183 --strictPort &) && xvfb-run -a pyth
 cd frontend && xvfb-run -a python3 e2e/webkit/bug-screenshot-webkit.py
 
 # The bug report's picture vs a real screenshot, and 🐞 over every kind of dialog (fake backend, Chromium)
-cd frontend && for s in bug-screenshot-faithful bug-over-dialogs; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
+cd frontend && for s in bug-screenshot-faithful bug-over-dialogs bug-everywhere; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
 
 # Leaving pages in real WebKit logs no version.json console error (reads WebKit's own console via MiniBrowser)
 cd frontend && xvfb-run -a python3 e2e/webkit/version-check-webkit.py

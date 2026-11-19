@@ -85,6 +85,7 @@ action worked **and** the screen, console and network showed nothing a person wo
 - [x] L-47 🐞 works while any dialog, panel or sheet is open (control room Song panel, New Archive, New Show; desktop and iPhone): a tap where the 🐞 shows opens the report even under a dimmed backdrop, the dialog stays open and is in the picture, the report sends, and the dialog is still open afterwards. Found 2026-11-18 from Shmuel's iPhone (Song panel open: no way to report) | both | covered: frontend/e2e/bug-over-dialogs.mjs (fails on the old code)
 - [x] L-48 The report's picture opens full screen on a tap, zooms on a second tap, and Close goes back to the report (Shmuel could not see the cropped preview) | both | covered: frontend/e2e/bug-over-dialogs.mjs
 - [ ] L-49 ↳ real iPhone: the picture's qnet buttons look like the screen; 🐞 over the Song panel; full-screen view with pinch | phone | covered: NOT COVERED (live check by Shmuel)
+- [x] L-50 A 🐞 can be tapped with any dialog, card or sheet open, on every page, without covering the dialog's own buttons; the report opens with the dialog still behind it. Found 2026-11-19 from Shmuel's iPhone (Edit contract on a client's page: no 🐞) | both | covered: frontend/e2e/bug-everywhere.mjs (Chromium, iPhone 13/SE + desktop), frontend/e2e/webkit/bug-screenshot-webkit.py (WebKit, iPhone width)
 
 ## I. One station never shows, warns about or changes another
 
