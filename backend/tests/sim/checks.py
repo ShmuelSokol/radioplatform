@@ -752,6 +752,66 @@ def estimates_hold(res: Result, ctx: Context):
              f"{r.title!r} shown at {shown} (queue read {read}), aired {off / 60:+.1f} min off")
 
 
+def omer_count(res: Result, ctx: Context):
+    """Sefiras HaOmer (Shmuel 2026-11-19): every hh:00 on the air during the count, the
+    count airs right after the time check and before anything else of the hour, and says
+    the station's own day (the next day from shekia at its place; days only, as the siddur).
+    Never at another minute, never in the Shabbos / Yom Tov silence, never outside the
+    49 days, never with the station's setting off."""
+    from app.services import omer_count as omer
+
+    check = "Omer count after each hour's time check, the right day"
+    res.checks_run.setdefault(check, 0)
+    start, end = ctx.window()
+    for sid, rows in _per_station(res.rows).items():
+        tz = rows[0].tz
+        st = ctx.stations[sid]
+        setting = omer.omer_setting(ctx.config(sid))
+        place = omer.station_place(st.latitude, st.longitude, tz.key)
+        said = [r for r in rows if r.category == "omer_count"]
+        for r in said:
+            _count(res, check)
+            a = ctx.assets.get(r.asset_id)
+            got = omer.clip_key(a) if a is not None else None
+            mark = r.preempt_at
+            expect = omer.omer_at(mark, tz, place, setting.switch_minutes) if mark and place else None
+            if not setting.enabled:
+                _add(res, check, r, r.local_start, "Omer count aired with the station's setting off")
+            elif mark is None or mark.astimezone(tz).minute != 0:
+                _add(res, check, r, r.local_start, f"{r.title!r} aired outside an hh:00 group")
+            elif got != expect:
+                _add(res, check, r, r.local_start, f"says {got}, the station's count then is {expect}")
+            if any(w["start"].timestamp() <= r.start < w["end"].timestamp()
+                   and (not w["stations"] or sid in w["stations"]) for w in ctx.sim.blackouts):
+                _add(res, check, r, r.local_start, f"{r.title!r} aired in the Shabbos / Yom Tov silence")
+        if not setting.enabled or place is None:
+            continue
+        t = datetime.fromtimestamp(start, UTC).replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        while t.timestamp() < end - 60:
+            mark, t = t, t + timedelta(hours=1)
+            if mark.astimezone(tz).minute != 0 or mark.timestamp() < start + 60:
+                continue
+            expect = omer.omer_at(mark, tz, place, setting.switch_minutes)
+            if expect is None:
+                continue
+            if any(w["start"] <= mark < w["end"] and (not w["stations"] or sid in w["stations"])
+                   for w in ctx.sim.blackouts):
+                continue
+            _count(res, check)
+            time_row = next((r for r in rows if r.is_time and abs(r.start - mark.timestamp()) <= ON_TIME_SECONDS), None)
+            hit = next((r for r in said if r.preempt_at == mark), None)
+            label = mark.astimezone(tz).strftime("%a %H:%M")
+            if hit is None:
+                _add(res, check, sid, label, f"no Omer count (expected {expect})")
+                continue
+            prev = next((p for p in reversed(rows) if p.end <= hit.start + 0.5 and p is not hit), None)
+            if time_row is not None and prev is not time_row:
+                _add(res, check, hit, hit.local_start,
+                     f"count not right after the time check (after {prev.label() if prev else 'nothing'})")
+            if hit.start - mark.timestamp() > 60:
+                _add(res, check, hit, hit.local_start, f"count {hit.start - mark.timestamp():.0f} s after the hour")
+
+
 ALL_CHECKS = [estimates_hold, site_log_matches_air, one_resume_per_pause, shabbos_silence, shabbos_ending, hard_items_on_time, time_checks_on_the_hour, no_dead_air, nothing_inside_a_shiur,
               sponsor_spacing, station_ids, station_isolation, time_check_says_the_hour, weather_is_todays,
-              soft_items_wait_for_the_song, nothing_twice]
+              soft_items_wait_for_the_song, nothing_twice, omer_count]
