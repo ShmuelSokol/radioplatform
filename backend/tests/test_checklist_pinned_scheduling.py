@@ -648,6 +648,18 @@ async def _hourly_station(db: AsyncSession, config: dict):
     return station, clock, weather, other
 
 
+def _pin_clock(monkeypatch, at: datetime) -> None:
+    """The hourly scheduler reads this time instead of the wall clock."""
+    import app.services.queue_replenish_service as qrs
+
+    class _Pinned(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return at if tz is None else at.astimezone(tz)
+
+    monkeypatch.setattr(qrs, "datetime", _Pinned)
+
+
 async def _run_hourly(db: AsyncSession, station_id, clock, weather):
     with patch("app.services.weather_spot_service.get_or_create_weather_spot_assets",
                new=AsyncMock(return_value=(clock, weather))):
@@ -668,11 +680,16 @@ async def test_hourly_time_and_weather_for_48_hours(
     minute does not count), hard on the hour; a :30 weather (soft) only when weather
     is on and the interval is 30 minutes; a second pass adds nothing."""
     monkeypatch.setattr(type(settings), "supabase_storage_enabled", property(lambda self: True))
+    # The clock is pinned a moment before the top of an hour: read twice from the wall
+    # clock, the 48-hour window moved by an hour between the two passes when the run
+    # crossed hh:00, and the second pass added a set (main, 2026-11-19 03:00Z).
+    now = datetime.now(UTC).replace(minute=59, second=59, microsecond=900000)
+    _pin_clock(monkeypatch, now)
     station, clock, weather, other = await _hourly_station(db_session, {
         "hourly_time_announcement": True, "weather_enabled": weather_enabled,
         "weather_interval_minutes": interval,
     })
-    hour = (datetime.now(UTC) + timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
+    hour = (now + timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
     db_session.add_all([
         QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=other.id, position=1, status="pending",
                    source="ad_slot", preempt_at=hour),
@@ -695,7 +712,7 @@ async def test_hourly_time_and_weather_for_48_hours(
     assert 46 <= len(by_hour) <= 48
     assert all(sorted(map(str, v)) == sorted([str(clock.id), str(weather.id)]) for v in by_hour.values())
     assert hour in by_hour and hour + timedelta(hours=1) in by_hour
-    assert max(by_hour) <= datetime.now(UTC) + timedelta(hours=48)
+    assert max(by_hour) <= now + timedelta(hours=48)
     assert all(e.timing_mode == "hard" for e in tops)
     halves = [e for e in entries if _utc(e.preempt_at).minute == 30]
     if half:
