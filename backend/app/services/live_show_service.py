@@ -350,20 +350,6 @@ async def start_show(
         if station is not None:
             await take_over_station(db, station, show, now)
 
-    # Set icecast mount for WebRTC mode
-    if show.broadcast_mode == "webrtc" and not show.icecast_mount:
-        show.icecast_mount = f"/live-{show.id}"
-
-    # Start Icecast stream if in WebRTC mode
-    if show.broadcast_mode == "webrtc":
-        try:
-            from app.services.icecast_service import start_icecast_stream
-            await start_icecast_stream(
-                str(show.id), show.title, mount=show.icecast_mount
-            )
-        except Exception as e:
-            logger.warning("Failed to start Icecast for live show %s: %s", show_id, e)
-
     await db.flush()
     await db.refresh(show)
     return show
@@ -599,14 +585,6 @@ async def end_show(db: AsyncSession, show_id: UUID | str, drain: bool = True) ->
             await live_relay.caller_status(line.call_id, "completed")
     except Exception as e:
         logger.warning("Failed to end web calls for show %s: %s", show_id, e)
-
-    # Stop Icecast stream
-    if show.broadcast_mode == "webrtc":
-        try:
-            from app.services.icecast_service import stop_icecast_stream
-            await stop_icecast_stream(str(show.id))
-        except Exception as e:
-            logger.warning("Failed to stop Icecast for show %s: %s", show_id, e)
 
     await db.flush()
     await db.refresh(show)
