@@ -127,7 +127,7 @@ def test_every_track_change_is_reported_and_the_emergency_folder_fills_itself():
     assert re.search(r"cp -f .*part.* && mv -f .*part.*dest", keep)
     assert "tail -n +#{emergency_keep + 1}" in keep
     started = _block(liq, "def send_started(m) =")
-    assert 'if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"]) end' in started
+    assert 'if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"], m["kbr_asset"]) end' in started
     assert liq.count("keep_for_emergency(") == 2  # the definition and that one call
 
 

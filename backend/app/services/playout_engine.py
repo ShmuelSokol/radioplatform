@@ -147,6 +147,8 @@ class EngineState:
     # playing is not on air any more (it was cut by the restart), so the hold rule must
     # not wait for its end
     fresh_start: bool = False
+    # The long item cut by an engine restart has been queued to carry on (once per start)
+    restart_resumed: bool = False
     # The engine this station listens to (its X-Playout-Instance, a random id each engine
     # start). None until one calls, and for an engine that sends none
     instance: str | None = None
@@ -533,6 +535,9 @@ def build_uri(entry: QueueEntry, lane: str) -> str | None:
         "kbr_lane": lane,
         # The engine keeps copies of music it played as its emergency fallback
         "kbr_kind": (asset.asset_type or "").lower(),
+        # ... under one name per item: the download's own name (liq-processXXXX.mp3) is
+        # new each time, so a song played twice took two of its 40 places
+        "kbr_asset": str(asset.id),
         # How long this item overlaps the next at its end: the station's song
         # crossfade, 0 for anything spoken (queue.overlap_seconds)
         "kbr_overlap": f"{_overlap(entry):.2f}",
@@ -844,6 +849,52 @@ async def _reconcile_given(db: AsyncSession, station_id, given: list[str]) -> se
     return {str(i) for i in ids}
 
 
+async def _resume_after_restart(db: AsyncSession, station_id) -> None:
+    """The engine restarted (a deployment, a crash) while a shiur or story was on air: it
+    carries on from where it was cut, first thing, like after a pause for the time
+    check. It was lost with 48 minutes left (simulator, engine restart during the Daf
+    Yomi, 2026-11-19)."""
+    from app.models.queue_entry import RESUME_PREFIX, resume_source
+    from app.services import long_items
+
+    res = await db.execute(
+        select(QueueEntry)
+        .options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast())
+    )
+    current = res.unique().scalars().first()
+    if current is None or current.started_at is None or not long_items.is_long_form(current.asset):
+        return
+    resume_at = long_items.resume_point(current, datetime.now(UTC))
+    if resume_at is None:
+        return
+    # Already queued to carry on (a pause made a resume entry before the restart)
+    waiting = await db.execute(
+        select(QueueEntry.id).where(
+            QueueEntry.station_id == station_id, QueueEntry.status == "pending",
+            QueueEntry.asset_id == current.asset_id, QueueEntry.source.like(f"{RESUME_PREFIX}%"),
+        ).limit(1)
+    )
+    if waiting.first() is not None:
+        return
+    head = (current.position or 0) + 1
+    await db.execute(
+        update(QueueEntry)
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending",
+               QueueEntry.position >= head)
+        .values(position=QueueEntry.position + 1)
+        .execution_options(synchronize_session=False)
+    )
+    db.add(QueueEntry(
+        id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id,
+        position=head, status="pending", source=resume_source(resume_at),
+    ))
+    await db.commit()
+    logger.info("Station %s: engine restarted during %s; it carries on from %.0f s",
+                station_id, current.asset_id, resume_at)
+
+
 async def handle_next(
     db: AsyncSession, station_id, given: list[str] | None = None, proto: int | None = None,
     engine_live_on: bool = False,
@@ -887,6 +938,14 @@ async def handle_next(
         skipping=state.skip_requested or state.fresh_start,
     ):
         return None
+
+    if state.fresh_start and not state.restart_resumed and not during_show:
+        state.restart_resumed = True
+        try:
+            await _resume_after_restart(db, station_id)
+        except Exception as e:
+            logger.warning("Station %s: resuming the item cut by the engine restart failed: %s", station_id, e)
+            await db.rollback()
 
     # The engine only asks when it holds nothing pre-loaded, so an entry we already handed
     # out is on its way to air (its "started" report may not have reached us yet).
@@ -937,7 +996,12 @@ async def handle_next(
             _note_handed(state, entry)
             await _record_handed(db, station_id, [(entry_id, asset_id)])
             logger.info("Engine next -> %s", entry_id)
-            return {"uri": uri, "entry_id": entry_id}
+            # Its length, so the engine fetches the item after a short one (a 2 s station
+            # ID) at once: asked only when the short one starts, the song's download
+            # outlasted it and emergency music filled the gap (Jerusalem 03:46Z, 04:00Z
+            # 2026-11-19)
+            seconds = float(entry.asset.duration or 0.0) if entry.asset is not None else 0.0
+            return {"uri": uri, "entry_id": entry_id, "seconds": round(seconds, 2)}
         # No playable file for this entry: drop it and try the following one
         logger.error("Queue entry %s has no playable audio URL; skipping it", entry.id)
         entry.status = "skipped"
@@ -1824,6 +1888,7 @@ async def _hand_over_timed(db: AsyncSession, station_id, state: EngineState, now
         groups.setdefault(at, []).append((entry, uri))
 
     handed: list[tuple[str, str]] = []
+    missed: list[tuple[QueueEntry, datetime]] = []
     parallel = state.engine_proto >= ENGINE_PROTO_GROUPS
     for at, items in groups.items():
         # A group moved to follow an earlier one (timed_groups) is handed over at that
@@ -1855,21 +1920,29 @@ async def _hand_over_timed(db: AsyncSession, station_id, state: EngineState, now
             elif at <= now and key not in state.timed_alerted:
                 # Its time has come and the engine has not taken it: it will not air on time
                 state.timed_alerted.add(key)
-                title = (entry.asset.title if entry.asset else None) or "A timed item"
-                await _alert(
-                    db,
-                    station_id,
-                    state,
-                    force=True,
-                    title="Timed item did not reach the playout engine",
-                    message=(
-                        f"\"{title}\" was due at {at:%H:%M:%S} UTC, but the engine did not "
-                        "accept it. It is retried for a few minutes; check that the engine "
-                        "is running."
-                    ),
-                )
-    if len(state.timed_alerted) > 200:
-        state.timed_alerted.clear()
+                missed.append((entry, at))
+    if missed:
+        # One alert for all of them: an engine that cannot be reached at candle lighting
+        # has hundreds of Silence rows due, and each one alerted on every pass (30,600
+        # alert calls in 5 minutes in the simulator, 2026-11-19)
+        entry, at = missed[0]
+        title = (entry.asset.title if entry.asset else None) or "A timed item"
+        more = f" and {len(missed) - 1} more timed item(s)" if len(missed) > 1 else ""
+        await _alert(
+            db,
+            station_id,
+            state,
+            force=True,
+            title="Timed item did not reach the playout engine",
+            message=(
+                f"\"{title}\" was due at {at:%H:%M:%S} UTC{more}, but the engine did not "
+                "accept it. It is retried for a few minutes; check that the engine "
+                "is running."
+            ),
+        )
+    if len(state.timed_alerted) > 5000:
+        # Forget half, not all: clearing it made every missed item alert again
+        state.timed_alerted = set(list(state.timed_alerted)[2500:])
     await _record_handed(db, station_id, handed)
 
 
