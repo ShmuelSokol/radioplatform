@@ -451,3 +451,13 @@ outgoing track's tags once more), logged as "showed again for a moment; ignored"
 journal for that break showed one plain crossfade and no hold or timed line, so this
 crossfade path is the likely cause. Start reports are not logged by the engine unless the
 backend is unreachable.
+
+## The FM feed is the engine's stream (2026-11-19)
+
+The FM feed must carry the whole station at all times: automation between shows,
+host and callers during shows, and never drop. That is the playout engine's stream
+(and, in the BMG room, the same engine on the local box: [local-fm-box](local-fm-box.md)).
+The backend's own Icecast source (`icecast_service.py`, "Start the FM feed",
+`ICECAST_HOST`) carried only the live host's microphone and dropped between shows;
+it was never configured in production and is retired. `/icecast/{id}/start` and
+`/stop` answer 410; `/icecast/status` names the engine's streams.

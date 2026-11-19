@@ -133,36 +133,24 @@ async def test_ntfy_only_with_a_topic_and_on_its_server(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_icecast_status_and_start_follow_icecast_host(client, auth_headers, db_session, monkeypatch):
-    """B-ICECAST-1 / B-SET-31: status reports whether ICECAST_HOST is set (and the active
-    streams); with no host, start refuses with a message and opens nothing; with a host it starts
-    the station's source on /<station id> by default."""
-    from app.models.station import Station
-    from app.services import icecast_service
-
-    st = Station(id=uuid.uuid4(), name="FM feed", timezone="UTC")
-    db_session.add(st)
-    await db_session.commit()
-    monkeypatch.setattr(settings, "ICECAST_HOST", "")
-    monkeypatch.setattr(icecast_service, "_icecast_clients", {})       # other tests leave sources behind
-    status =(await client.get("/api/v1/icecast/status", headers=auth_headers)).json()
-    assert status["enabled"] is False and status["host"] is None and status["active_streams"] == []
-
-    started = []
-
-    async def fake_start(station_id, name, mount=None):
-        started.append((station_id, name, mount))
-
-    monkeypatch.setattr(icecast_service, "start_icecast_stream", fake_start)
-    r = await client.post(f"/api/v1/icecast/{st.id}/start", headers=auth_headers)
-    assert "not configured" in r.json()["error"] and started == []
-
+async def test_the_old_fm_feed_routes_say_where_the_fm_feed_is_now(client, auth_headers, db_session, monkeypatch):
+    """B-ICECAST-1 / B-SET-31 / V2-116: the backend's own Icecast source is retired
+    (it carried only the host's microphone and dropped between shows). Status names the
+    engine's streams; start and stop answer 410 with the reason, also with ICECAST_HOST set."""
+    sid = str(uuid.uuid4())
     monkeypatch.setattr(settings, "ICECAST_HOST", "ice.invalid")
-    assert (await client.get("/api/v1/icecast/status", headers=auth_headers)).json()["enabled"] is True
-    r = await client.post(f"/api/v1/icecast/{st.id}/start", headers=auth_headers)
-    assert r.json() == {"status": "started", "station": "FM feed", "mount": f"/{st.id}"}
-    assert started == [(str(st.id), "FM feed", None)]
-    assert (await client.post(f"/api/v1/icecast/{uuid.uuid4()}/start", headers=auth_headers)).status_code == 404
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_ENABLED", True)
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_STATION_ID", sid)
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_URL", "http://engine.invalid")
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_TOKEN", "t")
+    monkeypatch.setattr(settings, "ICECAST_STREAM_URL", "https://stream.invalid/live")
+    status = (await client.get("/api/v1/icecast/status", headers=auth_headers)).json()
+    assert status["enabled"] is False and status["retired"] is True and status["active_streams"] == []
+    assert status["engine_streams"] == {sid: f"https://stream.invalid/live-{sid}"}
+    for action in ("start", "stop"):
+        r = await client.post(f"/api/v1/icecast/{sid}/{action}", headers=auth_headers)
+        assert r.status_code == 410 and "playout engine" in r.json()["detail"]
+    assert (await client.post(f"/api/v1/icecast/{sid}/start")).status_code in (401, 403)
 
 
 # ── B-STATIONS-5 / B-STATIONS-6 ───────────────────────────────────────────

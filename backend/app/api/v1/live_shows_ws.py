@@ -851,7 +851,6 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
         _holds.add(_task := asyncio.ensure_future(hold_for_timed_items(station_id, _air)))
         _task.add_done_callback(_holds.discard)
 
-    from app.config import settings
     try:
         while True:
             data = await websocket.receive_bytes()
@@ -862,13 +861,6 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
                 # heard for a minute over the returning music (Jerusalem 2026-11-17)
                 continue
             await live_relay.audio(station_id, data)
-            if settings.icecast_enabled:
-                try:
-                    from app.services.icecast_service import get_icecast_client
-                    client = get_icecast_client(show_id)
-                    await client.push_audio(data)
-                except Exception as e:
-                    logger.error("Failed to push audio to Icecast for show %s: %s", show_id, e)
     except WebSocketDisconnect:
         pass
     except Exception as e:
