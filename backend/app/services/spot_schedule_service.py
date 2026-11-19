@@ -67,14 +67,15 @@ SPONSOR_GAP = timedelta(minutes=60)
 # A soft break this close to a shiur's end waits for it anyway (long_items), so it
 # does not interrupt and stays usable.
 TALK_TAIL = timedelta(minutes=5)
+# A paused shiur waits about this long for the timed items before it carries on
+RESUME_WAIT = timedelta(minutes=3)
 # Breaks this close are neighbours (a quarter hour apart): one sponsor in both is
 # heard back to back, which is worth one extra sponsorship in a break to avoid.
 NEIGHBOUR = timedelta(minutes=20)
 def talk_tier(b: "Break", quiet: "list[tuple[datetime, datetime]] | None") -> int:
     """0: the break is outside every shiur or story (or in its last few minutes, where
-    a soft break waits for the end anyway). 1: a hard break inside one: the shiur pauses
-    there for the time check anyway, but sponsorships would make the pause longer.
-    2: a soft break inside one: it would pause the shiur just for sponsorships."""
+    a soft break waits for the end anyway). 1: a hard break inside one (the time check
+    pauses it). 2: a soft break inside one. Sponsorships use only 0."""
     if not any(start < b.local < end - TALK_TAIL for start, end in (quiet or ())):
         return 0
     return 2 if b.timing_mode == "soft" else 1
@@ -469,14 +470,13 @@ def plan_spots(
                         idx = int((k + 0.5) * len(day_breaks) / plays) % len(day_breaks)
                         n = len(day_breaks)
                         open_ = [(i, b) for i, b in enumerate(day_breaks) if fits(b, sched)]
-                        # Steer around a shiur: only when the slot has no other room
-                        # (a hard break there pauses it anyway for the time check, so
-                        # it is second choice; a soft one would pause it just for us)
-                        open_ = (
-                            [ib for ib in open_ if talk_tier(ib[1], quiet) == 0]
-                            or [ib for ib in open_ if talk_tier(ib[1], quiet) < 2]
-                            or open_
-                        )
+                        # Never inside a shiur, and never one sponsor twice within 20
+                        # minutes (Shmuel 2026-11-18): a play with no other room is left
+                        # out rather than break either rule
+                        open_ = [
+                            ib for ib in open_
+                            if not talk_tier(ib[1], quiet) and not next_to_own(ib[1], sched)
+                        ]
                         chosen = min(
                             open_,
                             key=lambda ib: (
@@ -816,6 +816,7 @@ async def talk_windows(
     weather, sponsor places, an intro).
     """
     from app.models.asset import Asset
+    from app.models.queue_entry import RESUME_PREFIX, resume_offset
     from app.services.long_items import is_long_form
 
     rows = (
@@ -834,16 +835,38 @@ async def talk_windows(
     windows: list[tuple[datetime, datetime]] = []
     playing = (
         await db.execute(
-            select(QueueEntry.started_at, Asset)
+            select(QueueEntry, Asset)
             .join(Asset, QueueEntry.asset_id == Asset.id)
             .where(QueueEntry.station_id == station.id, QueueEntry.status == "playing")
         )
     ).all()
-    for started, asset in playing:
-        if started is not None and is_long_form(asset) and asset.duration:
-            begun = as_utc(started)
-            end = begun + timedelta(seconds=float(asset.duration))
-            windows.append((begun.astimezone(tz), end.astimezone(tz)))
+    for entry, asset in playing:
+        if entry.started_at is not None and is_long_form(asset) and asset.duration:
+            begun = as_utc(entry.started_at)
+            # a resumed shiur starts part way in
+            left = max(0.0, float(asset.duration) - resume_offset(entry))
+            windows.append((begun.astimezone(tz), (begun + timedelta(seconds=left)).astimezone(tz)))
+    # A shiur paused for a timed item waits as a resume entry with no set time; it
+    # carries on as soon as the time check and weather have played. Without this a
+    # re-plan in those seconds saw no shiur (Main 2026-11-18 8:30 PM ET pause, then
+    # sponsorships at 8:45 inside the Daf Yomi).
+    resumes = (
+        await db.execute(
+            select(QueueEntry, Asset)
+            .join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(
+                QueueEntry.station_id == station.id,
+                QueueEntry.status == "pending",
+                QueueEntry.source.startswith(RESUME_PREFIX),
+            )
+        )
+    ).all()
+    for entry, asset in resumes:
+        if is_long_form(asset) and asset.duration:
+            left = max(0.0, float(asset.duration) - resume_offset(entry))
+            start = as_utc(now)
+            end = start + RESUME_WAIT + timedelta(seconds=left)
+            windows.append((start.astimezone(tz), end.astimezone(tz)))
     offset: dict[datetime, float] = {}
     for at, _, asset in rows:
         at = as_utc(at)
@@ -965,14 +988,15 @@ def settle_today(
                 and h_start <= b.local.hour < h_end
                 and b.local not in own_breaks
             ]
-            pool = (
-                [b for b in pool if talk_tier(b, quiet) == 0]
-                or [b for b in pool if talk_tier(b, quiet) < 2]
-                or pool
-            )
+            others = [where(q) for q in mine if q is not p and where(q).astimezone(UTC) > cutoff]
+            others += [t for t in (aired or {}).get(str(sched.asset_id), [])]
+            # never inside a shiur, never within 20 minutes of the sponsor's own play
+            pool = [
+                b for b in pool
+                if not talk_tier(b, quiet) and not any(abs(b.local - t) < NEIGHBOUR for t in others)
+            ]
             if not pool:
                 continue
-            others = [where(q) for q in mine if q is not p and where(q).astimezone(UTC) > cutoff]
             b = min(
                 pool,
                 key=lambda b: (

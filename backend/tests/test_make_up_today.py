@@ -127,3 +127,73 @@ async def test_talk_windows_start_after_the_items_before_them_in_their_group(db_
     await db_session.commit()
     windows = await talk_windows(db_session, st, NY, _local(19, 0).astimezone(UTC))
     assert windows == [(_local(20, 1), _local(20, 57))]
+
+
+@pytest.mark.asyncio
+async def test_a_paused_shiur_waiting_to_resume_is_still_a_talk(db_session):
+    """Main 2026-11-18 8:30 PM: the Daf Yomi paused for the time check waits as a
+    resume entry with no set time. A re-plan in those seconds saw no shiur and put
+    sponsorships at 8:45 inside it."""
+    from app.models.queue_entry import QueueEntry, resume_source
+    from app.services.spot_schedule_service import talk_windows
+
+    st = await _station(db_session)
+    daf = Asset(id=uuid.uuid4(), title="TEST Daf Yomi", file_path="d.mp3", duration=3360.0, asset_type="shiur")
+    db_session.add(daf)
+    await db_session.flush()
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=st.id, asset_id=daf.id, position=2,
+                              status="pending", source=resume_source(1737)))
+    await db_session.commit()
+    now = _local(20, 30).astimezone(UTC)
+    windows = await talk_windows(db_session, st, NY, now)
+    assert len(windows) == 1
+    start, end = windows[0]
+    assert start <= _local(20, 30) and _local(20, 45) < end - timedelta(minutes=5)
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_shiur_on_air_ends_where_its_rest_ends(db_session):
+    from app.models.queue_entry import QueueEntry, resume_source
+    from app.services.spot_schedule_service import talk_windows
+
+    st = await _station(db_session)
+    daf = Asset(id=uuid.uuid4(), title="TEST Daf Yomi", file_path="d.mp3", duration=3360.0, asset_type="shiur")
+    db_session.add(daf)
+    await db_session.flush()
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=st.id, asset_id=daf.id, position=1, status="playing",
+                              source=resume_source(1740), started_at=_local(20, 31).astimezone(UTC)))
+    await db_session.commit()
+    windows = await talk_windows(db_session, st, NY, _local(20, 35).astimezone(UTC))
+    assert windows == [(_local(20, 31), _local(20, 58))]
+
+
+@pytest.mark.asyncio
+async def test_the_last_check_before_queueing_a_sponsorship(db_session):
+    """Main 2026-11-18: a block time added to the queue at 8:45 took Glatt Bite and Main
+    Street Hardware while both were still queued at 9:00, inside the Daf Yomi. Whatever
+    a plan says, the queue never takes a sponsorship inside a shiur or within 20 minutes
+    of the same spot."""
+    from app.models.queue_entry import QueueEntry, resume_source
+    from app.services.program_block_service import _SponsorGuard
+
+    st = await _station(db_session)
+    daf = Asset(id=uuid.uuid4(), title="TEST Daf Yomi", file_path="d.mp3", duration=3360.0, asset_type="shiur")
+    glatt = Asset(id=uuid.uuid4(), title="TEST Glatt", file_path="g.mp3", duration=20.0, asset_type="spot")
+    other = Asset(id=uuid.uuid4(), title="TEST other", file_path="o.mp3", duration=20.0, asset_type="spot")
+    db_session.add_all([daf, glatt, other])
+    await db_session.flush()
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=st.id, asset_id=daf.id, position=2,
+                              status="pending", source=resume_source(1737)))
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=st.id, asset_id=glatt.id, position=3, status="pending",
+                              source="block", preempt_at=_local(21, 0).astimezone(UTC)))
+    db_session.add(PlayLog(id=uuid.uuid4(), station_id=st.id, asset_id=other.id, source=PlaySource.SCHEDULER,
+                           start_utc=_local(20, 25).astimezone(UTC)))
+    await db_session.commit()
+    guard = await _SponsorGuard.load(db_session, st, _local(20, 30).astimezone(UTC))
+    assert not guard.allows(glatt.id, _local(20, 45))  # inside the paused shiur
+    assert not guard.allows(glatt.id, _local(21, 15))  # 15 minutes after its own 9:00
+    assert guard.allows(glatt.id, _local(21, 30))
+    assert guard.near[str(other.id)] == [_local(20, 25).astimezone(UTC)]  # just played counts too
+    assert guard.allows(other.id, _local(21, 30))
+    guard.took(other.id, _local(21, 30))
+    assert not guard.allows(other.id, _local(21, 45))

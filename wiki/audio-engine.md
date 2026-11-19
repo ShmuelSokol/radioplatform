@@ -342,3 +342,6 @@ weather), for short items and for timed ones. `handover_seconds` hands a non-son
   re-encoding; with middle gaps it re-encodes at 256k. The original stays for Restore Original.
 - "AI Auto-Enhance" is called "Smart Enhance" on screen since 2026-11-19 (Shmuel asked);
   the API route is still `auto-enhance`.
+- "Done 100%" is held `DONE_HOLD_MS` (1.5 s) after the edit answers before the page moves on
+  (review box, dialog closes): the server's Done lands between two polls, so without the hold
+  the bar went from "Saving 92%" straight to gone (PC live check 2026-11-19).

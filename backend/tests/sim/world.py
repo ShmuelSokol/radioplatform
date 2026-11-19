@@ -1,0 +1,265 @@
+"""The simulator: virtual clock, patches, the scheduler pass and the fake engines."""
+from __future__ import annotations
+
+import asyncio
+import heapq
+import logging
+import sys
+import time as _real_time
+import types
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+
+import time_machine
+
+from tests.sim.engine import FakeEngine, item_from_db
+
+logger = logging.getLogger("station_sim")
+
+PASS_SECONDS = 3.0      # the scheduler's check_interval
+QUIET_PASS_SECONDS = 3.0  # can be raised for long runs (see Simulator.quiet_pass)
+
+
+class _VirtualTime(types.ModuleType):
+    """`time` as the app modules see it: monotonic() and time() follow the virtual clock;
+    everything else is the real module."""
+
+    def __init__(self, sim):
+        super().__init__("time")
+        self._sim = sim
+
+    def monotonic(self):
+        return self._sim.mono
+
+    def monotonic_ns(self):
+        return int(self._sim.mono * 1e9)
+
+    def time(self):
+        return self._sim.t
+
+    def perf_counter(self):
+        return _real_time.perf_counter()
+
+    def __getattr__(self, name):
+        return getattr(_real_time, name)
+
+
+class Simulator:
+    def __init__(self, db_path: Path, start: datetime, quiet_pass: float = QUIET_PASS_SECONDS):
+        self.db_path = Path(db_path)
+        self.start_dt = start.astimezone(UTC)
+        self.t = self.start_dt.timestamp()
+        self.mono = 1000.0
+        self.quiet_pass = quiet_pass
+        self.log: list = []
+        self.engines: dict[str, FakeEngine] = {}
+        self._events: list = []
+        self._seq = 0
+        self._patched: list = []
+        self.errors: list[str] = []
+        self.passes = 0
+
+    # ── clock ──────────────────────────────────────────────────────────────────
+    @property
+    def now(self) -> datetime:
+        return datetime.fromtimestamp(self.t, UTC)
+
+    def _move(self, t: float):
+        if t > self.t:
+            self.mono += t - self.t
+            self.t = t
+            self._coords.move_to(datetime.fromtimestamp(t, UTC))
+
+    def schedule(self, t: float, station: str, kind: str):
+        self._seq += 1
+        heapq.heappush(self._events, (t, self._seq, station, kind))
+
+    # ── database ───────────────────────────────────────────────────────────────
+    @asynccontextmanager
+    async def session(self):
+        async with self.Session() as s:
+            try:
+                yield s
+            finally:
+                try:
+                    await s.rollback()
+                except Exception:
+                    pass
+
+    async def item_for(self, entry_id: str, lane: str, uri: str):
+        async with self.session() as db:
+            return await item_from_db(db, entry_id, lane, uri)
+
+    # ── set-up ─────────────────────────────────────────────────────────────────
+    async def setup(self, seed):
+        """`seed(db)` fills the empty database and returns the engine stations' ids."""
+        import tests.conftest  # noqa: F401  (SQLite compilers for the Postgres types)
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+        from sqlalchemy import event
+
+        import app.models  # noqa: F401
+        from app.db.base import Base
+
+        self._traveller = time_machine.travel(self.start_dt, tick=False)
+        self._coords = self._traveller.start()
+
+        if self.db_path.exists():
+            self.db_path.unlink()
+        self.engine = create_async_engine(f"sqlite+aiosqlite:///{self.db_path}", echo=False)
+
+        @event.listens_for(self.engine.sync_engine, "connect")
+        def _pragma(conn, _rec):
+            c = conn.cursor()
+            c.execute("PRAGMA foreign_keys=ON")
+            c.execute("PRAGMA synchronous=OFF")
+            c.execute("PRAGMA journal_mode=MEMORY")
+            c.close()
+
+        self.Session = async_sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with self.Session() as db:
+            station_ids = await seed(db)
+        self._patch(station_ids)
+        await self._load_blackouts()
+        from app.services import playout_engine
+        playout_engine.reset_state()
+        for sid in station_ids:
+            eng = FakeEngine(self, sid)
+            self.engines[str(sid)] = eng
+        for eng in self.engines.values():
+            await eng.start()
+        return station_ids
+
+    async def _load_blackouts(self):
+        from sqlalchemy import select
+
+        from app.models.holiday_window import HolidayWindow
+
+        self.blackouts = []
+        async with self.Session() as db:
+            for h in (await db.execute(select(HolidayWindow))).scalars().all():
+                if not h.is_blackout:
+                    continue
+                ids = set((h.affected_stations or {}).get("station_ids") or [])
+                self.blackouts.append({
+                    "start": h.start_datetime if h.start_datetime.tzinfo else h.start_datetime.replace(tzinfo=UTC),
+                    "end": h.end_datetime if h.end_datetime.tzinfo else h.end_datetime.replace(tzinfo=UTC),
+                    "stations": ids, "reason": h.reason or h.name,
+                })
+
+    def _set(self, obj, name, value):
+        self._patched.append((obj, name, getattr(obj, name)))
+        setattr(obj, name, value)
+
+    def _patch(self, station_ids):
+        import app.db.engine as db_engine
+        from app.api.v1 import queue as queue_module
+        from app.config import settings
+        from app.services import last_played, playout_engine, upcoming_analysis
+
+        self._set(settings, "PLAYOUT_ENGINE_ENABLED", True)
+        self._set(settings, "PLAYOUT_ENGINE_STATION_ID", ",".join(str(s) for s in station_ids))
+        self._set(settings, "PLAYOUT_ENGINE_URL", "http://engine.invalid")
+        self._set(settings, "PLAYOUT_ENGINE_TOKEN", "sim-token")
+        self._set(settings, "PLAYOUT_STREAM_LIVE", True)
+        # uploaded time clips and weather are looked up only with storage set up
+        self._set(settings, "SUPABASE_URL", "https://storage.invalid")
+        self._set(settings, "SUPABASE_SERVICE_KEY", "sim")
+        self._set(upcoming_analysis, "ENABLED", False)
+        self._set(last_played, "BACKGROUND_FULL_READ", False)
+
+        async def command(path, payload=None, *, station_id, **_kw):
+            eng = self.engines.get(str(station_id))
+            return await eng.command(path, payload) if eng else False
+
+        async def status(station_id):
+            eng = self.engines.get(str(station_id))
+            return eng.status() if eng else None
+
+        self._set(playout_engine, "_command", command)
+        self._set(playout_engine, "engine_status", status)
+
+        async def no_broadcast(*_a, **_k):
+            return None
+
+        if hasattr(queue_module, "_broadcast_now_playing_entry"):
+            self._set(queue_module, "_broadcast_now_playing_entry", no_broadcast)
+
+        original_factory = db_engine.async_session_factory
+        vtime = _VirtualTime(self)
+        for name, mod in list(sys.modules.items()):
+            if not name.startswith("app.") or mod is None:
+                continue
+            for attr, val in list(vars(mod).items()):
+                if val is original_factory:
+                    self._set(mod, attr, self.Session)
+                elif val is _real_time:
+                    self._set(mod, attr, vtime)
+
+    async def teardown(self):
+        for obj, name, val in reversed(self._patched):
+            setattr(obj, name, val)
+        self._patched.clear()
+        from app.services import playout_engine
+        playout_engine.reset_state()
+        await self._settle()
+        await self.engine.dispose()
+        self._traveller.stop()
+
+    # ── running ────────────────────────────────────────────────────────────────
+    async def _settle(self):
+        """Let background tasks the app started (refills, analysis) finish before the
+        clock moves on, as they would in a few real milliseconds."""
+        me = asyncio.current_task()
+        for _ in range(3):
+            pending = [t for t in asyncio.all_tasks() if t is not me and not t.done()]
+            if not pending:
+                return
+            await asyncio.wait(pending, timeout=0.5)
+
+    async def scheduler_pass(self):
+        from app.services.scheduler_engine import SchedulerEngine
+
+        if not hasattr(self, "_scheduler"):
+            self._scheduler = SchedulerEngine()
+        self.passes += 1
+        async with self.Session() as db:
+            try:
+                await self._scheduler._check_all_stations(db)
+                await self._scheduler._maybe_queue_weather_readouts(db)
+            except Exception as e:  # the real loop logs and carries on
+                self.errors.append(f"{self.now:%H:%M:%S} pass: {e!r}")
+                logger.exception("scheduler pass")
+            finally:
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+
+    async def run_until(self, end: datetime, on_step=None):
+        end_t = end.astimezone(UTC).timestamp()
+        next_pass = self.t
+        while self.t < end_t:
+            ev_t = self._events[0][0] if self._events else None
+            eng_t = min((e.next_event_time() for e in self.engines.values()
+                         if e.next_event_time() is not None), default=None)
+            nxt = min(x for x in (next_pass, ev_t, eng_t, end_t) if x is not None)
+            self._move(max(nxt, self.t))
+            while self._events and self._events[0][0] <= self.t + 1e-6:
+                _, _, sid, kind = heapq.heappop(self._events)
+                eng = self.engines.get(sid)
+                if eng is not None:
+                    await eng.on_event(kind)
+            for eng in self.engines.values():
+                await eng.tick()
+            if self.t + 1e-6 >= next_pass:
+                await self.scheduler_pass()
+                await self._settle()
+                next_pass = self.t + PASS_SECONDS
+            if on_step is not None:
+                await on_step(self)
+        for seg in self.log:
+            if seg.end is None:
+                seg.end = self.t

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import EditProgressBar from './EditProgressBar';
+import EditProgressBar, { DONE_HOLD_MS } from './EditProgressBar';
 import { newProgressId } from '../../api/assets';
 import { Link } from 'react-router-dom';
 import { useEnhancePresets, useEnhanceAsset, useEnhancePreview, useRestoreOriginal, useAutoEnhance } from '../../hooks/useAssets';
@@ -33,6 +33,7 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
   const restoreMutation = useRestoreOriginal();
   const autoEnhanceMutation = useAutoEnhance();
   const [progressId, setProgressId] = useState<string | null>(null);
+  const [finishing, setFinishing] = useState(false);  // "Done 100%" held a moment
 
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [enhancePending, setEnhancePending] = useState(false);
@@ -116,10 +117,14 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
     setProgressId(pid);
     autoEnhanceMutation.mutate({ id: assetId, progressId: pid }, {
       onSuccess: (result) => {
-        setEnhancePending(true);
-        setAiReasons(result.reasons);
-        setStatusMsg(null);
-        onEnhanceComplete?.();
+        setFinishing(true);
+        setTimeout(() => {
+          setFinishing(false);
+          setEnhancePending(true);
+          setAiReasons(result.reasons);
+          setStatusMsg(null);
+          onEnhanceComplete?.();
+        }, DONE_HOLD_MS);
       },
       onError: () => setStatusMsg('Smart Enhance failed'),
     });
@@ -177,13 +182,13 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
       {canEdit && (
         <button
           onClick={handleAutoEnhance}
-          disabled={autoEnhanceMutation.isPending}
+          disabled={autoEnhanceMutation.isPending || finishing}
           className="w-full mb-3 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50"
         >
           {autoEnhanceMutation.isPending ? <><Spinner className="mr-1" />Analyzing &amp; Enhancing...</> : 'Smart Enhance'}
         </button>
       )}
-      <EditProgressBar progressId={progressId} active={autoEnhanceMutation.isPending} label="Smart Enhance" />
+      <EditProgressBar progressId={progressId} active={autoEnhanceMutation.isPending || finishing} done={finishing} label="Smart Enhance" />
 
       {/* Preset buttons */}
       <div className="flex flex-wrap gap-2 mb-3">
