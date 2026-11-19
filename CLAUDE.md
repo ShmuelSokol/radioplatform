@@ -168,7 +168,7 @@ radioplatform/
 | billing | billing.py | /billing |
 | ai_emails | ai_emails.py | /ai-emails |
 | alerts | alerts.py | /alerts (list pages with skip/limit; POST /alerts/resolve-all; repeats of an open alert fold into it) |
-| live_shows | live_shows.py | /live-shows (`GET /{id}/air`, `POST /{id}/dump`, `POST /{id}/delay`: the broadcast delay; `GET /{id}/dumps` and `/dumps/{dump_id}/audio`: the dump log; `GET` and `POST /{id}/chat`: the staff chat; `calls/{id}/on-air` answers 409 `delay_not_safe` unless `?force=true`; `calls/{id}/hold`, `calls/{id}/lock` and `calls/next`: the caller desk (up to four callers on air together); see `wiki/live-shows.md`) |
+| live_shows | live_shows.py | /live-shows (`POST /{id}/start` answers 409 while another show is live on the station; `GET /{id}/air`, `POST /{id}/dump`, `POST /{id}/delay`: the broadcast delay; `GET /{id}/dumps` and `/dumps/{dump_id}/audio`: the dump log; `GET` and `POST /{id}/chat`: the staff chat; `calls/{id}/on-air` answers 409 `delay_not_safe` unless `?force=true`; `calls/{id}/hold`, `calls/{id}/lock` and `calls/next`: the caller desk (up to four callers on air together); see `wiki/live-shows.md`) |
 | live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, `/ws/live/{show}/talk/{call}` (staff talk to a caller off the air), `/ws/live/phone/{call}` (a phone caller's Twilio media stream), `/ws/live/{show}/cohost` (a co-host joins from another place), `/ws/live/{show}/video` (the host's camera) and `/ws/live/station/{id}/watch` (pages watching it), and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
@@ -331,6 +331,7 @@ radioplatform/
 | useLiveVideo.ts | Watch a station's live show on the Listen page: decodes the frames and draws them |
 | useEscape.ts | Esc closes an open dialog (New Archive, Live show, bug report) |
 | useMayChange.ts | May the signed-in person change things on this screen? The one rule for hiding or disabling change controls (see `wiki/view-only-screens.md`) |
+| useNavState.ts | useState kept with the page's place in this tab's history: Back (the Back line, browser back, iPhone swipe) finds filters, search and open panels as they were (see `wiki/back-navigation.md`) |
 
 ### API Clients (`frontend/src/api/`) — 14 modules
 auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, playlists.ts, sponsorPortal.ts, campaigns.ts, billing.ts, alerts.ts, liveShows.ts, songRequests.ts, archives.ts, client.ts (Axios + JWT interceptor)
@@ -400,6 +401,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - **Station permissions**: staff can be limited to named stations (`User.station_ids`), and a protected station (`Station.protected`, the FM feed) needs an explicit assignment. Rule: `may_operate_station`; guard: `require_station_operator`. See `wiki/station-permissions.md`.
 - **Caller address**: rate limits, listener IPs and the activity log take the caller's address from `app/core/client_ip.py` (rightmost non-internal X-Forwarded-For hop); never read the header by hand. See `wiki/client-ip.md`.
 - **Look ("qnet")**: every admin and sponsor page wears the KBR Studio look through one shared skin (`.qn-site`, `frontend/src/styles/qnet-site.css` + generated `qnet-site-colors.css`); write pages with ordinary Tailwind classes and the skin restyles them. Rules and escape hatches in `wiki/qnet-site-theme.md`.
+- **Back navigation**: every staff page but the control room has a "‹ Back to …" line (`components/layout/BackNav.tsx`, in `Layout`); coming back restores scroll, page state kept with `hooks/useNavState.ts` and lights the row last tapped (`data-nav-id` on list rows helps find it). Keep filters in the address or in `useNavState`, not plain `useState`, on list pages people open things from. See `wiki/back-navigation.md`.
 - **Page layout**: admin and sponsor pages fill the window; no `max-w-* mx-auto` page wrappers. Rules in `wiki/admin-page-layout.md`.
 - **Frontend**: All API calls through `src/api/client.ts` (default export, auto JWT refresh). Zustand for global state, React Query for server state. `StationListResponse` wraps stations in `.stations` array — always use `data?.stations?.map()`.
 - **Models**: Use `UUIDPrimaryKeyMixin` + `TimestampMixin` from `app/db/base.py`.
@@ -577,6 +579,9 @@ cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs
 
 # Many stations x many listeners: does everyone switch songs together? (see wiki/multi-station-load.md)
 cd backend && KBR_ADMIN_EMAIL=... KBR_ADMIN_PASSWORD=... uv run python loadtests/multi_station.py --base http://localhost:8000 --listeners 150
+
+# Simulate whole broadcast days fast (virtual clock, fake engine, real scheduling code; see wiki/station-simulator.md)
+cd backend && uv run python -m tests.sim.run --export tests/sim/fixtures/stations-2026-11-19.json --start 2026-11-19T00:00 --hours 24 --stations main
 
 # Run the real playout engine locally against the backend, with timing scenarios (see wiki/engine-harness.md)
 cd backend && uv run python ../infra/streaming/harness/run_harness.py

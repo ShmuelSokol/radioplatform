@@ -129,8 +129,8 @@ async def test_daily_extension_really_fills_a_bare_station(db_session):
 
 @pytest.mark.parametrize("where", [LOS_ANGELES, JERUSALEM], ids=["los-angeles", "jerusalem"])
 def test_shabbos_window_is_in_the_stations_own_zone(where):
-    """V1-82: Friday sunset - 18 min to Saturday sunset + 72 min, on the station's local
-    Friday and Saturday, with the station's zone offset"""
+    """V1-82: candle lighting (Friday sunset - 18 min, 40 in Jerusalem) to Saturday sunset
+    + 72 min, on the station's local Friday and Saturday, with the station's zone offset"""
     from app.services.shabbos_service import generate_shabbos_windows
 
     lat, lon, tz = where
@@ -140,7 +140,8 @@ def test_shabbos_window_is_in_the_stations_own_zone(where):
     start, end = datetime.fromisoformat(w["start_datetime"]), datetime.fromisoformat(w["end_datetime"])
     fri = get_sun_times(lat, lon, tz, friday)["sunset"]
     sat = get_sun_times(lat, lon, tz, friday + timedelta(days=1))["sunset"]
-    assert start == fri - timedelta(minutes=18) and end == sat + timedelta(minutes=72)
+    candles = 40 if tz == "Asia/Jerusalem" else 18
+    assert start == fri - timedelta(minutes=candles) and end == sat + timedelta(minutes=72)
     assert start.utcoffset() == datetime(2027, 1, 15, 12, tzinfo=zone).utcoffset()
     assert start.astimezone(zone).date() == friday and start.astimezone(zone).weekday() == 4
     assert end.astimezone(zone).date() == friday + timedelta(days=1)
@@ -148,7 +149,8 @@ def test_shabbos_window_is_in_the_stations_own_zone(where):
 
 
 def test_yom_tov_runs_from_erev_to_the_last_day():
-    """V1-82: Yom Tov from erev (sunset - 18 min) to the last day (sunset + 72 min):
+    """V1-82: Yom Tov from candle lighting on erev (sunset - 18 min, 40 in Jerusalem) to the
+    last day (sunset + 72 min):
     two days in Los Angeles, one in Jerusalem"""
     from pyluach.dates import HebrewDate
 
@@ -161,7 +163,7 @@ def test_yom_tov_runs_from_erev_to_the_last_day():
         pesach = next(w for w in windows if w["name"].startswith("Pesach (First Days)"))
         erev, last = nissan15 - timedelta(days=1), nissan15 + timedelta(days=days - 1)
         assert datetime.fromisoformat(pesach["start_datetime"]) == \
-            get_sun_times(lat, lon, tz, erev)["sunset"] - timedelta(minutes=18)
+            get_sun_times(lat, lon, tz, erev)["sunset"] - timedelta(minutes=40 if tz == "Asia/Jerusalem" else 18)
         assert datetime.fromisoformat(pesach["end_datetime"]) == \
             get_sun_times(lat, lon, tz, last)["sunset"] + timedelta(minutes=72)
 

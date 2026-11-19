@@ -31,7 +31,7 @@ from app.config import settings
 from app.models.asset import Asset, stored_analysis
 from app.models.engine_handoff import EngineHandoff
 from app.models.play_log import PlayLog
-from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, mark_started, resume_offset, soft_timed
+from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, mark_started, resume_offset, soft_timed, start_offset
 
 logger = logging.getLogger(__name__)
 
@@ -1145,13 +1145,14 @@ async def _handle_started(
         if entry is None and entry_id else None
     )
 
-    # Close whatever the database still shows as playing
+    # Close whatever the database still shows as playing (with its asset: the play log
+    # row starts where it was heard, after its cue-in)
     res = await db.execute(
-        select(QueueEntry).where(
+        select(QueueEntry).options(joinedload(QueueEntry.asset)).where(
             QueueEntry.station_id == station_id, QueueEntry.status == "playing"
         )
     )
-    for prev in res.scalars().all():
+    for prev in res.unique().scalars().all():
         if entry is not None and prev.id == entry.id:
             continue
         started = prev.started_at
@@ -1159,7 +1160,7 @@ async def _handle_started(
             started = started.replace(tzinfo=UTC)
         if started is not None:
             # A resumed item: the moment it came back on air, not the shifted start
-            started = started + timedelta(seconds=resume_offset(prev))
+            started = started + timedelta(seconds=start_offset(prev))
         if started is not None and (now - started).total_seconds() >= MIN_LOGGED_PLAY_SECONDS:
             db.add(
                 PlayLog(

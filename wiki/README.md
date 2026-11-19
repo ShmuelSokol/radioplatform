@@ -35,6 +35,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [multi-station-load.md](multi-station-load.md) — load test for many stations and listeners; what it found
 - [station-permissions.md](station-permissions.md) — who may operate which station; the protected (FM) station
 - [view-only-screens.md](view-only-screens.md) — one rule (useMayChange / canChange) for hiding or disabling change controls a role may not use
+- [back-navigation.md](back-navigation.md) — the "‹ Back to …" line on staff pages, how a page comes back as it was (scroll, filters, open panel, tapped row lit), useNavState, deleted pages skipped
 - [client-ip](client-ip.md) — the one helper that says who is calling (rightmost non-internal X-Forwarded-For hop) for rate limits, listeners, activity log
 - [sign-in-sessions](sign-in-sessions.md) — what signs a person out everywhere: the session number in every token, bumped by a new password or a changed role
 - [before-go-live](before-go-live.md) — decisions to look at again before the station depends on the site
@@ -43,6 +44,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [emergency-alerts](emergency-alerts.md) — EAS: what the certified box does vs our override (engine alert lane, device API, line input on the FM box), the 47 CFR 11.45 tone guard, log page
 - [local-fm-box](local-fm-box.md) — Feeding FM from the transmitter room: the engine on a local box with a relay that keeps it on air with no internet (plan + library on disk); stages and gaps
 - [look-at-the-screen-tests](look-at-the-screen-tests.md) — the browser guard, the walk of every page and control on three stations, the station isolation sweep
+- [station-simulator](station-simulator.md) — the real scheduling/playout decisions on a virtual clock with a fake engine: whole broadcast days in minutes, rules checked over the play log
 - [engine-harness](engine-harness.md) — run the real Liquidsoap engine locally with tones and check what was heard and when
 - [live-shows](live-shows.md) — how a live show goes on air without a broadcast server: mic relay, automation pause/resume, hard stop
 - [deploys](deploys.md) — what a merge to main publishes: website only for frontend changes, backend only for backend changes; how to check and force

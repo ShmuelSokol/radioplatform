@@ -779,19 +779,21 @@ async function cueInAndReplayGain() {
   await page.goto(`${base}e2e/audio-harness/index.html`);
   await page.waitForFunction(() => typeof window.__set === 'function');
   const set = (s) => page.evaluate((x) => window.__set(x), s);
-  await set({ ...A, cross: 9, cueIn: 5, rg: -6, nextId: 'b', nextCueIn: 2, nextRg: -12, startedAt: now() });
+  // The server counts an item from the top of the file: a fresh item with a 5 s cue-in is
+  // sent as started 5 s before it came on air (mark_started, F-HANDOVER-17)
+  const onAir = Date.now();
+  await set({ ...A, cross: 9, cueIn: 5, rg: -6, nextId: 'b', nextCueIn: 2, nextRg: -12, startedAt: new Date(onAir - 5000).toISOString() });
   await sleep(1500);
   let snap = await page.evaluate(() => window.__snap());
   const a = snap.find((d) => d.src === 'a' && d.playing);
   check('cue-in: the item starts at its cue-in point (5 s), not at 0', !!a && a.t >= 5 && a.t <= 7.5, JSON.stringify(snap));
   check('replay gain: -6 dB plays at half level', !!a && Math.abs(a.gain - 0.5) < 0.03, a ? `gain ${a.gain}` : 'not playing');
-  // The server counts an item's time from the top of the file (it hands over at
-  // started_at + cross_start, and a resumed shiur is started with started_at moved back),
-  // so a listener who joins later is put at the file's elapsed time. A listener who was
-  // there when the item started is cue_in seconds ahead of that.
-  xfail('cue-in: a listener there from the start is at the same point as one joining now', !!a && Math.abs(a.t - 1.5) < 1,
-    'cue-in-ahead: player starts at cue_in but the server counts from 0, so listeners differ by cue_in and the hand-over waits up to cue_in - 1 s past the crossfade point',
-    a ? `deck at ${a.t} s, station at 1.5 s` : '');
+  // The server's position (now - started_at) is a position in the file, so a listener
+  // there from the start and one joining now are at the same point, and the hand-over at
+  // started_at + cross_start is not late by the cue-in
+  const station = (Date.now() - (onAir - 5000)) / 1000;
+  check('cue-in: a listener there from the start is at the same point as one joining now', !!a && Math.abs(a.t - station) < 1.2,
+    a ? `deck at ${a.t} s, station at ${station.toFixed(1)} s` : 'not playing');
   // The player's own crossfade brings the next item in at its own cue-in (2 s)
   let x = null;
   for (let i = 0; i < 60 && !x; i++) {

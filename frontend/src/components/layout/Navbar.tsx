@@ -167,7 +167,7 @@ export default function Navbar() {
   );
 
   return (
-    <nav className={`sticky top-0 z-50 bg-[#0a0a28] text-white border-b border-[#2a2a5e] ${qnet ? 'qn-site' : ''}`}>
+    <nav data-site-nav className={`sticky top-0 z-50 bg-[#0a0a28] text-white border-b border-[#2a2a5e] ${qnet ? 'qn-site' : ''}`}>
       <div className="px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-12">
           {/* Logo + desktop links */}
