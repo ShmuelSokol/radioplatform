@@ -159,12 +159,30 @@ export const trimAsset = async (
 export const removeSilence = async (
   id: string,
   regions: Array<{ start: number; end: number }>,
+  progressId?: string,
 ): Promise<Asset> => {
   const res = await apiClient.post<Asset>(`/assets/${id}/remove-silence`, {
     regions: regions.map((r) => ({ start: r.start, end: r.end })),
-  }, { timeout: 300_000 });
+  }, { timeout: 1_800_000, params: progressId ? { progress_id: progressId } : undefined });
   return res.data;
 };
+
+/** How far a long edit (AI Enhance, Remove All Found Silence) has got; the page made up
+ *  the id and sent it with the edit. */
+export interface EditProgress {
+  fraction: number;
+  stage: string | null;
+  done: boolean;
+  error: string | null;
+}
+
+export const getEditProgress = async (progressId: string): Promise<EditProgress> => {
+  const res = await apiClient.get<EditProgress>(`/assets/progress/${progressId}`);
+  return res.data;
+};
+
+export const newProgressId = (): string =>
+  `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 
 export const restoreOriginal = async (id: string): Promise<Asset> => {
   const res = await apiClient.post<Asset>(`/assets/${id}/restore-original`);
@@ -277,8 +295,11 @@ export interface AutoEnhanceResult {
   reasons: string[];
 }
 
-export const autoEnhanceAsset = async (id: string): Promise<AutoEnhanceResult> => {
-  const res = await apiClient.post<AutoEnhanceResult>(`/assets/${id}/auto-enhance`);
+export const autoEnhanceAsset = async (id: string, progressId?: string): Promise<AutoEnhanceResult> => {
+  const res = await apiClient.post<AutoEnhanceResult>(`/assets/${id}/auto-enhance`, null, {
+    timeout: 1_800_000,
+    params: progressId ? { progress_id: progressId } : undefined,
+  });
   return res.data;
 };
 

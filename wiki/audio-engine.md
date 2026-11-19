@@ -319,3 +319,16 @@ weather), for short items and for timed ones. `handover_seconds` hands a non-son
   file, Undo Trim / Restore Original bring it back. Any trim or restore drops
   `audio_analysis`, whose end and crossfade points belong to the old audio; the upcoming
   analysis measures the item again before it airs.
+- Progress bar (Shmuel 2026-11-19: "can it show a progress bar?"): AI Auto-Enhance (item
+  page and full editor) and Remove All Found Silence / Trim Out send `?progress_id=` that the
+  page made up, and `components/audio/EditProgressBar.tsx` asks `GET /assets/progress/{id}`
+  every second: fraction, step ("Listening for volume and peaks", "Enhancing", "Saving"),
+  done, error. `services/job_progress.py` runs FFmpeg with `-progress` on temp files and
+  maps its time reached against the recording's length; kept in memory (one process).
+- AI Auto-Enhance is rule-based, not AI: volumedetect + astats, then noise reduction (only
+  when the noise floor is above -50 dB), high-pass 80/120 Hz, a small bass lift (only when
+  very quiet), +1..3 dB at 3 kHz, compression (only when the dynamics are wide), loudnorm
+  to -16 LUFS. Before 2026-11-19 it read the audio from a pipe with a 5 minute FFmpeg limit,
+  so a long shiur failed (a 35 minute one takes about 2 1/2 minutes on 4 cores); now it
+  reads a temp file with a 30 minute limit. Both edits commit the read transaction before
+  FFmpeg runs, and drop `audio_analysis` afterwards.

@@ -957,24 +957,36 @@ async def enhance_asset_endpoint(
 @router.post("/{asset_id}/auto-enhance")
 async def auto_enhance_endpoint(
     asset_id: uuid.UUID,
+    progress_id: str | None = Query(None, description="made up by the page; GET /assets/progress/{id} says how far it is"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
     """AI auto-enhancement: analyze audio and apply optimal filters."""
+    from app.services import job_progress
     from app.services.enhance_service import auto_enhance
     from app.services.storage_service import generate_asset_key, upload_file as upload_storage
 
-    asset = await get_asset(db, asset_id)
-    data = await _download_asset_data(asset.file_path)
+    try:
+        asset = await get_asset(db, asset_id)
+        file_path = asset.file_path
+        await db.commit()  # no transaction held open through minutes of FFmpeg
+        job_progress.report(progress_id, 0.01, "Fetching the recording")
+        data = await _download_asset_data(file_path)
 
-    input_ext = "." + asset.file_path.rsplit(".", 1)[-1].lower() if "." in asset.file_path else ".mp3"
-    enhanced_data, new_duration, filters_applied, reasons = await asyncio.to_thread(auto_enhance, data, input_ext)
+        input_ext = "." + file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ".mp3"
+        enhanced_data, new_duration, filters_applied, reasons = await asyncio.to_thread(
+            auto_enhance, data, input_ext, job_progress.reporter(progress_id, 0.05, 0.9))
 
-    # Upload enhanced file
-    new_key = generate_asset_key("ai-enhanced.mp3")
-    await upload_storage(enhanced_data, new_key, "audio/mpeg")
+        # Upload enhanced file
+        job_progress.report(progress_id, 0.92, "Saving")
+        new_key = generate_asset_key("ai-enhanced.mp3")
+        await upload_storage(enhanced_data, new_key, "audio/mpeg")
+    except Exception as e:
+        job_progress.finish(progress_id, error=getattr(e, "detail", None) or "failed")
+        raise
 
     # Update asset non-destructively
+    asset = await get_asset(db, asset_id)
     extra = dict(asset.metadata_extra or {})
     if "original_file_path" not in extra:
         extra["original_file_path"] = asset.file_path
@@ -991,8 +1003,11 @@ async def auto_enhance_endpoint(
     if new_duration > 0:
         asset.duration = new_duration
     asset.metadata_extra = extra
+    extra.pop("audio_analysis", None)  # measured on the audio before enhancing
+    asset.metadata_extra = extra
     await db.flush()
     await db.refresh(asset)
+    job_progress.finish(progress_id)
 
     return {
         "asset": AssetResponse.model_validate(asset).model_dump(),
@@ -1256,26 +1271,38 @@ class RemoveSilenceRequest(BaseModel):
 async def remove_silence_endpoint(
     asset_id: uuid.UUID,
     body: RemoveSilenceRequest,
+    progress_id: str | None = Query(None, description="made up by the page; GET /assets/progress/{id} says how far it is"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
     """Cut the given silent regions out (start, middle and end) and join the rest.
     Non-destructive like /trim: the original stays, Restore Original brings it back."""
+    from app.services import job_progress
     from app.services.silence_service import merge_regions, remove_regions
 
     if not merge_regions(body.regions):
         raise HTTPException(status_code=400, detail="No silence to remove")
-    asset = await get_asset(db, asset_id)
-    data = await _download_asset_data(asset.file_path)
     try:
-        new_data, new_duration = await asyncio.to_thread(remove_regions, data, body.regions)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        asset = await get_asset(db, asset_id)
+        file_path = asset.file_path
+        await db.commit()  # no transaction held open through minutes of FFmpeg
+        job_progress.report(progress_id, 0.01, "Fetching the recording")
+        data = await _download_asset_data(file_path)
+        try:
+            new_data, new_duration = await asyncio.to_thread(
+                remove_regions, data, body.regions, job_progress.reporter(progress_id, 0.05, 0.9))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
-    from app.services.storage_service import generate_asset_key, upload_file as upload_storage
-    new_key = generate_asset_key("trimmed.mp3")
-    await upload_storage(new_data, new_key, "audio/mpeg")
+        from app.services.storage_service import generate_asset_key, upload_file as upload_storage
+        job_progress.report(progress_id, 0.92, "Saving")
+        new_key = generate_asset_key("trimmed.mp3")
+        await upload_storage(new_data, new_key, "audio/mpeg")
+    except Exception as e:
+        job_progress.finish(progress_id, error=getattr(e, "detail", None) or "failed")
+        raise
 
+    asset = await get_asset(db, asset_id)
     extra = dict(asset.metadata_extra or {})
     if "original_file_path" not in extra:
         extra["original_file_path"] = asset.file_path
@@ -1288,7 +1315,21 @@ async def remove_silence_endpoint(
     asset.metadata_extra = extra
     await db.flush()
     await db.refresh(asset)
+    job_progress.finish(progress_id)
     return asset
+
+
+@router.get("/progress/{progress_id}")
+async def edit_progress(progress_id: str, _user: User = Depends(require_staff)):
+    """How far a long edit (AI Enhance, Remove All Found Silence) has got: fraction 0..1,
+    what it is doing, done, error. Unknown id: nothing started yet (fraction 0)."""
+    from app.services import job_progress
+
+    if not job_progress.valid_id(progress_id):
+        raise HTTPException(status_code=400, detail="Bad progress id")
+    job = job_progress.get(progress_id) or {"fraction": 0.0, "stage": None, "done": False, "error": None}
+    return {"fraction": round(job["fraction"], 3), "stage": job.get("stage"), "done": bool(job.get("done")),
+            "error": job.get("error")}
 
 
 @router.post("/{asset_id}/restore-original", response_model=AssetResponse)

@@ -269,48 +269,29 @@ def analyze_audio(file_data: bytes) -> dict[str, Any]:
 
     Returns metrics: mean_volume, max_volume, noise_floor_est, dynamic_range, etc.
     """
-    # Run volumedetect
-    cmd_vol = [
-        settings.FFMPEG_PATH, "-i", "pipe:0",
-        "-af", "volumedetect",
-        "-f", "null", "-",
-    ]
+    cmd_vol = [settings.FFMPEG_PATH, "-i", "pipe:0", "-af", "volumedetect", "-f", "null", "-"]
     res_vol = subprocess.run(cmd_vol, input=file_data, capture_output=True, timeout=120)
-    stderr_vol = res_vol.stderr.decode("utf-8", errors="replace")
-
-    stats: dict[str, Any] = {}
-
-    # Parse volumedetect output
-    stats["mean_volume"] = _db_value(r"mean_volume:\s*([-\d.]+)\s*dB", stderr_vol, -20.0)
-
-    stats["max_volume"] = _db_value(r"max_volume:\s*([-\d.]+)\s*dB", stderr_vol, 0.0)
-
-    # Run astats for more detailed analysis (RMS, peak, crest factor, noise floor)
-    cmd_stats = [
-        settings.FFMPEG_PATH, "-i", "pipe:0",
-        "-af", "astats=metadata=1:reset=0",
-        "-f", "null", "-",
-    ]
+    cmd_stats = [settings.FFMPEG_PATH, "-i", "pipe:0", "-af", "astats=metadata=1:reset=0", "-f", "null", "-"]
     res_stats = subprocess.run(cmd_stats, input=file_data, capture_output=True, timeout=120)
-    stderr_stats = res_stats.stderr.decode("utf-8", errors="replace")
+    return parse_stats(res_vol.stderr.decode("utf-8", errors="replace"),
+                       res_stats.stderr.decode("utf-8", errors="replace"))
 
-    # Parse astats — look for Overall RMS level and other metrics
+
+def parse_stats(stderr_vol: str, stderr_stats: str) -> dict[str, Any]:
+    """The numbers build_auto_filters works from, out of volumedetect's and astats' output."""
+    stats: dict[str, Any] = {}
+    stats["mean_volume"] = _db_value(r"mean_volume:\s*([-\d.]+)\s*dB", stderr_vol, -20.0)
+    stats["max_volume"] = _db_value(r"max_volume:\s*([-\d.]+)\s*dB", stderr_vol, 0.0)
+    # astats: Overall RMS level and other metrics
     stats["rms_level"] = _db_value(r"RMS level dB:\s*([-\d.]+)", stderr_stats, stats["mean_volume"])
-
     stats["peak_level"] = _db_value(r"Peak level dB:\s*([-\d.]+)", stderr_stats, stats["max_volume"])
-
     stats["noise_floor"] = _db_value(r"Noise floor dB:\s*([-\d.]+)", stderr_stats, -60.0)
-
     stats["crest_factor"] = _db_value(r"Crest factor:\s*([-\d.]+)", stderr_stats, 10.0)
-
     stats["dynamic_range"] = _db_value(r"Dynamic range:\s*([-\d.]+)", stderr_stats, 20.0)
-
     stats["flat_factor"] = _db_value(r"Flat factor:\s*([-\d.]+)", stderr_stats, 0.0)
-
-    # Compute derived metrics
+    # Derived
     stats["headroom"] = abs(stats["max_volume"])  # dB below 0
     stats["loudness_range"] = abs(stats["max_volume"] - stats["mean_volume"])
-
     logger.info("Audio analysis: %s", stats)
     return stats
 
@@ -379,12 +360,44 @@ def build_auto_filters(stats: dict[str, Any]) -> tuple[list[dict], list[str]]:
     return filters, reasons
 
 
-def auto_enhance(file_data: bytes, input_ext: str = ".mp3") -> tuple[bytes, float, list[dict], list[str]]:
+def auto_enhance(file_data: bytes, input_ext: str = ".mp3", progress=None) -> tuple[bytes, float, list[dict], list[str]]:
     """Analyze audio and apply optimal enhancement automatically.
 
+    Reads a temporary file, not a pipe (FFmpeg on a pipe gave up on some good files,
+    silence_service.audio_file), with no 5 minute limit (a 35 minute shiur through noise
+    reduction takes longer), and tells `progress(fraction, stage)` how far it is
+    (job_progress.py; Shmuel 2026-11-19 asked for a progress bar).
     Returns (enhanced_bytes, duration, filters_applied, reasons).
     """
-    stats = analyze_audio(file_data)
-    filters, reasons = build_auto_filters(stats)
-    enhanced_data, duration = enhance_audio(file_data, filters, input_ext)
-    return enhanced_data, duration, filters, reasons
+    import os
+
+    from app.services import job_progress
+    from app.services.silence_service import _probed_length, audio_file, get_audio_duration
+
+    step = (lambda a, b: job_progress.scaled(progress, a, b)) if progress else (lambda a, b: None)
+    suffix = input_ext if input_ext and len(input_ext) <= 6 else ".mp3"
+    with audio_file(file_data, suffix=suffix) as path:
+        if progress:
+            progress(0.0, "Measuring the recording")
+        length = _probed_length(path) or get_audio_duration(path)
+        _, stderr_vol = job_progress.run_ffmpeg(["-i", path, "-af", "volumedetect", "-f", "null", "-"],
+                                                length, step(0.02, 0.15), "Listening for volume and peaks")
+        _, stderr_stats = job_progress.run_ffmpeg(["-i", path, "-af", "astats=metadata=1:reset=0", "-f", "null", "-"],
+                                                  length, step(0.15, 0.3), "Listening for background noise")
+        filters, reasons = build_auto_filters(parse_stats(stderr_vol, stderr_stats))
+        out = job_progress.temp_path(".mp3")
+        try:
+            code, stderr = job_progress.run_ffmpeg(
+                ["-y", "-i", path, "-vn", "-af", build_filter_chain(filters), "-f", "mp3", "-ab", "192k", out],
+                length, step(0.3, 1.0), "Enhancing",
+            )
+            with open(out, "rb") as f:
+                data = f.read()
+        finally:
+            try:
+                os.unlink(out)
+            except OSError:
+                pass
+    if code != 0 or not data:
+        raise RuntimeError(f"FFmpeg enhance failed: {stderr[:1000]}")
+    return data, get_audio_duration(data), filters, reasons
