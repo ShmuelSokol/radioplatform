@@ -548,7 +548,7 @@ def site_log_matches_air(res: Result, ctx: Context):
         logs = sorted(by_station.get(sid, []))
         used = set()
         for r in rows:
-            if not r.entry_id or r.asset_id is None or r.kind == "silence" or r.start > end - 5:
+            if not r.entry_id or r.asset_id is None or r.kind == "silence" or r.end > end - 5 or r.seconds < 3:  # logged when the next starts; a cut-at-once item is not a play
                 continue
             _count(res, check)
             hit = [i for i, (a, _b, asset) in enumerate(logs) if asset == r.asset_id and abs(a - r.start) <= 2.0]
