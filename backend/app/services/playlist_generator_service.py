@@ -155,7 +155,11 @@ class StationIdSprinkler:
         return None
 
     def _gap(self) -> timedelta:
-        return timedelta(minutes=random.uniform(self.ids.min_minutes, self.ids.max_minutes))
+        # Drawn from the first half of min..max: an ID waits for the end of a song and
+        # for room clear of breaks, and at air time it can still move a song later, so
+        # drawing from the whole range put Main's IDs 25 to 30 minutes apart (2026-11-19)
+        low, high = self.ids.min_minutes, self.ids.max_minutes
+        return timedelta(minutes=random.uniform(low, low + (high - low) / 2))
 
     async def after(self, clock: "Clock", previous_type: str | None):
         """Called after each programme item. Returns (row, start) of the drawn ID

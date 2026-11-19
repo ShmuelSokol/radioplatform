@@ -63,6 +63,14 @@ async def _status(db, entry_id):
     return (await db.execute(select(QueueEntry.status).where(QueueEntry.id == entry_id))).scalar()
 
 
+async def _moved_after(db, entry_id, song_id) -> bool:
+    """The ID still waits, one song later (station_id_guard.postpone)."""
+    db.expire_all()
+    rows = dict((await db.execute(select(QueueEntry.id, QueueEntry.position).where(
+        QueueEntry.id.in_([entry_id, song_id])))).all())
+    return await _status(db, entry_id) == "pending" and rows[entry_id] > rows[song_id]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("before,break_in,song_left,airs", [
     ("song", None, 60.0, True),     # between songs, no break near: airs
@@ -80,7 +88,7 @@ async def test_browser_player_pick(db_session: AsyncSession, before, break_in, s
         assert picked.id == id_entry
     else:
         assert picked.id == song_entry
-        assert await _status(db_session, id_entry) == "skipped"
+        assert await _moved_after(db_session, id_entry, song_entry)
 
 
 @pytest.mark.asyncio
@@ -91,7 +99,7 @@ async def test_an_operators_id_is_never_second_guessed(db_session: AsyncSession)
 
 
 @pytest.mark.asyncio
-async def test_engine_pick_passes_over_and_the_start_report_skips_it(db_session: AsyncSession):
+async def test_engine_pick_passes_over_and_the_start_report_moves_it_one_song_later(db_session: AsyncSession):
     station_id, id_entry, song_entry = await _setup(db_session, "break", None)
     picked = await playout_engine.pick_next(db_session, station_id)
     assert picked.id == song_entry
@@ -101,7 +109,7 @@ async def test_engine_pick_passes_over_and_the_start_report_skips_it(db_session:
     assert str(id_entry) in station_id_guard.passed(station_id)
     assert await station_id_guard.take_passed(db_session, station_id) == 1
     await db_session.commit()
-    assert await _status(db_session, id_entry) == "skipped"
+    assert await _moved_after(db_session, id_entry, song_entry)
     assert not station_id_guard.passed(station_id)
 
 
@@ -179,7 +187,7 @@ async def test_no_id_after_a_sponsorship_that_waited_for_a_story(db_session: Asy
     picked = await _pick_next_pending(db_session, station_id, now)
     await db_session.commit()
     assert picked.id == song_entry
-    assert await _status(db_session, id_entry) == "skipped"
+    assert await _moved_after(db_session, id_entry, song_entry)
 
 
 @pytest.mark.asyncio
@@ -243,7 +251,21 @@ async def test_queue_tidy_moves_ids_away_from_breaks_and_keeps_clear_ones(db_ses
     assert ids["after"] in order
     assert order.index(ids["after"]) == order.index(song_ids[4]) + 1
     assert order.index(ids["after"]) == order.index(song_ids[5]) - 1
-    # no room before the next ID's turn: removed
-    assert ids["near"] not in order
-    assert ids["also"] not in order
-    assert dropped == 3
+    # no room before the next ID's turn: left in place for the air-time check (removing
+    # them here wore Main's IDs away)
+    assert ids["near"] in order and ids["also"] in order
+    assert dropped == 1
+
+
+@pytest.mark.asyncio
+async def test_an_id_that_cannot_move_before_the_next_id_is_skipped(db_session: AsyncSession):
+    """Postponing stops at the next ID: two never play together."""
+    station_id, id_entry, song_entry = await _setup(db_session, "break", None)
+    jingle = (await db_session.execute(select(Asset).where(Asset.category == "station_id"))).scalars().first()
+    song = (await db_session.execute(select(QueueEntry).where(QueueEntry.id == song_entry))).scalar_one()
+    song.asset_id = jingle.id  # the item after this ID is another ID
+    await db_session.commit()
+    picked = await _pick_next_pending(db_session, station_id, datetime.now(UTC))
+    await db_session.commit()
+    assert picked is None or picked.id != id_entry
+    assert await _status(db_session, id_entry) == "skipped"

@@ -444,6 +444,7 @@ INGEST 2026-11-19 back-navigation.md Back line on staff pages (BackNav.tsx), per
 UPDATE 2026-11-19 playlist-generation.md station IDs: air-time guard (station_id_guard.py) passes over an ID after a break/spoken item or near a break; soft breaks move at air time
 UPDATE 2026-11-19 playlist-generation.md station IDs: drop_misplaced tidies waiting IDs beside breaks after each top-up; queue page estimates use on-air lengths
 UPDATE 2026-11-19 playlist-generation.md station IDs: drop_misplaced moves a misplaced ID later instead of removing it, only 5-90 min ahead
+UPDATE 2026-11-19 playlist-generation.md station IDs: passed-over IDs move one song later instead of being skipped; tidy never removes; fill draws gaps from the first half of min..max
 INGEST 2026-11-19 blackout-window-generation.md regenerate now corrects a stored window whose computed times changed (future, this station only, never edited); SQLite returns zone-less clock times
 UPDATE 2026-11-19 control-room.md Sponsors list rows always open the Sponsor panel (SongTarget.sponsorship); station-day sends asset.sponsor_id: a block-placed sponsor recording with no spots category opened the song options on Main
 INGEST 2026-11-19 holiday-music.md holiday lists (holiday_items) mixed in before/during each holiday at a rising 1-in-N per station (holiday_settings); holiday-only items out of every ordinary pick (not_holiday_only); credit carried between top-ups; 2 h/6 h rest; Holiday Music page; queue tag
