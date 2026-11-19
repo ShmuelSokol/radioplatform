@@ -49,7 +49,12 @@ export function day(iso: string | null | undefined): string {
 /** "Nov 1, 2026 to Dec 31, 2026", "Since Nov 1, 2026 (no end date)", or "" */
 export function span(from: string | null, until: string | null, openEnded: boolean): string {
   if (!from && !until) return '';
-  if (openEnded) return from ? `Since ${day(from)} (no end date)` : 'No end date';
+  if (openEnded) {
+    if (!from) return 'No end date';
+    // a start still ahead reads "Starts", not "Since"
+    const today = new Date().toLocaleDateString('en-CA');
+    return `${from.slice(0, 10) > today ? 'Starts' : 'Since'} ${day(from)} (no end date)`;
+  }
   if (from && until) return `${day(from)} to ${day(until)}`;
   return from ? `From ${day(from)}` : `Until ${day(until)}`;
 }

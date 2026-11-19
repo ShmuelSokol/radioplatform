@@ -67,9 +67,12 @@
 .qn-site [class~="border-gray-100"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-gray-200"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-gray-300"]{border-color:var(--qn-shadow)}
+.qn-site [class~="border-gray-400"]{border-color:var(--qn-shadow)}
+.qn-site [class~="border-gray-500"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-gray-600"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-gray-700"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-gray-700/50"]{border-color:var(--qn-shadow)}
+.qn-site [class~="border-gray-800"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-green-200"]{border-color:#16a34a}
 .qn-site [class~="border-indigo-200"]{border-color:#4f46e5}
 .qn-site [class~="border-indigo-300"]{border-color:#4f46e5}

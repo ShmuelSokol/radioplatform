@@ -49,8 +49,8 @@ export default function AdminCampaigns() {
     <div className="w-full space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">Sponsorship Campaigns</h1>
-          <p className="text-sm text-gray-500">Every sponsor's campaigns: drafts, comments and status.</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">Sponsor requests</h1>
+          <p className="text-sm text-gray-500">What sponsors asked for in their portal (called campaigns there): wording drafts, messages and status.</p>
         </div>
         {mayChange && (
           <button
@@ -65,12 +65,12 @@ export default function AdminCampaigns() {
 
       {mayOpenClients && (
         <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-3 text-sm flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="clients-pointer">
-          <span className="min-w-0">Campaigns are only the sponsor's requests and drafts. Every client with all their spots, contracts and what played is in <b>All Clients</b>.</span>
+          <span className="min-w-0">These are only the sponsors' requests and drafts. Every client with all their spots, contracts and what aired is in <b>Clients</b>; each client page has these requests under Requests.</span>
           <Link
             to={sponsorFilter ? `/admin/sponsors/${sponsorFilter}` : '/admin/sponsors'}
             className="inline-flex items-center min-h-[44px] px-3 rounded-lg bg-yellow-400 text-black font-semibold"
           >
-            {sponsorFilter ? `Open ${sponsorOptions.find(([id]) => id === sponsorFilter)?.[1] ?? 'this client'}` : 'Open All Clients'}
+            {sponsorFilter ? `Open ${sponsorOptions.find(([id]) => id === sponsorFilter)?.[1] ?? 'this client'}` : 'Open Clients'}
           </Link>
         </div>
       )}

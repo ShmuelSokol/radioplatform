@@ -164,7 +164,7 @@ export default function SponsorPanel({ target, stationId, canSkip, canManage, ca
         )}
         {canOpen('/admin/spot-schedule') && (
           <Link to={`/admin/spot-schedule?contract=${c.id}${c.station_id ? `&station=${c.station_id}` : ''}`} data-testid="sponsor-contract-link"
-            className="block text-xs underline !text-blue-800">Change it on Spot Schedule →</Link>
+            className="block text-xs underline !text-blue-800">Change it in All contracts →</Link>
         )}
       </li>
     );
@@ -292,13 +292,13 @@ export default function SponsorPanel({ target, stationId, canSkip, canManage, ca
 
           <section className="border-t border-[#808080] pt-2 grid grid-cols-2 gap-2" data-testid="sponsor-links">
             {canOpen('/admin/spot-schedule') && (
-              <Link to={`/admin/spot-schedule?station=${stationId}`} className={linkCls} data-testid="link-spot-schedule">Spot Schedule</Link>
+              <Link to={`/admin/spot-schedule?station=${stationId}`} className={linkCls} data-testid="link-spot-schedule">All contracts</Link>
             )}
             {canOpen('/admin/sponsors') && (
               <Link to={sponsor ? `/admin/sponsors/${sponsor.id}?tab=contracts` : '/admin/sponsors'} className={linkCls} data-testid="link-sponsors">{sponsor ? 'Sponsor page' : 'Sponsors'}</Link>
             )}
             {canOpen('/admin/campaigns') && (
-              <Link to={sponsor ? `/admin/campaigns?sponsor=${sponsor.id}` : '/admin/campaigns'} className={linkCls} data-testid="link-campaigns">Campaigns</Link>
+              <Link to={sponsor ? `/admin/campaigns?sponsor=${sponsor.id}` : '/admin/campaigns'} className={linkCls} data-testid="link-campaigns">Sponsor requests</Link>
             )}
             {canOpen('/admin/schedule-check') && (
               <Link to="/admin/schedule-check" className={linkCls} data-testid="link-schedule-check">Schedule Check</Link>

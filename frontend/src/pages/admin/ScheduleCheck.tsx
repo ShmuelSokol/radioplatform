@@ -208,7 +208,7 @@ export default function ScheduleCheck() {
                         to="/admin/spot-schedule"
                         className="text-orange-700 underline"
                       >
-                        Open Spot Schedule
+                        Open All contracts
                       </Link>
                     </p>
                   )}

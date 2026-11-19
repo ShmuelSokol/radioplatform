@@ -69,6 +69,9 @@ for (const [name, device] of SIZES) {
   await page.getByRole('link', { name: busy.name }).first().click();
   await page.getByTestId('client-tiles').waitFor();
   if (!page.url().includes(`/admin/sponsors/${busy.id}`)) fail(`${name}: clicking a client did not open its page`);
+  // Contracts is the first tab (2026-11-19); the spots by stage are one tap away
+  await page.getByTestId('contract-table').first().waitFor();
+  await page.getByRole('tab', { name: /^Spots/ }).click();
   await page.getByTestId('spot-flow').waitFor();
   if (!(await page.getByTestId('stage-on_air').count())) fail(`${name}: running client shows no spot on the air`);
   await noSideways('spots'); await shot('2-spots');
@@ -105,7 +108,7 @@ for (const [name, device] of SIZES) {
   await page.keyboard.press('Escape');
   await page.getByTestId('contract-editor').waitFor({ state: 'detached' });
 
-  await page.getByRole('tab', { name: 'Play history' }).click();
+  await page.getByRole('tab', { name: 'What aired' }).click();
   await page.getByTestId('play-table').waitFor();
   const total = await page.getByTestId('plays-total').innerText();
   if (!total.startsWith(String(busy.plays_total))) fail(`${name}: play history says "${total}", expected ${busy.plays_total}`);
@@ -115,6 +118,9 @@ for (const [name, device] of SIZES) {
   await page.getByText(/promised plays? did not air/).waitFor();
   await noSideways('missed'); await shot('5-missed');
 
+  await page.getByRole('tab', { name: 'Requests' }).click();
+  await page.getByTestId('requests-tab').waitFor();
+  await noSideways('requests'); await shot('5b-requests');
   await page.getByRole('tab', { name: 'Details' }).click();
   await page.getByRole('button', { name: 'Save details' }).waitFor();
   await noSideways('details'); await shot('6-details');
