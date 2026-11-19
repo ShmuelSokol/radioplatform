@@ -413,3 +413,5 @@ UPDATE 2026-11-18 spot-schedules.md spread sponsorships skip soft breaks inside 
 UPDATE 2026-11-18 spot-schedules.md a break next to the same sponsor's play counts one fuller (no back-to-back sponsor; levelling may be off by one)
 INGEST 2026-11-18 live-shows.md End Show right after GO LIVE: take-over landed after End, stale-show check waited for ever on an open delay; it now stops it
 INGEST 2026-11-18 deploys.md deploy gate: CI's last job on main waits while a live show is on air and around :00/:30; needs Railway Wait for CI; [deploy-now] skips it
+UPDATE 2026-11-19 spot-schedules.md a block rebuild reads talk windows before deleting the queued shiur (TALKS_BEFORE_REBUILD), so it no longer queues sponsorships inside it
+UPDATE 2026-11-19 spot-schedules.md sponsorships avoid hard breaks inside a shiur too (talk_tier: outside, then hard inside, then soft inside)

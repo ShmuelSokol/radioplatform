@@ -14,6 +14,7 @@ them (source="ad_slot" + preempt_at), so the player treats them the same way.
 """
 
 import logging
+from contextvars import ContextVar
 import uuid
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
@@ -69,6 +70,21 @@ TALK_TAIL = timedelta(minutes=5)
 # Breaks this close are neighbours (a quarter hour apart): one sponsor in both is
 # heard back to back, which is worth one extra sponsorship in a break to avoid.
 NEIGHBOUR = timedelta(minutes=20)
+def talk_tier(b: "Break", quiet: "list[tuple[datetime, datetime]] | None") -> int:
+    """0: the break is outside every shiur or story (or in its last few minutes, where
+    a soft break waits for the end anyway). 1: a hard break inside one: the shiur pauses
+    there for the time check anyway, but sponsorships would make the pause longer.
+    2: a soft break inside one: it would pause the shiur just for sponsorships."""
+    if not any(start < b.local < end - TALK_TAIL for start, end in (quiet or ())):
+        return 0
+    return 2 if b.timing_mode == "soft" else 1
+
+
+# Talk windows read before a block rebuild deleted the queued shiurim it is about
+# to queue again (see program_block_service.reconcile_block_entries).
+TALKS_BEFORE_REBUILD: ContextVar[list[tuple[datetime, datetime]] | None] = ContextVar(
+    "talks_before_rebuild", default=None
+)
 # Never add/remove a slot this close to air time — the player may be picking it up.
 SAFETY_MARGIN = timedelta(minutes=2)
 
@@ -268,13 +284,6 @@ def plan_spots(
     """
     blackouts = blackouts or []
 
-    def inside_talk(b: Break) -> bool:
-        # A soft break during a shiur or story would pause it just for sponsorships;
-        # a hard one (time check, weather) pauses it anyway, so it stays usable.
-        return b.timing_mode == "soft" and any(
-            start < b.local < end - TALK_TAIL for start, end in (quiet or ())
-        )
-
     minutes = sorted({int(m) for m in (slot_minutes or DEFAULT_SLOT_MINUTES) if 0 <= int(m) < 60})
     ordered = sorted(schedules, key=lambda s: (str(s.created_at or ""), str(s.id)))
     placements: list[Placement] = []
@@ -461,7 +470,13 @@ def plan_spots(
                         n = len(day_breaks)
                         open_ = [(i, b) for i, b in enumerate(day_breaks) if fits(b, sched)]
                         # Steer around a shiur: only when the slot has no other room
-                        open_ = [ib for ib in open_ if not inside_talk(ib[1])] or open_
+                        # (a hard break there pauses it anyway for the time check, so
+                        # it is second choice; a soft one would pause it just for us)
+                        open_ = (
+                            [ib for ib in open_ if talk_tier(ib[1], quiet) == 0]
+                            or [ib for ib in open_ if talk_tier(ib[1], quiet) < 2]
+                            or open_
+                        )
                         chosen = min(
                             open_,
                             key=lambda ib: (
@@ -765,7 +780,12 @@ async def plan_for_station(
             select(Asset.id, Asset.duration).where(Asset.id.in_({s.asset_id for s in schedules}))
         )
         durations = {str(r[0]): float(r[1]) for r in rows.all() if r[1]}
-    quiet = await talk_windows(db, station, tz, now) if breaks else []
+    quiet: list[tuple[datetime, datetime]] = []
+    if breaks:
+        # A rebuild has just deleted the queued block entries, the shiur among them,
+        # so its own list from before the delete is the true one (Main 2026-11-18:
+        # a sponsorship queued at 8:15 inside the Daf Yomi after a rebuild).
+        quiet = TALKS_BEFORE_REBUILD.get() or await talk_windows(db, station, tz, now)
     placements, unplaced = plan_spots(
         schedules,
         tz,
@@ -945,14 +965,11 @@ def settle_today(
                 and h_start <= b.local.hour < h_end
                 and b.local not in own_breaks
             ]
-            pool = [
-                b
-                for b in pool
-                if not (
-                    b.timing_mode == "soft"
-                    and any(s < b.local < e - TALK_TAIL for s, e in (quiet or ()))
-                )
-            ] or pool
+            pool = (
+                [b for b in pool if talk_tier(b, quiet) == 0]
+                or [b for b in pool if talk_tier(b, quiet) < 2]
+                or pool
+            )
             if not pool:
                 continue
             others = [where(q) for q in mine if q is not p and where(q).astimezone(UTC) > cutoff]

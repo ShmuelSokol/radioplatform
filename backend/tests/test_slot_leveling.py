@@ -163,16 +163,28 @@ def _mixed_breaks(h_start, h_end):
     ]
 
 
-def test_sponsorships_steer_around_a_shiur_but_keep_its_hard_breaks():
-    """Main 2026-11-18: the 8 PM Daf Yomi (56 min) had sponsorships at 8:15, 8:30 and 8:45."""
+def test_sponsorships_steer_around_a_shiur_even_its_hard_breaks():
+    """Main 2026-11-18: the 8 PM Daf Yomi (56 min) had sponsorships at 8:15, 8:30 and 8:45.
+    The hard 8:30 time check pauses the shiur anyway, but sponsorships would make that
+    pause longer, so they go there only when the slot has no other room."""
     shiur = (datetime(DAY.year, DAY.month, DAY.day, 20, 1, tzinfo=NY), datetime(DAY.year, DAY.month, DAY.day, 20, 57, tzinfo=NY))
     spots = [_spot(f"s{i:02d}", "early_evening") for i in range(10)]
     placed, unplaced = plan_spots(spots, NY, DAY, 1, breaks=_mixed_breaks(18, 21), quiet=[shiur])
     assert not unplaced
-    during = [p.local.strftime("%H:%M") for p in placed if shiur[0] < p.local < shiur[1]]
-    assert set(during) <= {"20:30"}  # never the soft 8:15 or 8:45
-    # with room elsewhere the rest stays level (10 plays, 10 usable breaks)
-    assert max(_counts(placed).values()) == 1
+    assert not [p.local.strftime("%H:%M") for p in placed if shiur[0] < p.local < shiur[1]]
+    # 10 plays over the 9 breaks outside the shiur: one break takes a second
+    assert max(_counts(placed).values()) == 2
+
+
+def test_a_hard_shiur_break_comes_before_a_soft_one():
+    # every break outside the shiur is full, so the overflow pauses the shiur only where
+    # the time check pauses it anyway
+    shiur = (datetime(DAY.year, DAY.month, DAY.day, 20, 1, tzinfo=NY), datetime(DAY.year, DAY.month, DAY.day, 20, 57, tzinfo=NY))
+    spots = [_spot(f"s{i:02d}", "early_evening") for i in range(28)]
+    placed, unplaced = plan_spots(spots, NY, DAY, 1, breaks=_mixed_breaks(18, 21), quiet=[shiur])
+    assert not unplaced
+    during = {p.local.strftime("%H:%M") for p in placed if shiur[0] < p.local < shiur[1]}
+    assert during == {"20:30"}
 
 
 def test_a_shiur_break_is_used_when_the_slot_has_no_other_room():

@@ -373,3 +373,48 @@ async def test_an_announcement_is_left_out_when_its_programme_is_missing(
     run = preview.json()["occurrences"][0]
     assert any("Announcement: left out" in p for p in run["problems"])
     assert run["seconds"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_rebuild_still_steers_sponsorships_around_a_shiur_it_requeues(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    """Main 2026-11-18: after a block was re-saved, a sponsorship was queued at 8:15
+    inside the Daf Yomi. The rebuild had deleted the queued shiur before planning, so
+    the planner did not see it."""
+    station, made = await _library(db_session)
+    made["show"].duration = 3000.0  # a 50-minute shiur at the top of every hour
+    spots = [Asset(id=uuid.uuid4(), title=f"TEST spot {i}", file_path=f"x/s{i}.mp3", asset_type="spot",
+                   category="sponsorship", duration=30) for i in range(4)]
+    db_session.add_all(spots)
+    station_id = station.id
+    spot_ids = {a.id for a in spots}
+    await db_session.commit()
+    for i, sponsor_asset in enumerate(a.id for a in spots):  # enough plays that the quarter-past breaks would be used
+        res = await client.post("/api/v1/sponsors", json={"name": f"TEST sponsor {i}", "length_seconds": 30.0, "audio_file_path": ""}, headers=auth_headers)
+        assert res.status_code == 201, res.text
+        res = await client.post(
+            "/api/v1/spot-schedules",
+            json={"sponsor_id": res.json()["id"], "asset_id": str(sponsor_asset), "station_id": str(station_id),
+                  "dayparts": "overnight,morning,afternoon,evening", "plays_per_daypart": 3},
+            headers=auth_headers,
+        )
+        assert res.status_code == 201, res.text
+    shiur = _block(station, made, name="TEST Daf", items=[{"kind": "asset", "asset_id": str(made["show"].id)}])
+    assert (await client.post("/api/v1/program-blocks", json=shiur, headers=auth_headers)).status_code == 201
+    quarter = _block(
+        station, made, name="TEST quarter", timing_mode="soft",
+        times=",".join(f"{h:02d}:{m}" for h in range(24) for m in ("15", "45")),
+        items=[{"kind": "sponsors", "count": 3}],
+    )
+    res = await client.post("/api/v1/program-blocks", json=quarter, headers=auth_headers)
+    assert res.status_code == 201, res.text
+    for _ in range(2):  # created, then re-saved unchanged: both rebuild the queue
+        db_session.expire_all()
+        entries = await _pending(db_session, station_id)
+        shiur_at = {e.preempt_at for e in entries if e.asset_id == made["show"].id}
+        inside = [e.preempt_at for e in entries if e.asset_id in spot_ids
+                  and any(st < e.preempt_at < st + timedelta(minutes=45) for st in shiur_at)]
+        assert shiur_at and not inside, inside[:3]
+        res = await client.put(f"/api/v1/program-blocks/{res.json()['id']}", json=quarter, headers=auth_headers)
+        assert res.status_code == 200, res.text
