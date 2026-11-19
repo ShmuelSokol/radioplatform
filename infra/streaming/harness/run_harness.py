@@ -1098,6 +1098,35 @@ async def sc_short_item_before_slow_file(h: Harness, item: str = "id2", delay: f
     await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
 
 
+async def sc_slow_short_item_keeps_its_place(h: Harness) -> None:
+    """Main 15:34Z 2026-11-19: a 1.9 s station ID was handed out, the song after it was
+    fetched at once (the item is short) and finished downloading first, so it was added
+    to the queue first: the song aired, then the ID, right before the :45 sponsorships.
+    The item after a short one now waits for the short one to be queued."""
+    name = "slow_short_item_keeps_its_place"
+    await wait_music(h)
+    await h.clear_pending()
+    h.stack.slow_files["id2.mp3"] = 3.0
+    try:
+        await h.queue([("id2", {}), ("song5", {}), ("song6", {})])
+        await asyncio.sleep(6)
+        pressed = time.time()
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        t = await h.wait_on_air("song5", 30)
+    finally:
+        h.stack.slow_files.pop("id2.mp3", None)
+    await asyncio.sleep(4)
+    heard = h.heard(pressed - 2, time.time() - 1)
+    h.print_timeline(heard, pressed)
+    names = [n for n in (n for _, n in timeline(heard)) if n != "silence"]
+    short, song = tone_name(TONES["id2"][0]), tone_name(TONES["song5"][0])
+    h.check(name, t is not None and short in names and song in names
+            and names.index(short) < names.index(song),
+            f"the station ID airs before the song handed out after it: {names}")
+    h.check(name, "EMERGENCY" not in names, f"no emergency music: {names}")
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+
+
 async def sc_two_sources_same_second(h: Harness) -> None:
     """V3-5: hard items from two sources due on the same second (the hourly time check and
     weather, and a program block's announcement). Each airs once, whole, one after the
@@ -4617,6 +4646,7 @@ SCENARIOS = {
     "play_now_before_hard_item": sc_play_now_before_hard_item,
     "play_now_next_before_hard_item": lambda h: sc_play_now_before_hard_item(h, next_during=True),
     "short_item_before_slow_file": sc_short_item_before_slow_file,
+    "slow_short_item_keeps_its_place": sc_slow_short_item_keeps_its_place,
     "short_item_6s_before_slow_file": lambda h: sc_short_item_before_slow_file(h, "announce", 9.0),
     "backend_unreachable": sc_backend_unreachable,
     "local_box_commands": sc_local_box_commands,
