@@ -361,6 +361,8 @@ export default function BugReporter() {
   // The Library has controls on both edges of every row (checkbox left, View right): on a
   // phone the button would sit on one while scrolling. There it is in the menu ("Report a bug").
   const hideOnPhone = pathname === '/admin/assets';
+  // Staff pages wear the qnet look: the button and the dialog take it too (.qn-bug in qnet-site.css)
+  const staffLook = pathname.startsWith('/admin') || pathname.startsWith('/sponsor');
   // A top bar that carries the bug button (BugTopButton) replaces the floating one on phones
   const [topButton, setTopButton] = useState(false);
   useEffect(() => {
@@ -499,7 +501,7 @@ export default function BugReporter() {
   };
 
   return (
-    <div {...{ [IGNORE_ATTR]: '' }}>
+    <div {...{ [IGNORE_ATTR]: '' }} className={staffLook ? 'qn-site qn-bug' : undefined}>
       {phase === 'closed' && (
         <button
           type="button"
