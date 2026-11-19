@@ -686,7 +686,18 @@ def one_resume_per_pause(res: Result, ctx: Context):
             if str(e.station_id) == sid and (e.source or "").startswith("resume@"):
                 resumes[(str(e.asset_id), e.source)].append(e)
         for (asset_id, source), es in resumes.items():
-            if len(es) > 1:
+            # One entry per pause: the Daf Yomi airs every night, so the same shiur can be
+            # paused at the same second on several days, each with its own resume entry
+            try:
+                at = float(source[len("resume@"):])
+            except ValueError:
+                at = None
+            pauses = sum(
+                1 for r in rows
+                if r.cut and str(r.asset_id) == asset_id and at is not None
+                and -1.0 <= r.cue_in + r.seconds - at <= 6.0
+            )
+            if len(es) > max(1, pauses):
                 a = ctx.assets.get(asset_id)
                 _add(res, check, sid, "", f"{len(es)} resume entries '{source}' for {a.title if a else asset_id!r}")
 
