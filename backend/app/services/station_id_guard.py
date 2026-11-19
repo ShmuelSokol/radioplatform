@@ -12,7 +12,7 @@ automatically queued ID is passed over, for good, when
   check, a sponsorship, another jingle...), or
 - a timed item is due within the station's `clear_minutes` of it, or
 - it is shorter than MIN_STATION_ID_SECONDS (4 s), or
-- the last ID aired less than the station's `min_minutes` ago (half a minute of slack).
+- the last ID aired less than the station's `min_minutes` ago.
 
 Passing one over only makes the gap to the next ID longer. The browser path marks it
 skipped at once; the engine's pick is read-only, so the IDs it passed over are kept
@@ -84,7 +84,7 @@ async def must_wait(db: AsyncSession, station_id, entry: QueueEntry, now: dateti
             start = max(start, ends)
     # Not sooner than the station's shortest gap after the last ID that aired: the fill
     # spaced them by predicted times, and a cut song or a moved break brings them closer
-    # (simulator: 10.2 minutes apart). Half a minute of slack, so a near miss still airs.
+    # (simulator: 10.2 minutes apart). 
     from app.models.asset import Asset
 
     last_id = (await db.execute(
@@ -95,7 +95,7 @@ async def must_wait(db: AsyncSession, station_id, entry: QueueEntry, now: dateti
                func.lower(Asset.category).like(f"{STATION_ID_CATEGORY_PREFIX}%"))
         .order_by(QueueEntry.started_at.desc()).limit(1)
     )).scalar()
-    if last_id is not None and start - _aware(last_id) < timedelta(minutes=settings.min_minutes - 0.5):
+    if last_id is not None and start - _aware(last_id) < timedelta(minutes=settings.min_minutes):
         return True
     length = float(getattr(entry.asset, "duration", None) or 10.0)
     margin = timedelta(minutes=settings.clear_minutes)
