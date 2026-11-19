@@ -123,3 +123,18 @@ async def test_not_sooner_than_the_shortest_gap_after_the_last_id(db_session: As
     await db_session.commit()
     picked = await _pick_next_pending(db_session, station_id, datetime.now(UTC))
     assert picked.id == (id_entry if airs else song_entry)
+
+
+@pytest.mark.asyncio
+async def test_an_id_under_four_seconds_never_airs_or_gets_queued(db_session: AsyncSession):
+    """Jerusalem 2026-11-19: after a 1.8 s ID the engine played its emergency file."""
+    from app.services.playlist_generator_service import _Library
+
+    station_id, id_entry, song_entry = await _setup(db_session, "song", None)
+    jingle = (await db_session.execute(
+        select(Asset).join(QueueEntry, QueueEntry.asset_id == Asset.id).where(QueueEntry.id == id_entry))).scalar_one()
+    jingle.duration = 1.8
+    await db_session.commit()
+    assert (await _pick_next_pending(db_session, station_id, datetime.now(UTC))).id == song_entry
+    pool = await _Library(db_session, station_id, set()).pool("jingle", "station_id")
+    assert pool and all(r.duration >= 4.0 for r in pool)

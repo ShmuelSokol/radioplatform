@@ -1882,6 +1882,13 @@ async def play_next(
     _user: User = Depends(require_dj_or_manager),
 ):
     await _require_assets(db, [body.asset_id])
+    # Ahead of every waiting entry, also when the one on air sits further down the
+    # numbering (an engine start report can leave it there): an ID once aired ahead
+    # of an operator's Play next on Jerusalem (2026-11-19)
+    first_waiting = (await db.execute(
+        select(func.min(QueueEntry.position))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+    )).scalar()
     await db.execute(
         update(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
@@ -1894,6 +1901,8 @@ async def play_next(
     )
     current = result.scalar_one_or_none()
     next_pos = (current.position + 1) if current else 1
+    if first_waiting is not None:
+        next_pos = min(next_pos, first_waiting)
     entry = QueueEntry(
         id=uuid.uuid4(), station_id=station_id, asset_id=body.asset_id,
         position=next_pos, status="pending", source="manual",

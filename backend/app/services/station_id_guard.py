@@ -11,6 +11,7 @@ automatically queued ID is passed over, for good, when
 - the item before it (the one on air now) is not a programme item (a break, a time
   check, a sponsorship, another jingle...), or
 - a timed item is due within the station's `clear_minutes` of it, or
+- it is shorter than MIN_STATION_ID_SECONDS (4 s), or
 - the last ID aired less than the station's `min_minutes` ago (half a minute of slack).
 
 Passing one over only makes the gap to the next ID longer. The browser path marks it
@@ -26,7 +27,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.models.asset import STATION_ID_CATEGORY_PREFIX
+from app.models.asset import MIN_STATION_ID_SECONDS, STATION_ID_CATEGORY_PREFIX
 from app.models.queue_entry import QueueEntry
 
 # Queue sources a person chose: never second-guessed
@@ -57,6 +58,8 @@ async def must_wait(db: AsyncSession, station_id, entry: QueueEntry, now: dateti
     from app.models.station import Station
     from app.services.playlist_generator_service import NOT_BEFORE_AN_ID, id_settings_for, on_air_seconds
 
+    if float(getattr(entry.asset, "duration", None) or 0.0) < MIN_STATION_ID_SECONDS:
+        return True  # too short for the engine to load the next song behind it
     station = await db.get(Station, station_id)
     settings = id_settings_for(station.automation_config if station is not None else None)
     playing = (await db.execute(
