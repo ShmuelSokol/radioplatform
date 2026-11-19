@@ -1583,6 +1583,19 @@ async def _apply_long_item_rule(db: AsyncSession, station, state: EngineState, n
     resume_at = long_items.resume_point(current, at)
     if resume_at is None:
         return
+    # Already paused for an earlier group a moment before (a second group due seconds
+    # later is a new key while the shiur is still on air): one resume entry only
+    # (simulator, Motzaei Shabbos 2027-10-09, two resume entries for the Daf Yomi)
+    from app.models.queue_entry import RESUME_PREFIX
+
+    waiting = await db.execute(
+        select(QueueEntry.id).where(
+            QueueEntry.station_id == station_id, QueueEntry.status == "pending",
+            QueueEntry.asset_id == current.asset_id, QueueEntry.source.like(f"{RESUME_PREFIX}%"),
+        ).limit(1)
+    )
+    if waiting.first() is not None:
+        return
     # The shiur carries on first thing in the music lane, which takes over again when
     # the timed group has played (the engine re-asks for its next track: queue head changed)
     head = (current.position or 0) + 1
