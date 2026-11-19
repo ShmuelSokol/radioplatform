@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import EditProgressBar from '../../components/audio/EditProgressBar';
+import EditProgressBar, { DONE_HOLD_MS } from '../../components/audio/EditProgressBar';
 import { newProgressId } from '../../api/assets';
 import { useParams, Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -74,6 +74,7 @@ export default function AudioEnhance() {
   const restoreMutation = useRestoreOriginal();
   const autoEnhanceMutation = useAutoEnhance();
   const [progressId, setProgressId] = useState<string | null>(null);
+  const [finishing, setFinishing] = useState(false);  // "Done 100%" held a moment
   const waveformRef = useRef<WaveformPlayerHandle>(null);
 
   const [filters, setFilters] = useState<FilterState>({ ...defaultFilters });
@@ -186,10 +187,14 @@ export default function AudioEnhance() {
     setProgressId(pid);
     autoEnhanceMutation.mutate({ id: assetId!, progressId: pid }, {
       onSuccess: (result) => {
-        setEnhancePending(true);
-        setAiReasons(result.reasons);
-        setStatusMsg(null);
-        handleRefresh();
+        setFinishing(true);
+        setTimeout(() => {
+          setFinishing(false);
+          setEnhancePending(true);
+          setAiReasons(result.reasons);
+          setStatusMsg(null);
+          handleRefresh();
+        }, DONE_HOLD_MS);
       },
       onError: () => setStatusMsg('Smart Enhance failed'),
     });
@@ -254,12 +259,12 @@ export default function AudioEnhance() {
               <h3 className="text-sm font-semibold mb-3">Presets</h3>
               <button
                 onClick={handleAutoEnhance}
-                disabled={autoEnhanceMutation.isPending}
+                disabled={autoEnhanceMutation.isPending || finishing}
                 className="w-full mb-3 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white px-3 py-2.5 rounded text-sm font-medium transition disabled:opacity-50"
               >
                 {autoEnhanceMutation.isPending ? <><Spinner className="mr-1" />Analyzing...</> : 'Smart Enhance'}
               </button>
-              <EditProgressBar progressId={progressId} active={autoEnhanceMutation.isPending} label="Smart Enhance" />
+              <EditProgressBar progressId={progressId} active={autoEnhanceMutation.isPending || finishing} done={finishing} label="Smart Enhance" />
               <div className="flex flex-col gap-2">
                 {presetNames.map((key) => (
                   <button

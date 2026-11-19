@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import EditProgressBar from './EditProgressBar';
+import EditProgressBar, { DONE_HOLD_MS } from './EditProgressBar';
 import { newProgressId } from '../../api/assets';
 import { useDetectSilence, useTrimAsset, useRemoveSilence, useRestoreOriginal } from '../../hooks/useAssets';
 import Spinner from '../Spinner';
@@ -35,7 +35,8 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
   // Remove All shortens each gap in the middle to this many seconds instead of cutting it
   // to nothing, so pauses do not sound unnaturally short (start and end silence goes)
   const [keepGap, setKeepGap] = useState(0.5);
-  const working = removeMutation.isPending || trimMutation.isPending;
+  const [finishing, setFinishing] = useState(false);  // "Done 100%" held a moment
+  const working = removeMutation.isPending || trimMutation.isPending || finishing;
   // Esc closes the confirm, but not while the edit runs (it would go on anyway)
   useEscape(showConfirm !== null && !trimPending && !working, () => setShowConfirm(null));
   const restoreMutation = useRestoreOriginal();
@@ -101,13 +102,17 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
       { id: assetId, regions: toRemove, progressId: pid, keepGap: keep },
       {
         onSuccess: () => {
-          setRegions([]);
-          setSelectedIndex(null);
-          setShowConfirm(null);
-          setStatusMsg(null);
-          onRegionsDetected?.([]);
-          onTrimComplete?.();
-          setTrimPending(true);
+          setFinishing(true);
+          setTimeout(() => {
+            setFinishing(false);
+            setRegions([]);
+            setSelectedIndex(null);
+            setShowConfirm(null);
+            setStatusMsg(null);
+            onRegionsDetected?.([]);
+            onTrimComplete?.();
+            setTrimPending(true);
+          }, DONE_HOLD_MS);
         },
         onError: (err) => {
           const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -378,18 +383,18 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
                 s of silence <span className="text-xs text-gray-400">(0 = cut it out completely)</span>
               </label>
             )}
-            <EditProgressBar progressId={progressId} active={removeMutation.isPending} label="Removing the silence" />
+            <EditProgressBar progressId={progressId} active={removeMutation.isPending || finishing} done={finishing} label="Removing the silence" />
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setShowConfirm(null)}
-                disabled={removeMutation.isPending || trimMutation.isPending}
+                disabled={working}
                 className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded"
               >
                 Cancel
               </button>
               <button
                 onClick={showConfirm === 'auto' ? handleAutoClip : showConfirm === 'all' ? handleRemoveAll : handleTrimRegion}
-                disabled={trimMutation.isPending || removeMutation.isPending}
+                disabled={working}
                 className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded disabled:opacity-50"
               >
                 {trimMutation.isPending || removeMutation.isPending
