@@ -278,6 +278,62 @@ export function BugTopButton({ className = '' }: { className?: string }) {
 
 type Phase = 'closed' | 'capturing' | 'open' | 'sending' | 'sent';
 
+
+const LIFT_SIZE = 44;
+const TAPPABLE = 'button, a[href], input, select, textarea, label, summary, [role="button"], [role="slider"], [role="tab"], [role="checkbox"], [contenteditable="true"], audio, video';
+
+/** What the page shows at a point, the reporter's own parts left out. */
+function pageAt(x: number, y: number): Element | null {
+  for (const el of document.elementsFromPoint(x, y)) {
+    if (el.closest(`[${IGNORE_ATTR}]`)) continue;
+    return el;
+  }
+  return null;
+}
+
+/** Can a 🐞 on the screen be tapped? It shows, and nothing lies over its middle. */
+function aBugReachable(): boolean {
+  for (const el of document.querySelectorAll<HTMLElement>('[data-bug-trigger]:not([data-bug-lifted])')) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8 || r.bottom <= 0 || r.right <= 0 || r.top >= innerHeight || r.left >= innerWidth) continue;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || Number(cs.opacity) < 0.3) continue;
+    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    if (top && (el === top || el.contains(top))) return true;
+  }
+  return false;
+}
+
+/** A spot for the lifted 🐞 with no button, link or field of the page under any part of it. */
+function spotFree(left: number, top: number): boolean {
+  if (left < 0 || top < 0 || left + LIFT_SIZE > innerWidth || top + LIFT_SIZE > innerHeight) return false;
+  const pts = [[0.5, 0.5], [0.1, 0.1], [0.9, 0.1], [0.1, 0.9], [0.9, 0.9], [0.5, 0.05], [0.5, 0.95], [0.05, 0.5], [0.95, 0.5]];
+  for (const [fx, fy] of pts) {
+    const el = pageAt(left + fx * LIFT_SIZE, top + fy * LIFT_SIZE);
+    if (el?.closest(TAPPABLE)) return false;
+  }
+  return true;
+}
+
+/** Where to lift the 🐞 to, or null when one can already be tapped. */
+function liftSpot(): { left: number; top: number } | null {
+  if (aBugReachable()) return null;
+  const W = innerWidth, H = innerHeight, m = 12, s = LIFT_SIZE;
+  // Edges first (dialogs leave a margin there), the bottom kept clear of the player bar
+  const tries: [number, number][] = [
+    [W - s - m, H - s - 96], [m, H - s - 96], [W - s - m, H / 2], [m, H / 2],
+    [W - s - m, H - s - 160], [m, H - s - 160], [W - s - m, H / 3], [m, H / 3],
+    [W - s - m, (2 * H) / 3], [m, (2 * H) / 3], [W - s - 4, H - s - 96], [4, H - s - 96],
+    [W / 2 - s / 2, H - s - 96], [W - s - m, 72], [m, 72],
+  ];
+  for (const [l, t] of tries) {
+    const left = Math.round(l), top = Math.round(t);
+    if (spotFree(left, top)) return { left, top };
+  }
+  // Nowhere free: right edge, low, where a thumb reaches
+  return { left: Math.round(W - s - 4), top: Math.round(H - s - 96) };
+}
+
 export default function BugReporter() {
   const [phase, setPhase] = useState<Phase>('closed');
   const [shot, setShot] = useState<string | null>(null);
@@ -373,6 +429,25 @@ export default function BugReporter() {
     return () => window.removeEventListener('click', onClick, true);
   }, []);
 
+  // 🐞 everywhere (Shmuel's iPhone, 2026-11-19: the Edit contract card covered the top bar's
+  // 🐞 and there was none to tap). Twice a second, while no report is open: if no 🐞 on the
+  // screen can be tapped (each one hidden, or something lies over its middle), a 🐞 is lifted
+  // above every dialog, on a spot where no button, link or field of the page lies under it.
+  const [lift, setLift] = useState<{ left: number; top: number } | null>(null);
+  useEffect(() => {
+    if (phase !== 'closed') return;
+    const look = () => setLift((was) => {
+      const next = liftSpot();
+      if (!next) return null;
+      // Stay put while the old spot is still free: no jumping about as the dialog scrolls
+      if (was && spotFree(was.left, was.top)) return was;
+      return next;
+    });
+    look();
+    const t = window.setInterval(look, 500);
+    return () => window.clearInterval(t);
+  }, [phase, pathname]);
+
   const close = () => {
     setPhase('closed');
     setDescription('');
@@ -434,6 +509,21 @@ export default function BugReporter() {
           aria-label="Report a bug"
           // Phone: right edge, where cards have no text (on the left it covered their labels and the Library checkboxes); 44 px there for a finger
           className={`fixed right-3 sm:right-auto sm:left-3 bottom-24 z-[60] h-11 w-11 sm:h-9 sm:w-9 rounded-full ${hideFloating ? 'hidden' : hideOnPhone || topButton ? 'hidden sm:flex' : 'flex'} bg-gray-800/80 text-gray-200 shadow-lg ring-1 ring-white/15 hover:bg-rose-600 hover:text-white transition-colors items-center justify-center text-base print:hidden`}
+        >
+          <span aria-hidden>🐞</span>
+        </button>
+      )}
+      {phase === 'closed' && lift && (
+        <button
+          type="button"
+          onClick={start}
+          data-bug-trigger=""
+          data-bug-lifted=""
+          data-testid="bug-lifted"
+          title="Report a bug"
+          aria-label="Report a bug"
+          style={{ left: lift.left, top: lift.top, width: LIFT_SIZE, height: LIFT_SIZE }}
+          className="fixed z-[65] rounded-full flex bg-gray-800/90 text-gray-200 shadow-lg ring-1 ring-white/25 hover:bg-rose-600 hover:text-white transition-colors items-center justify-center text-base print:hidden"
         >
           <span aria-hidden>🐞</span>
         </button>

@@ -6,6 +6,7 @@ station list and the listener page (see wiki/streaming-architecture.md).
 - "browser": each listener's page plays the files itself (the built-in player).
 Public: it says nothing secret, and the engine is asked at most every few seconds.
 """
+import asyncio
 import time
 import uuid
 
@@ -25,13 +26,17 @@ CACHE_SECONDS = 8.0
 _cache: dict[str, tuple[float, dict]] = {}
 
 
-async def station_status(db: AsyncSession, station_id: str) -> dict:
+_UNASKED = object()
+
+
+async def station_status(db: AsyncSession, station_id: str, engine=_UNASKED) -> dict:
     if not settings.engine_drives(station_id):
         return {"mode": "browser"}
     hit = _cache.get(station_id)
     if hit and time.monotonic() - hit[0] < CACHE_SECONDS:
         return hit[1]
-    engine = await playout_engine.engine_status(station_id)
+    if engine is _UNASKED:
+        engine = await playout_engine.engine_status(station_id)
     playing = (await db.execute(
         select(QueueEntry.id, Asset.title)
         .join(Asset, Asset.id == QueueEntry.asset_id)
@@ -65,6 +70,13 @@ async def station_status(db: AsyncSession, station_id: str) -> dict:
 @router.get("")
 async def all_stations(db: AsyncSession = Depends(get_db)):
     """{station_id: status} for every engine station; any other station is "browser"."""
-    out = {sid: await station_status(db, sid) for sid in sorted(settings.engine_station_ids)
-           if settings.engine_drives(sid)}
+    sids = [sid for sid in sorted(settings.engine_station_ids) if settings.engine_drives(sid)]
+    # The engines are asked together (V1-146): one after another, each down engine added
+    # its own 3 s timeout to this public call. Cached stations are not asked again.
+    stale = [sid for sid in sids
+             if not (sid in _cache and time.monotonic() - _cache[sid][0] < CACHE_SECONDS)]
+    answers = await asyncio.gather(*(playout_engine.engine_status(sid) for sid in stale),
+                                   return_exceptions=True)
+    engines = {sid: (None if isinstance(a, BaseException) else a) for sid, a in zip(stale, answers)}
+    out = {sid: await station_status(db, sid, engines.get(sid, _UNASKED)) for sid in sids}
     return {"stations": out, "default": {"mode": "browser"}}

@@ -1,0 +1,239 @@
+"""A station ID is passed over at air time when it would follow a break or another
+spoken item, or land next to a break (services/station_id_guard.py). The fill only
+predicts air times; a soft break waits for the song, so the simulator heard an ID
+0.9 minutes after a :30 break (2026-11-19)."""
+import uuid
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.v1.queue import _pick_next_pending
+from app.models.asset import Asset
+from app.models.queue_entry import QueueEntry
+from app.models.station import Station
+from app.services import playout_engine, station_id_guard
+
+
+async def _setup(db: AsyncSession, before: str, break_in_minutes: float | None, song_left: float = 60.0,
+                 source: str = "auto"):
+    """On air: `before` ("song", "break" or "id"); then an ID, then a song; maybe a
+    soft break due `break_in_minutes` from now."""
+    now = datetime.now(UTC)
+    station = Station(id=uuid.uuid4(), name=f"S {uuid.uuid4().hex[:6]}", timezone="America/New_York",
+                      automation_config={"station_ids": {"enabled": True}})
+    db.add(station)
+    await db.flush()
+
+    def asset(kind, category, seconds):
+        a = Asset(id=uuid.uuid4(), title=f"{kind} {category}", file_path=f"{uuid.uuid4().hex}.mp3",
+                  asset_type=kind, category=category, duration=seconds)
+        db.add(a)
+        return a
+
+    song = asset("music", "lively", 200.0)
+    after = asset("music", "lively", 210.0)
+    sponsor = asset("spot", "sponsorship", 30.0)
+    jingle = asset("jingle", "station_id", 8.0)
+    jingle2 = asset("jingle", "station_id", 8.0)
+    await db.flush()
+    on_air = {"song": song, "break": sponsor, "id": jingle2}[before]
+    started = now - timedelta(seconds=on_air.duration - song_left) if before == "song" else now - timedelta(seconds=5)
+    db.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=on_air.id, position=1,
+                      status="playing", started_at=started,
+                      preempt_at=now - timedelta(minutes=1) if before == "break" else None,
+                      timing_mode="soft" if before == "break" else None,
+                      source="block" if before == "break" else "auto"))
+    the_id = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=jingle.id, position=2,
+                        status="pending", source=source)
+    nxt = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=after.id, position=3,
+                     status="pending", source="auto")
+    db.add_all([the_id, nxt])
+    if break_in_minutes is not None:
+        db.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=sponsor.id, position=4,
+                          status="pending", source="block", timing_mode="soft",
+                          preempt_at=now + timedelta(minutes=break_in_minutes)))
+    await db.commit()
+    return station.id, the_id.id, nxt.id
+
+
+async def _status(db, entry_id):
+    db.expire_all()
+    return (await db.execute(select(QueueEntry.status).where(QueueEntry.id == entry_id))).scalar()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("before,break_in,song_left,airs", [
+    ("song", None, 60.0, True),     # between songs, no break near: airs
+    ("song", 20.0, 60.0, True),     # break well ahead: airs
+    ("break", None, 60.0, False),   # right after a break: never spoken next to spoken
+    ("id", None, 60.0, False),      # never two IDs
+    ("song", 3.0, 60.0, False),     # the song ends in 1 min, a break 2 min after the ID
+    ("song", 6.0, 200.0, False),    # the song has 3.3 min left: the ID would start 2.7 min before the break
+])
+async def test_browser_player_pick(db_session: AsyncSession, before, break_in, song_left, airs):
+    station_id, id_entry, song_entry = await _setup(db_session, before, break_in, song_left)
+    picked = await _pick_next_pending(db_session, station_id, datetime.now(UTC))
+    await db_session.commit()
+    if airs:
+        assert picked.id == id_entry
+    else:
+        assert picked.id == song_entry
+        assert await _status(db_session, id_entry) == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_an_operators_id_is_never_second_guessed(db_session: AsyncSession):
+    station_id, id_entry, _ = await _setup(db_session, "break", None, source="manual")
+    picked = await _pick_next_pending(db_session, station_id, datetime.now(UTC))
+    assert picked.id == id_entry
+
+
+@pytest.mark.asyncio
+async def test_engine_pick_passes_over_and_the_start_report_skips_it(db_session: AsyncSession):
+    station_id, id_entry, song_entry = await _setup(db_session, "break", None)
+    picked = await playout_engine.pick_next(db_session, station_id)
+    assert picked.id == song_entry
+    assert await _status(db_session, id_entry) == "pending"  # the pick only reads
+    # asked again (the tick's check) it stays passed over
+    assert (await playout_engine.pick_next(db_session, station_id)).id == song_entry
+    assert str(id_entry) in station_id_guard.passed(station_id)
+    assert await station_id_guard.take_passed(db_session, station_id) == 1
+    await db_session.commit()
+    assert await _status(db_session, id_entry) == "skipped"
+    assert not station_id_guard.passed(station_id)
+
+
+@pytest.mark.asyncio
+async def test_engine_pick_between_songs_gives_the_id(db_session: AsyncSession):
+    station_id, id_entry, _ = await _setup(db_session, "song", 20.0)
+    assert (await playout_engine.pick_next(db_session, station_id)).id == id_entry
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("minutes_ago,airs", [(10, False), (13, True)])
+async def test_not_sooner_than_the_shortest_gap_after_the_last_id(db_session: AsyncSession, minutes_ago, airs):
+    """Simulator: IDs 10.2 min apart after a hard :30 cut the song between them."""
+    station_id, id_entry, song_entry = await _setup(db_session, "song", None)
+    jingle = (await db_session.execute(select(Asset).where(Asset.category == "station_id"))).scalars().first()
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=jingle.id, position=0,
+                              status="played", source="auto",
+                              started_at=datetime.now(UTC) - timedelta(minutes=minutes_ago)))
+    await db_session.commit()
+    picked = await _pick_next_pending(db_session, station_id, datetime.now(UTC))
+    assert picked.id == (id_entry if airs else song_entry)
+
+
+@pytest.mark.asyncio
+async def test_an_id_under_four_seconds_never_airs_or_gets_queued(db_session: AsyncSession):
+    """Jerusalem 2026-11-19: after a 1.8 s ID the engine played its emergency file."""
+    from app.services.playlist_generator_service import _Library
+
+    station_id, id_entry, song_entry = await _setup(db_session, "song", None)
+    jingle = (await db_session.execute(
+        select(Asset).join(QueueEntry, QueueEntry.asset_id == Asset.id).where(QueueEntry.id == id_entry))).scalar_one()
+    jingle.duration = 1.8
+    await db_session.commit()
+    assert (await _pick_next_pending(db_session, station_id, datetime.now(UTC))).id == song_entry
+    pool = await _Library(db_session, station_id, set()).pool("jingle", "station_id")
+    assert pool and all(r.duration >= 4.0 for r in pool)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("break_started_minutes_ago,airs", [(2.0, False), (5.0, True)])
+async def test_a_short_song_after_a_break_is_not_enough(db_session: AsyncSession, break_started_minutes_ago, airs):
+    """Simulator: break at 17:01:16, a short song, then an ID at 17:04:03 (2.8 min)."""
+    station_id, id_entry, song_entry = await _setup(db_session, "song", None, song_left=10.0)
+    spot = (await db_session.execute(select(Asset).where(Asset.category == "sponsorship"))).scalars().first()
+    at = datetime.now(UTC) - timedelta(minutes=break_started_minutes_ago)
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=spot.id, position=0,
+                              status="played", source="block", timing_mode="soft", preempt_at=at, started_at=at))
+    await db_session.commit()
+    picked = await _pick_next_pending(db_session, station_id, datetime.now(UTC))
+    assert picked.id == (id_entry if airs else song_entry)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sponsor_status", ["playing", "played"])
+async def test_no_id_after_a_sponsorship_that_waited_for_a_story(db_session: AsyncSession, sponsor_status):
+    """All Day Stories 2026-11-19 06:36Z, browser player: TEST SPONSOR 08 waited for a story
+    to end (sponsorships_wait_for_talks), aired at 06:36:04, and an ID followed at 06:36:32."""
+    station_id, id_entry, song_entry = await _setup(db_session, "song", None)
+    now = datetime.now(UTC)
+    story = Asset(id=uuid.uuid4(), title="A story", file_path=f"{uuid.uuid4().hex}.mp3",
+                  asset_type="story", category="stories", duration=1200.0)
+    db_session.add(story)
+    await db_session.flush()
+    spot = (await db_session.execute(select(Asset).where(Asset.category == "sponsorship"))).scalars().first()
+    # the song in _setup aired before the story; the story then the late sponsorship
+    for e in (await db_session.execute(select(QueueEntry).where(
+            QueueEntry.station_id == station_id, QueueEntry.status == "playing"))).scalars():
+        e.status, e.started_at = "played", now - timedelta(minutes=40)
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=story.id, position=0,
+                              status="played", source="auto", started_at=now - timedelta(minutes=20)))
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=spot.id, position=1,
+                              status=sponsor_status, source="ad_slot", timing_mode="soft",
+                              preempt_at=now - timedelta(minutes=12), started_at=now - timedelta(seconds=28)))
+    await db_session.commit()
+    picked = await _pick_next_pending(db_session, station_id, now)
+    await db_session.commit()
+    assert picked.id == song_entry
+    assert await _status(db_session, id_entry) == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_queue_tidy_drops_ids_next_to_breaks_and_keeps_clear_ones(db_session: AsyncSession):
+    """Main 2026-11-19: the queue showed an ID at 08:15:34 right after TEST SPONSOR 14
+    and one at 07:57:45, 2.2 min before the 08:00 break. A waiting ID the queue's own
+    timeline puts beside a break is taken out; one well clear stays."""
+    now = datetime.now(UTC)
+    station = Station(id=uuid.uuid4(), name=f"S {uuid.uuid4().hex[:6]}", timezone="America/New_York",
+                      automation_config={"station_ids": {"enabled": True}})
+    db_session.add(station)
+    await db_session.flush()
+
+    def asset(kind, category, seconds):
+        a = Asset(id=uuid.uuid4(), title=f"{kind} {category}", file_path=f"{uuid.uuid4().hex}.mp3",
+                  asset_type=kind, category=category, duration=seconds)
+        db_session.add(a)
+        return a
+
+    song = asset("music", "lively", 243.0)  # 240 s on air (3 s crossfade)
+    sponsor = asset("spot", "sponsorship", 30.0)
+    jingle = asset("jingle", "station_id", 8.0)
+    await db_session.flush()
+    pos = 0
+
+    def add(a, **kw):
+        nonlocal pos
+        pos += 1
+        e = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=a.id, position=pos,
+                       status=kw.pop("status", "pending"), source=kw.pop("source", "auto"), **kw)
+        db_session.add(e)
+        return e
+
+    add(song, status="playing", started_at=now)          # on air until +4 min
+    songs = [add(song) for _ in range(2)]                 # +4, +8
+    clear = add(jingle)                                   # +12: 8 min from the break, stays
+    songs += [add(song) for _ in range(2)]                # +12:08, +16:08
+    add(sponsor, source="ad_slot", timing_mode="soft",    # due +20, waits for the song: +20:08
+        preempt_at=now + timedelta(minutes=20))
+    after_break = add(jingle)                             # +20:38 right after the sponsorship
+    songs += [add(song) for _ in range(2)]
+    near = add(jingle)                                    # 2 min before the next break
+    add(song)
+    add(sponsor, source="ad_slot", timing_mode="soft",
+        preempt_at=now + timedelta(minutes=30, seconds=50))
+    also_after = add(jingle)                              # after the song, so right after that break too
+    await db_session.commit()
+
+    dropped = await station_id_guard.drop_misplaced(db_session, station.id, now)
+    await db_session.commit()
+    left = {e for (e,) in (await db_session.execute(
+        select(QueueEntry.id).where(QueueEntry.station_id == station.id))).all()}
+    assert clear.id in left
+    assert after_break.id not in left
+    assert near.id not in left
+    assert also_after.id not in left
+    assert dropped == 3

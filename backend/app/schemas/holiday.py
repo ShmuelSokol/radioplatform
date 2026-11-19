@@ -69,3 +69,5 @@ class AutoGenerateRequest(BaseModel):
 class AutoGenerateResponse(BaseModel):
     created: int
     skipped: int
+    # stored windows whose times were corrected (the candle-lighting rule changed)
+    updated: int = 0

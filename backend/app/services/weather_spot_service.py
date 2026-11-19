@@ -107,15 +107,20 @@ def clip_hour(asset: Asset) -> int | None:
 # Station sign-off for the hourly time announcement. Spelled for the voice
 # engine ("Kohl Baramah" is how it pronounces Kol Berama correctly).
 TIME_ANNOUNCEMENT_TEMPLATE = "The time is {time} on Radio {brand}, W M D I 107.9, the highest frequency."
+# A station outside the default (Lakewood FM) region is not on 107.9: it names only
+# the brand, never the FM call sign (checklist V1-120).
+TIME_ANNOUNCEMENT_TEMPLATE_OTHER_REGION = "The time is {time} on Radio {brand}."
 
 
-def _build_time_text(eastern_now: datetime, brand_name: str = "Kohl Baramah") -> str:
+def _build_time_text(eastern_now: datetime, brand_name: str = "Kohl Baramah", region: str | None = None) -> str:
     hour = eastern_now.strftime("%I").lstrip("0")
     minute = eastern_now.strftime("%M")
     ampm = eastern_now.strftime("%p")
     # On the hour say "3 PM", not "3:00 PM".
     spoken = f"{hour} {ampm}" if minute == "00" else f"{hour}:{minute} {ampm}"
-    text = TIME_ANNOUNCEMENT_TEMPLATE.format(time=spoken, brand=brand_name)
+    template = (TIME_ANNOUNCEMENT_TEMPLATE if normalize_region(region) == DEFAULT_WEATHER_REGION
+                else TIME_ANNOUNCEMENT_TEMPLATE_OTHER_REGION)
+    text = template.format(time=spoken, brand=brand_name)
     return _apply_word_replacements(text)
 
 
@@ -244,16 +249,13 @@ async def find_own_time_clip(
 async def find_time_clip_asset(
     db: AsyncSession, hour: int, region: str | None = None, minute: int = 0
 ) -> Asset | None:
-    """The clip a station of this region plays at this hour: its own, else the default set's.
+    """The clip a station of this region plays at this hour: only its own.
 
-    Unlike weather, the default set is a fair fallback: the hour is the station's
-    own local hour either way, only the recording is shared.
+    The default (Lakewood) set says "one oh seven nine, Lakewood", so another region
+    never borrows it (checklist V1-120, coordinator 2026-11-19): without its own clip
+    a station gets a generated one without the call sign, or none.
     """
-    region = normalize_region(region)
-    own = await find_own_time_clip(db, hour, region, minute)
-    if own is None and region != DEFAULT_WEATHER_REGION:
-        own = await find_own_time_clip(db, hour, DEFAULT_WEATHER_REGION, minute)
-    return own
+    return await find_own_time_clip(db, hour, normalize_region(region), minute)
 
 
 def _decoded_duration(audio_bytes: bytes) -> float:
@@ -466,6 +468,7 @@ async def get_or_create_weather_spot_assets(
             Asset.asset_type == "jingle",
             Asset.category == "time_announcement",
             Asset.metadata_extra["slot_key"].astext == slot_key,
+            _region_filter(region),
         ).limit(1)
     )
     existing_time = result.scalar_one_or_none()
@@ -494,11 +497,12 @@ async def get_or_create_weather_spot_assets(
     time_asset = existing_time
     if not time_asset:
         try:
-            time_text = _build_time_text(_slot_time(slot_key, eastern_now))
+            time_text = _build_time_text(_slot_time(slot_key, eastern_now), region=region)
             time_bytes, time_duration = await generate_tts(time_text)
             from app.services.audio_analysis_service import normalize_audio_loudness
             time_bytes = normalize_audio_loudness(time_bytes)
-            time_path = f"weather/{safe_slot}_time.mp3"
+            own_region = region != DEFAULT_WEATHER_REGION
+            time_path = f"weather/{safe_slot}{'_' + region if own_region else ''}_time.mp3"
             time_url = await upload_to_supabase(time_bytes, time_path)
 
             time_asset = Asset(
@@ -509,7 +513,8 @@ async def get_or_create_weather_spot_assets(
                 file_path=time_url,
                 asset_type="jingle",
                 category="time_announcement",
-                metadata_extra={"slot_key": slot_key, "generated": True},
+                metadata_extra={"slot_key": slot_key, "generated": True,
+                                **({"region": region} if own_region else {})},
             )
             db.add(time_asset)
             await db.flush()

@@ -93,6 +93,9 @@ ONE_MOMENT_CATEGORIES = ("weather_spot", "time_announcement")
 NEVER_RANDOM_CATEGORIES = (
     "do_not_play", "test", "tests", "testing", "carlebach", "block_only", "kids",
     "kids_car_summer", "kids_car_year",
+    # The shofar (or whatever airs at candle lighting) and other Erev Shabbos items:
+    # only the station's Shabbos ending plays them (services/shabbos_ending.py)
+    "shabbos_ending",
 )
 
 
@@ -192,6 +195,9 @@ def not_contract_audio():
 # switch-on (2026-11-19): Jerusalem's ID on Main and on All Day Stories, IDs back to
 # back and right after a sponsorship, even with the setting off.
 STATION_ID_CATEGORY_PREFIX = "station_id"
+# No automatic station ID shorter than this: after a 1.8 s ID the engine had not loaded
+# the next song and played its emergency file for 2 to 3 s (Jerusalem, 2026-11-19)
+MIN_STATION_ID_SECONDS = 4.0
 
 
 def not_station_id():

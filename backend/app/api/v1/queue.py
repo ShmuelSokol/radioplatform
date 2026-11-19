@@ -24,7 +24,15 @@ from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.models.asset import Asset, fit_for_random_pick, stored_analysis
 from app.models.play_log import PlayLog
-from app.models.queue_entry import QueueEntry, aired_from, hard_timed, is_soft_timed, mark_started, resume_offset
+from app.models.queue_entry import (
+    RESUME_PREFIX,
+    QueueEntry,
+    aired_from,
+    hard_timed,
+    is_soft_timed,
+    mark_started,
+    resume_offset,
+)
 from app.models.user import User
 from app.schemas.queue import (
     QueueAdd,
@@ -378,6 +386,37 @@ async def _skip_placeholders(db: AsyncSession, station_id) -> None:
     await skip_lapsed_sponsorships(db, station_id)
 
 
+async def _resume_before_soft(db: AsyncSession, station_id, entry: QueueEntry) -> QueueEntry:
+    """A soft timed item that is due while a paused shiur or story waits to carry on
+    plays after it, not in its pause: soft means "after the item on air", and a soft
+    item still soft at this point was meant to wait for the shiur's end (less than
+    five minutes left, or a sponsorship on a station where sponsorships wait). The
+    simulator caught a 10:45 sponsorship airing in the 11:00 time check's pause of a
+    story on All Day Stories (2026-11-19). Hard items still go first."""
+    from app.services import long_items
+
+    if not is_soft_timed(entry):
+        return entry
+    res = await db.execute(
+        select(QueueEntry, Asset)
+        .join(Asset, QueueEntry.asset_id == Asset.id)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.source.like(f"{RESUME_PREFIX}%"),
+            QueueEntry.position < entry.position,
+        )
+        .order_by(QueueEntry.position)
+        .limit(1)
+    )
+    row = res.first()
+    # Only a shiur or story: the rest of a song a live show paused still comes after
+    # the sponsorship that waited for the show (test_live_delay)
+    if row is None or not long_items.is_long_form(row[1]):
+        return entry
+    return row[0]
+
+
 async def _pick_next_pending(
     db: AsyncSession, station_id, now_utc: datetime, silence_only: bool = False
 ) -> QueueEntry | None:
@@ -419,7 +458,7 @@ async def _pick_next_pending(
     )
     entry = ad_result.scalar_one_or_none()
     if entry:
-        return entry
+        return await _resume_before_soft(db, station_id, entry)
     # A timed item due in a moment starts now instead of waiting for the clock: the
     # song before it often ends a few seconds early, and waiting left that much quiet
     # air (heard live: 3.3 s before a block at 08:35:00). Starting the next song
@@ -438,18 +477,31 @@ async def _pick_next_pending(
     )
     entry = soon.scalar_one_or_none()
     if entry:
-        return entry
-    result = await db.execute(
-        select(QueueEntry)
-        .where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status == "pending",
-            or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
+        return await _resume_before_soft(db, station_id, entry)
+    from sqlalchemy.orm import joinedload
+
+    from app.services.station_id_guard import must_wait
+
+    # A station ID that would follow a break or another spoken item, or land next to a
+    # break, is skipped (services/station_id_guard.py); at most a few in a row
+    for _ in range(4):
+        result = await db.execute(
+            select(QueueEntry)
+            .options(joinedload(QueueEntry.asset))
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
+            )
+            .order_by(QueueEntry.position)
+            .limit(1)
         )
-        .order_by(QueueEntry.position)
-        .limit(1)
-    )
-    return result.scalar_one_or_none()
+        entry = result.unique().scalar_one_or_none()
+        if entry is None or not await must_wait(db, station_id, entry, now_utc):
+            return entry
+        entry.status = "skipped"
+        await db.flush()
+    return None
 
 
 # Items this short (station IDs, time checks) hand over at their end, not with a crossfade
@@ -946,6 +998,39 @@ async def _defer_hard_until_end(db: AsyncSession, station_id, current: QueueEntr
 SOFT_PAUSE_LOOKAHEAD_SECONDS = 90.0
 
 
+async def _sponsorship_only_groups(db: AsyncSession, station_id, current: QueueEntry, end: datetime) -> list:
+    """The preempt_at of each pending timed group, due before the long item on air
+    ends, whose entries are all sponsorships (clock-slot plays, or contract audio)."""
+    from app.models.spot_schedule import SpotSchedule
+
+    rows = (
+        await db.execute(
+            select(QueueEntry.preempt_at, QueueEntry.source, Asset.id, Asset.sponsor_id)
+            .join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at < end,
+            )
+        )
+    ).all()
+    if not rows:
+        return []
+    contract = set(
+        (await db.execute(
+            select(SpotSchedule.asset_id).where(SpotSchedule.asset_id.in_({r[2] for r in rows}))
+        )).scalars().all()
+    )
+    groups: dict = {}
+    for at, source, asset_id, sponsor_id in rows:
+        if current.preempt_at is not None and _aware(current.preempt_at) == _aware(at):
+            continue
+        sponsorship = source == "ad_slot" or asset_id in contract or sponsor_id is not None
+        groups[at] = groups.get(at, True) and sponsorship
+    return [at for at, only in groups.items() if only]
+
+
 async def _soft_items_pause_long(
     db: AsyncSession,
     station_id,
@@ -977,6 +1062,27 @@ async def _soft_items_pause_long(
     end = long_items.ends_at(current)
     if end is None:
         return 0
+    # On a station that says so (long_items.sponsorships_wait), a group of sponsorships
+    # alone never cuts into a shiur or story: it waits for its end and plays between
+    # stories (coordinator 2026-11-19 for All Day Stories: hard :15/:30/:45
+    # sponsorships cut into stories 25 times a day in the simulator).
+    # Sponsorships that ride with a time check or weather still play in that pause.
+    station = await db.get(Station, station_id)
+    sponsor_only = (
+        await _sponsorship_only_groups(db, station_id, current, end)
+        if long_items.sponsorships_wait(station) else []
+    )
+    if sponsor_only:
+        await db.execute(
+            update(QueueEntry)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.in_(sponsor_only),
+            )
+            .values(timing_mode="soft", hard_by=None)
+            .execution_options(synchronize_session=False)
+        )
     rows = (
         await db.execute(
             select(QueueEntry.preempt_at)
@@ -996,6 +1102,8 @@ async def _soft_items_pause_long(
         at_aware = _aware(at)
         if current.preempt_at is not None and _aware(current.preempt_at) == at_aware:
             continue  # the shiur is itself part of this group
+        if at in sponsor_only:
+            continue  # sponsorships alone wait for the end
         due = max(at_aware, now_utc)
         if (end - due).total_seconds() <= long_items.SOFT_PAUSE_MIN_LEFT_SECONDS:
             continue
@@ -1385,6 +1493,19 @@ async def _get_queue_impl(station_id, limit, db):
     # - Regular songs play sequentially by position
     # - Hard preempts (hourly time/weather) interrupt at their exact preempt_at
     # - Soft preempts (ad_slots) play after current song finishes when their time arrives
+    # Each item holds the air up to where the next one crossfades in (on_air_seconds),
+    # as the players and the fill count it; full lengths put everything about 3 s
+    # later per song, and an hour on the station IDs showed up beside breaks the
+    # fill had kept them clear of (2026-11-19)
+    from app.services.playlist_generator_service import on_air_seconds as _on_air
+
+    def _air(asset) -> float:
+        if asset is None:
+            return float(DEFAULT_DURATION)
+        meta = getattr(asset, "metadata_extra", None)
+        meta = meta if isinstance(meta, dict) else None
+        return _on_air(getattr(asset, "duration", None) or DEFAULT_DURATION, meta)
+
     try:
         now_utc_sort = datetime.now(timezone.utc)
         _np_sa = now_playing_entry.started_at if now_playing_entry and now_playing_entry.started_at else None
@@ -1392,7 +1513,7 @@ async def _get_queue_impl(station_id, limit, db):
             _np_sa = _np_sa.replace(tzinfo=timezone.utc)
 
         if _np_sa:
-            _ad = (now_playing_entry.asset.duration if now_playing_entry.asset else None) or DEFAULT_DURATION
+            _ad = _air(now_playing_entry.asset)
             _el = (now_utc_sort - _np_sa).total_seconds()
             _cursor = now_utc_sort + timedelta(seconds=max(0, (_ad or DEFAULT_DURATION) - _el))
         else:
@@ -1443,7 +1564,7 @@ async def _get_queue_impl(station_id, limit, db):
                 due = max(_tz(soft_preempts[si].preempt_at), start)
                 if due >= end or (end - due).total_seconds() <= _long.SOFT_PAUSE_MIN_LEFT_SECONDS:
                     break
-                _d = (soft_preempts[si].asset.duration if soft_preempts[si].asset else None) or DEFAULT_DURATION
+                _d = _air(soft_preempts[si].asset)
                 _est_map[soft_preempts[si].id] = due
                 # paused: it carries on afterwards; cut: the air is free after the item
                 end = end + timedelta(seconds=_d) if _long_policy == "pause" else due + timedelta(seconds=_d)
@@ -1463,7 +1584,7 @@ async def _get_queue_impl(station_id, limit, db):
                 if hp_pa <= _cursor:
                     _cursor = hp_pa
                     _est_map[hard_preempts[hi].id] = _cursor
-                    _dur = (hard_preempts[hi].asset.duration if hard_preempts[hi].asset else None) or DEFAULT_DURATION
+                    _dur = _air(hard_preempts[hi].asset)
                     _cursor = _soft_into_long(
                         hard_preempts[hi].asset, _cursor, _cursor + timedelta(seconds=_dur or DEFAULT_DURATION)
                     )
@@ -1475,7 +1596,7 @@ async def _get_queue_impl(station_id, limit, db):
                 sp_pa = _tz(soft_preempts[si].preempt_at)
                 if sp_pa <= _cursor:
                     _est_map[soft_preempts[si].id] = _cursor
-                    _dur = (soft_preempts[si].asset.duration if soft_preempts[si].asset else None) or DEFAULT_DURATION
+                    _dur = _air(soft_preempts[si].asset)
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     si += 1
                     continue
@@ -1483,7 +1604,7 @@ async def _get_queue_impl(station_id, limit, db):
             # 3. Play next regular song
             if ri < len(regulars):
                 song = regulars[ri]
-                song_dur = song.asset.duration if song.asset and song.asset.duration else DEFAULT_DURATION
+                song_dur = _air(song.asset)
                 song_dur = max(1.0, song_dur - resume_offset(song))  # a paused shiur's remainder
                 song_end = _cursor + timedelta(seconds=song_dur)
 
@@ -1506,13 +1627,13 @@ async def _get_queue_impl(station_id, limit, db):
                 if next_hp and (not next_sp or next_hp <= next_sp):
                     _cursor = max(_cursor, next_hp)
                     _est_map[hard_preempts[hi].id] = _cursor
-                    _dur = (hard_preempts[hi].asset.duration if hard_preempts[hi].asset else None) or DEFAULT_DURATION
+                    _dur = _air(hard_preempts[hi].asset)
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     hi += 1
                 elif next_sp:
                     _cursor = max(_cursor, next_sp)
                     _est_map[soft_preempts[si].id] = _cursor
-                    _dur = (soft_preempts[si].asset.duration if soft_preempts[si].asset else None) or DEFAULT_DURATION
+                    _dur = _air(soft_preempts[si].asset)
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     si += 1
                 else:
@@ -1813,6 +1934,13 @@ async def play_next(
     _user: User = Depends(require_dj_or_manager),
 ):
     await _require_assets(db, [body.asset_id])
+    # Ahead of every waiting entry, also when the one on air sits further down the
+    # numbering (an engine start report can leave it there): an ID once aired ahead
+    # of an operator's Play next on Jerusalem (2026-11-19)
+    first_waiting = (await db.execute(
+        select(func.min(QueueEntry.position))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+    )).scalar()
     await db.execute(
         update(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
@@ -1825,6 +1953,8 @@ async def play_next(
     )
     current = result.scalar_one_or_none()
     next_pos = (current.position + 1) if current else 1
+    if first_waiting is not None:
+        next_pos = min(next_pos, first_waiting)
     entry = QueueEntry(
         id=uuid.uuid4(), station_id=station_id, asset_id=body.asset_id,
         position=next_pos, status="pending", source="manual",
@@ -2894,13 +3024,12 @@ async def preview_weather(
     )
     from app.services.weather_service import get_current_weather
 
-    time_asset, weather_asset = await get_or_create_weather_spot_assets(
-        db, slot_key, await weather_region_for_station(db, station_id)
-    )
+    region = await weather_region_for_station(db, station_id)
+    time_asset, weather_asset = await get_or_create_weather_spot_assets(db, slot_key, region)
     await db.commit()
 
     # Build text for display
-    time_text = _build_time_text(eastern_now)
+    time_text = _build_time_text(eastern_now, region=region)
     try:
         weather_data = await get_current_weather()
         weather_text = _build_weather_text(weather_data)

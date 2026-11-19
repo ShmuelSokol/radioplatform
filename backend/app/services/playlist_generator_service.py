@@ -25,6 +25,8 @@ from sqlalchemy.orm import selectinload
 
 from app.models.asset import (
     Asset,
+    MIN_STATION_ID_SECONDS,
+    STATION_ID_CATEGORY_PREFIX,
     fit_for_random_pick,
     in_category,
     not_contract_audio,
@@ -335,6 +337,8 @@ class _Library:
             ).where(Asset.asset_type == asset_type)
             if category:
                 stmt = stmt.where(in_category(category), not_placeholder(), not_contract_audio())
+                if category.lower().startswith(STATION_ID_CATEGORY_PREFIX):
+                    stmt = stmt.where(Asset.duration >= MIN_STATION_ID_SECONDS)
             else:
                 stmt = stmt.where(fit_for_random_pick())
             # nor an item this station was told not to play ("Not on this station")

@@ -302,18 +302,16 @@ Delete a channel. **Requires admin.** Returns 204.
 
 ---
 
-## Icecast (OTA Broadcast)
+## Icecast (the old FM feed, retired)
 
-### POST `/icecast/start`
-Start OTA broadcast for a station. **Requires admin.**
-
-**Body:** `{ "station_id": "uuid" }`
-
-### POST `/icecast/stop`
-Stop OTA broadcast. **Requires admin.**
+The backend's own Icecast source was retired on 2026-11-19. The FM feed is the
+station's stream from the playout engine.
 
 ### GET `/icecast/status`
-Get broadcast status. **Requires auth.**
+**Requires admin.** `{ "enabled": false, "retired": true, "engine_streams": { "<station id>": "<stream url>" } }`
+
+### POST `/icecast/{station_id}/start`, POST `/icecast/{station_id}/stop`
+Answer 410 with the reason.
 
 ---
 

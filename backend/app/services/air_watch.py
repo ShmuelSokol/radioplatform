@@ -81,6 +81,7 @@ class _StationState:
     drift_since: float | None = None
     drift_entry: str | None = None
     drift_cleared: bool = False  # open drift alerts cleared since this process started
+    dead_cleared: bool = False  # open "Nothing on air" alerts cleared since this process started
     box_since: dict[str, float] = field(default_factory=dict)  # box problem -> first seen
     hours_checked: set = field(default_factory=set)
 
@@ -277,6 +278,17 @@ class AirWatch:
                     add("dead_air", "Nothing on air",
                         f"Nothing has been on air for {mono - st.dead_since:.0f} s.", f"{int(st.dead_since)}")
         else:
+            if st.dead_since is not None or not st.dead_cleared:
+                # Something is on air again (or first pass since a restart): an open
+                # "Nothing on air" alert is over, so it clears itself (V3-54)
+                st.dead_cleared = True
+                from app.services.alert_service import clear_alerts
+
+                try:
+                    await clear_alerts(db, station.id, f"{station.name}: Nothing on air",
+                                       "something is on air again")
+                except Exception as e:
+                    logger.warning("Could not clear the dead air alert: %s", e)
             st.dead_since = None
             if current.started_at is not None and current.asset is not None and current.asset.duration:
                 over = (now - _aware(current.started_at)).total_seconds() - current.asset.duration

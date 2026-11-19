@@ -155,7 +155,7 @@ radioplatform/
 | holidays | holidays.py | /holidays |
 | sponsors | sponsors.py | /sponsors (CRUD; `/clients`, `/{id}/account`, `/{id}/plays`, `/{id}/missed-plays`: the client database, see `wiki/sponsor-accounts.md`; delete refused with contracts or plays) |
 | channels | channels.py | /channels |
-| icecast | icecast.py | /icecast |
+| icecast | icecast.py | /icecast: retired 2026-11-19 (the backend's own FM source); `GET /status` names the engine's streams, start and stop answer 410. The FM feed is the playout engine's stream |
 | analytics | analytics.py | /analytics |
 | playlists | playlists.py | /playlists (the list is readable by every staff role, so a schedule's blocks can name their playlist; everything else manager only) |
 | sponsor_portal | sponsor_portal.py | /sponsor-portal |
@@ -208,7 +208,6 @@ radioplatform/
 | weather_service.py | OpenWeatherMap API (current + 3-day forecast) |
 | weather_spot_service.py | Weather/time announcement generation + caching; stores uploaded daily weather spots per region (station `automation_config.weather_region`, default lakewood; ElevenLabs is the fallback for the default region only) |
 | sun_service.py | Sunrise/sunset calculations (astral) |
-| icecast_service.py | Icecast OTA broadcast source client |
 | email_service.py | Resend transactional email (campaign updates, invoices, payments) |
 | ai_email_service.py | Claude API-powered email drafting for manager outreach |
 | copy_review_service.py | Checks a sponsor's proposed wording against the sponsorship rules in force (Claude API, keyword fallback) |
@@ -234,6 +233,7 @@ radioplatform/
 | activity_log.py | Activity log: middleware that records every signed-in change, before/after capture from SQLAlchemy flushes, batched background writer (see `wiki/activity-log.md`) |
 | bug_report_service.py | Copies bug reports to the private GitHub repo and sends ntfy pushes: "received" at once, then "fix ready" or "needs you" (see `wiki/bug-reports.md`) |
 | air_watch.py | On-air self-check every 5 s: hard timed items late or not started, no time check at hh:00, dead air, item shown past its end, engine vs site drift, skipped time/weather/sponsorship, a local FM box's clock, disk and missing audio; alerts + ntfy (see `wiki/air-watch.md`) |
+| station_id_guard.py | Last check on an automatic station ID as it would go on air: passed over after a break or spoken item, or near a break (both pick paths); after each top-up `drop_misplaced` removes waiting IDs the queue timeline puts beside a break (see `wiki/playlist-generation.md`) |
 | station_modes.py | HS (hard start) and Spots mode switches: softens hard timed items while HS is off and restores them; Spots off plans no sponsorships (see `wiki/station-modes.md`) |
 | queue_positions.py | Renumbers a station's playing and pending queue entries from 1 in one statement (browser player's song change, blackout fill); `put_playing_first` moves only the item on air before the first waiting one (engine start report) |
 | playout_tunnel.py | Commands to an engine with no inbound line (a local FM box): its relay long-polls for them; used by playout_engine only while a relay is polling. Also keeps the box's health report and names its problems for air watch (see `wiki/local-fm-box.md`) |
@@ -241,6 +241,7 @@ radioplatform/
 | rds_service.py | RDS line now: clock-based weighted rotation, sponsor line while their spot airs, Latin-only text (Hebrew dropped), 8/64 limits, play log of encoder fetches (see `wiki/rds-feed.md`) |
 | sponsor_accounts.py | Sponsors as clients: status from contract dates, spots by stage of the flow, plays per contract, the as-run log (see `wiki/sponsor-accounts.md`) |
 | sponsor_delivery.py | What a sponsor was promised against what aired: missed plays of the last 14 days and coming plays with no room or moved, for `GET /sponsor-portal/missed-plays` (see `wiki/spot-schedules.md`) |
+| shabbos_ending.py | Last song before Shabbos: the station's chosen song back-timed to end exactly at candle lighting (the blackout's start), the item after it (the shofar) first in the silence group, timed items cleared out of its way; `automation_config.shabbos_ending` (see `wiki/shabbos-ending.md`) |
 | station_blocks.py | "Not on this station": the per-station list of items a station does not play, the subquery every pick uses (`blocked_asset_ids`) and block/undo with removal of that station's waiting copies |
 | emergency_alerts.py | The emergency override: sends an alert to each station (engine `/alert`, or WS `emergency_alert` to browser players), takes the engine's start/end reports into the log, drops hard items due during it, alert + ntfy on each (see `wiki/emergency-alerts.md`) |
 | eas_tones.py | Finds EAS attention signal and SAME bursts in a recording, so a staff upload with them is refused |
@@ -430,10 +431,6 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 | `SUPABASE_URL` | Supabase project URL | For storage |
 | `SUPABASE_SERVICE_KEY` | Supabase service role key | For storage |
 | `SUPABASE_STORAGE_BUCKET` | Storage bucket name (default: "audio") | For storage |
-| `ICECAST_HOST` | Icecast server hostname (empty to disable) | For OTA |
-| `ICECAST_PORT` | Icecast server port (default: 8000) | For OTA |
-| `ICECAST_SOURCE_PASSWORD` | Icecast source password (no default; empty or "hackme" = nothing streams) | For OTA |
-| `ICECAST_MOUNT` | Icecast mount point (default: /live) | For OTA |
 | `STRIPE_SECRET_KEY` | Stripe secret key (empty to disable) | For billing |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret | For billing |
 | `STRIPE_PRICE_ID` | Stripe price ID | For billing |
@@ -452,6 +449,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 | `LIQUIDSOAP_ENABLED` | Enable Liquidsoap (remote VPS) | For streaming |
 | `LIQUIDSOAP_HOST` | VPS hostname for Liquidsoap telnet | For streaming |
 | `LIQUIDSOAP_TELNET_PORT` | Liquidsoap telnet port (default: 1234) | For streaming |
+| `ICECAST_HOST`, `ICECAST_PORT`, `ICECAST_SOURCE_PASSWORD`, `ICECAST_MOUNT` | Unused since the backend's own FM source was retired (kept so old settings still load) | No |
 | `ICECAST_STREAM_URL` | Stream base URL (e.g., https://stream.kbrlive.com/live); an engine station streams at `<base>-<station id>` | For streaming |
 | `PLAYOUT_ENGINE_ENABLED` | Let the playout engine drive the listed stations (default false) | For the engine |
 | `PLAYOUT_ENGINE_STATION_ID` | Comma-separated stations the engine plays (one engine each; setup.sh prints the list) | For the engine |
@@ -532,6 +530,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-compact.mjs
 # The Sponsors client list and client page at desktop and phone sizes (real backend with clients that have a running contract and plays)
 cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMIN_PASSWORD=... node e2e/sponsor-clients.mjs
 
+# Stations page: "Last song before Shabbos" (song and item at candle lighting from a library search, saves and keeps other settings), desktop and iPhone
+cd frontend && BASE_URL=http://localhost:4313 node e2e/shabbos-ending-setting.mjs
+
 # Program Blocks page: "Only part of the year" season pickers (fake backend, desktop and iPhone)
 cd frontend && BASE_URL=http://localhost:4173 node e2e/program-block-season.mjs
 
@@ -569,7 +570,7 @@ cd frontend && (npx vite preview --port 4183 --strictPort &) && xvfb-run -a pyth
 cd frontend && xvfb-run -a python3 e2e/webkit/bug-screenshot-webkit.py
 
 # The bug report's picture vs a real screenshot, and 🐞 over every kind of dialog (fake backend, Chromium)
-cd frontend && for s in bug-screenshot-faithful bug-over-dialogs; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
+cd frontend && for s in bug-screenshot-faithful bug-over-dialogs bug-everywhere; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
 
 # Leaving pages in real WebKit logs no version.json console error (reads WebKit's own console via MiniBrowser)
 cd frontend && xvfb-run -a python3 e2e/webkit/version-check-webkit.py

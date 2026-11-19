@@ -34,6 +34,16 @@ MIN_REMAINING_TO_RESUME = 30.0
 SOFT_PAUSE_MIN_LEFT_SECONDS = 5 * 60
 
 
+# automation_config key: sponsorships alone never pause or cut a shiur or story on
+# this station; they wait for its end (All Day Stories, coordinator 2026-11-19)
+SPONSORSHIPS_WAIT = "sponsorships_wait_for_talks"
+
+
+def sponsorships_wait(station) -> bool:
+    config = getattr(station, "automation_config", None) or {}
+    return config.get(SPONSORSHIPS_WAIT) is True
+
+
 def policy(station) -> str:
     config = getattr(station, "automation_config", None) or {}
     value = str(config.get(SETTING) or DEFAULT_POLICY).lower()

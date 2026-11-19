@@ -197,6 +197,60 @@ def run(path, label):
         d.quit()
 
 
+# 🐞 with a dialog over it (Shmuel's iPhone, 2026-11-19: the Edit contract card covered the top
+# bar's 🐞). WebKit's own hit testing decides whether a 🐞 can be tapped, so this runs here too.
+CARD = """document.body.insertAdjacentHTML('beforeend', `<div style="position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.4);overflow:auto;padding:8px">
+  <form role="dialog" aria-label="T card" style="background:#fff;border-radius:12px;padding:16px;min-height:96vh">
+  <h2>T card</h2><button type="button">Close</button><input placeholder="Name"><button type="submit">Save</button></form></div>`)"""
+BUG_STATE = """
+const out = [];
+for (const el of document.querySelectorAll('[data-bug-trigger]')) {
+  const r = el.getBoundingClientRect();
+  if (r.width < 8 || r.height < 8 || r.bottom <= 0 || r.top >= innerHeight) continue;
+  const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  const under = [];
+  for (const [fx, fy] of [[0.5, 0.5], [0.15, 0.15], [0.85, 0.15], [0.15, 0.85], [0.85, 0.85]]) {
+    const hit = document.elementsFromPoint(r.left + fx * r.width, r.top + fy * r.height).find((e) => !e.closest('[data-bug-reporter]') && !e.closest('[data-bug-trigger]'));
+    const t = hit && hit.closest('button, a[href], input, select, textarea, [role=button]');
+    if (t) under.push((t.textContent || t.tagName).trim().slice(0, 30));
+  }
+  out.push({ reach: !!top && (top === el || el.contains(top)), lifted: el.hasAttribute('data-bug-lifted'), x: r.left + r.width / 2, y: r.top + r.height / 2, under });
+}
+return out;"""
+
+
+def over_dialogs():
+    for path, how, opener in (
+        ('/admin/requests', 'a card over the top bar', lambda d: d.execute_script(CARD)),
+        ('/admin/archives', 'New Archive', lambda d: next(b for b in d.find_elements(By.TAG_NAME, 'button') if 'New Archive' in b.text).click()),
+    ):
+        label = f'iPhone width {path} {how}'
+        d = browser()
+        try:
+            d.get(BASE + path)
+            d.execute_script("localStorage.setItem('access_token','test');localStorage.setItem('refresh_token','test')")
+            d.get(BASE + path)
+            time.sleep(2.5)
+            opener(d)
+            time.sleep(1.2)  # the reporter looks twice a second
+            bugs = d.execute_script(BUG_STATE)
+            good = [b for b in bugs if b['reach']]
+            check(f'{label}: a 🐞 shows and can be tapped', bool(good), json.dumps(bugs))
+            if not good:
+                continue
+            b = next((x for x in good if x['lifted']), good[0])
+            check(f'{label}: the 🐞 covers no button, link or field', not b['under'], json.dumps(b))
+            d.execute_script('document.elementFromPoint(arguments[0], arguments[1]).click()', b['x'], b['y'])
+            t0 = time.time()
+            while time.time() - t0 < 25 and not d.execute_script("return !!document.querySelector('[role=dialog][aria-label*=\"bug\" i], #bug-what')"):
+                time.sleep(0.2)
+            check(f'{label}: tapping it opens the report', bool(d.execute_script("return !!document.getElementById('bug-what')")))
+            errs = d.execute_script('return window.__errs || []')
+            check(f'{label}: no console errors', not errs, ' | '.join(errs))
+        finally:
+            d.quit()
+
+
 def main():
     if not os.path.exists(MINIBROWSER):
         print(f'WebKitGTK MiniBrowser not found at {MINIBROWSER}: apt-get install webkit2gtk-driver')
@@ -212,6 +266,7 @@ def main():
             return 2
         run('/stations', 'public page')
         run('/admin/requests', 'staff page')
+        over_dialogs()
     finally:
         server.terminate()
     print(f"\n{state['passed']} passed, {state['failed']} failed")

@@ -63,11 +63,19 @@ async def test_heartbeat_ip_location_and_timeout(client, db_session, auth_header
 
 
 @pytest.mark.asyncio
-async def test_today_peak_never_below_current(client, db_session, auth_headers, geo_calls):
+async def test_today_peak_never_below_current(client, db_session, auth_headers, geo_calls, monkeypatch):
     """V2-119: peak = most sessions at once, never below the live count."""
     st = await _station(db_session)
-    now = datetime.now(UTC)
-    start = max(now - timedelta(hours=2), now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(seconds=1))
+    # Pinned to midday: run within seconds of midnight, "today" turned over mid-test (wall-clock sweep 2026-11-19)
+    now = datetime.now(UTC).replace(hour=12, minute=0, second=0, microsecond=0)
+
+    class _Pinned(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now if tz else now.replace(tzinfo=None)
+
+    monkeypatch.setattr(listeners, "datetime", _Pinned)
+    start = now - timedelta(hours=2)
     db_session.add_all([
         ListenerSession(station_id=st.id, session_key="x", ip_address="1.1.1.1", started_at=start,
                         last_heartbeat=start + timedelta(seconds=30), duration_seconds=30),
