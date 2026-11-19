@@ -22,6 +22,7 @@ The first real show (Main, host Shaya, Shmuel calling from an iPhone) found five
 - **CORS**: Safari adds `Cache-Control` and `Pragma` to some requests; the preflight was refused with 400. Both are allowed now (`core/middleware.py`).
 - Found by the older browser tests on the way: with **no delay** `LiveAir.passed` did not count as the host sending, so `_host_gone` took the station back after 15 s in mid sentence. `passed` sets `last_input`.
 - "Stop Broadcasting" is now the small "Leave the air without ending the show"; **End Show** is the way to finish.
+- **End Show seconds after GO LIVE left the stream quiet** (Jerusalem 23:35Z, 39 s until the next show): End ran before the take-over was written, so it had nothing to give back; the take-over and the host's audio landed after it and opened a delay for a show that was over. The scheduler's stale-show check waited for that delay to close, which it never did. It now waits only for a delay that is playing out the end of the show, and stops any other.
 
 Browser test: `e2e/live-go-live.cjs` (G1 to G20, desktop with a delay and phone without). The `/call-in` rate limit (429) fails the older parts of `live-delay.cjs` when they run back to back on one backend: restart it between parts.
 

@@ -59,7 +59,7 @@ const recent = (page, key) => page.evaluate((k) => (window.__rx[k] || []).slice(
   const H = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
   // End anything live on this station first
   for (const s of (await (await fetch(`${API}/live-shows?limit=100`, { headers: H })).json()).shows || [])
-    if (s.status === 'live') await fetch(`${API}/live-shows/${s.id}/end`, { method: 'POST', headers: H });
+    if (s.status === 'live' && s.station_id === STATION) await fetch(`${API}/live-shows/${s.id}/end`, { method: 'POST', headers: H });
   // This script is about who hears whom, at once: run it with no broadcast delay
   // (e2e/live-delay.cjs covers the delay) and put the station's setting back after
   const station = await (await fetch(`${API}/stations/${STATION}`, { headers: H })).json();

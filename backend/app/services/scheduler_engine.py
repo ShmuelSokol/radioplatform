@@ -494,7 +494,15 @@ class SchedulerEngine:
             from app.api.v1.live_shows_ws import live_relay
             air = live_relay.airs.get(str(station.id))
             if air is not None and air.show_id == str(live_show_id) and not air.closed:
-                return  # the end of the show is still playing out of the broadcast delay
+                if air.finishing and air.finish_reason != "host left" and not air.drained():
+                    return  # the end of the show is still playing out of the broadcast delay
+                # A show ended in the moment its host went on air: End found the station
+                # not yet taken (nothing to give back), the take-over landed after it,
+                # and the host's audio opened a delay for a show that was over. That
+                # delay never closed, so this returned for ever and the stream stayed
+                # quiet until the next show (KBR Jerusalem, 23:35Z 2026-11-18, 39 s).
+                await air.stop()
+                live_relay.on_air.pop(str(station.id), None)
             # Stale reference: hand the station back (the queue or engine carries on)
             from app.services.live_show_service import release_station
             if not await release_station(db, station.id, live_show_id, now):
