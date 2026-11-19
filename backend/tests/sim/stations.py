@@ -111,6 +111,14 @@ async def seed(db, export: dict, start: datetime, days: int = 2, stations: set[s
     # filler, because that station's contracts are not loaded
     known = {s["id"] for s in export["sponsors"]}
     sponsor_of = {s["asset_id"]: s["sponsor_id"] for s in export["spot_schedules"] if s["sponsor_id"] in known}
+    # A loose copy of a contract's audio (same title, another id) counts as sponsorship
+    # audio on the site through its title; with the other station's contracts not
+    # loaded the title is unknown here, so the copy gets the tie too
+    title_of = {a["id"]: (a["title"] or "").strip().lower() for a in export["assets"]}
+    by_title = {title_of[aid]: sid for aid, sid in sponsor_of.items() if title_of.get(aid)}
+    for aid, title in title_of.items():
+        if aid not in sponsor_of and title in by_title:
+            sponsor_of[aid] = by_title[title]
     for a in export["assets"]:
         db.add(Asset(id=uuid.UUID(a["id"]), title=a["title"] or "untitled", asset_type=a["asset_type"],
                      category=a["category"], duration=a["duration"],

@@ -73,6 +73,8 @@ async def test_station_is_back_seconds_after_yom_tov_ends(tmp_path):
     assert not [r.label() for r in result.rows
                 if r.kind != "silence" and r.lane != "emergency" and r.start < end - 1]
     assert not result.failed(SILENCE), [f.text for f in result.failed(SILENCE)]
+    # a run of Jerusalem alone must not draw Main's sponsorships (or loose copies) as filler
+    assert not result.failed("nothing from another station")
 
 
 def test_window_times_use_local_dates():
