@@ -4,6 +4,7 @@ No-op when twilio_voice_enabled is False.
 """
 import asyncio
 import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select
@@ -138,6 +139,8 @@ async def end_all_calls_for_show(db: AsyncSession, show_id: UUID | str) -> int:
     ended = 0
     for call in calls:
         await end_caller(call.twilio_call_sid)
+        if call.status == CallStatus.ON_AIR and call.air_start and not call.air_end:
+            call.air_end = datetime.now(timezone.utc)  # the call history keeps their air time
         call.status = CallStatus.COMPLETED
         ended += 1
 
