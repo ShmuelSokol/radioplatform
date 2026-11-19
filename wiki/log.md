@@ -473,3 +473,4 @@ INGEST 2026-11-19 control-room.md queue/library columns resizable (columns.tsx, 
 INGEST 2026-11-19 omer-count.md Omer count at each hh:00 after the time check (next day from shekia per station, days only as the siddur: "Today is the eighth day ..."), 49 clips category omer_count, automation_config.omer_count {enabled, switch_minutes}; hourly pass no longer counts a queued Omer clip as the hour's time check
 UPDATE 2026-11-19 station-simulator.md seeds the 49 Omer clips; new check "Omer count after each hour's time check, the right day"; scenarios tests/test_omer_sim.py
 INGEST 2026-11-19 air-watch.md outside watch: GitHub Actions every 5 min checks /health, engine and server streams from outside; state in an open issue, ntfy via repo secret NTFY_TOPIC
+UPDATE 2026-11-19 control-room.md queue Playing from: timed items named Time check / Weather / Omer count (not Station rules), Why hover button, clickable-cell cue
