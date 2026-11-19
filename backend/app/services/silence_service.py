@@ -198,12 +198,35 @@ def merge_regions(regions: list[dict], length: float | None = None) -> list[tupl
     return merged
 
 
-def remove_regions(file_data: bytes, regions: list[dict], progress=None) -> tuple[bytes, float]:
+EDGE = 0.05  # a gap within this of the start or end is the recording's lead-in or tail
+
+
+def cut_spans(regions: list[dict], length: float | None, keep_gap: float = 0.0) -> list[tuple[float, float]]:
+    """What to cut for these silent regions. Silence at the very start and end goes
+    completely. A gap in the middle keeps `keep_gap` seconds (half each side), so the
+    pause is shortened, not removed (Shmuel 2026-11-19: "replace the longer gaps with
+    shorter gaps ... so it's not unnaturally short spaces"); a gap already that short
+    stays as it is."""
+    keep = max(0.0, keep_gap or 0.0)
+    out = []
+    for a, b in merge_regions(regions, length):
+        at_start = a <= EDGE
+        at_end = bool(length) and b >= length - EDGE
+        if at_start or at_end or keep <= 0:
+            out.append((a, b))
+        elif b - a > keep + 0.01:
+            out.append((a + keep / 2, b - keep / 2))
+    return out
+
+
+def remove_regions(file_data: bytes, regions: list[dict], progress=None,
+                   keep_gap: float = 0.0) -> tuple[bytes, float]:
     """Cut every region out of the audio and join what is left, into an MP3.
 
     "Remove all found silence" in the Library (Shmuel 2026-11-18: "I like what it
     found. I want to delete it."). Gaps in the middle are removed too, not only at the
-    start and end. Read from a file, not a pipe (see audio_file). `progress(fraction,
+    start and end; with `keep_gap` each middle gap is shortened to that many seconds
+    instead (see cut_spans). Read from a file, not a pipe (see audio_file). `progress(fraction,
     stage)` hears how far it is (job_progress.py).
     Returns (new_bytes, new_duration). Raises ValueError when nothing would be left."""
     from app.services import job_progress
@@ -212,9 +235,9 @@ def remove_regions(file_data: bytes, regions: list[dict], progress=None) -> tupl
         if progress:
             progress(0.0, "Measuring the recording")
         length = get_audio_duration(path)
-        spans = merge_regions(regions, length or None)
+        spans = cut_spans(regions, length or None, keep_gap)
         if not spans:
-            raise ValueError("No silence to remove")
+            raise ValueError(f"Every gap is already {keep_gap:g} s or shorter" if keep_gap else "No silence to remove")
         removed = sum(b - a for a, b in spans)
         if length and length - removed < 0.5:
             raise ValueError("That would remove the whole recording")

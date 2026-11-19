@@ -12,7 +12,7 @@ import pytest
 
 from app.models.asset import Asset
 from app.services import storage_service
-from app.services.silence_service import detect_silence, get_audio_duration, merge_regions, remove_regions
+from app.services.silence_service import cut_spans, detect_silence, get_audio_duration, merge_regions, remove_regions
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
 
@@ -92,3 +92,43 @@ async def test_remove_all_then_restore_original(client, auth_headers, db_session
 
     r = await client.post(f"/api/v1/assets/{a.id}/remove-silence", json={"regions": []}, headers=auth_headers)
     assert r.status_code == 400
+
+
+# Shmuel 2026-11-19: "add a way to replace the longer gaps with shorter gaps ... so it's
+# not unnaturally short spaces"
+
+def test_cut_spans_shortens_middle_gaps_and_clears_the_ends():
+    regions = [{"start": 0, "end": 1}, {"start": 4, "end": 6}, {"start": 9, "end": 9.4}, {"start": 12, "end": 13.5}]
+    assert cut_spans(regions, 13.5, 0) == [(0, 1), (4, 6), (9, 9.4), (12, 13.5)]
+    # each middle gap keeps 0.5 s (half each side); the 0.4 s one is already short
+    assert cut_spans(regions, 13.5, 0.5) == [(0, 1), (4.25, 5.75), (12, 13.5)]
+
+
+def test_remove_all_with_a_kept_gap():
+    data = _tone_with_gaps()
+    regions = detect_silence(data, threshold_db=-30, min_duration=0.5)
+    out, length = remove_regions(data, regions, keep_gap=0.5)
+    assert abs(length - 9.0) < 0.3  # 8 s of tone + two 0.5 s gaps; start and end silence gone
+    gaps = detect_silence(out, threshold_db=-30, min_duration=0.3)
+    assert len(gaps) == 2 and all(0.35 < g["duration"] < 0.7 for g in gaps), gaps
+    with pytest.raises(ValueError, match="already"):
+        remove_regions(data, [r for r in regions if 2 < r["start"] < 11], keep_gap=3)
+
+
+@pytest.mark.asyncio
+async def test_remove_silence_api_keeps_a_gap(client, auth_headers, db_session, local_storage):
+    data = _tone_with_gaps()
+    key = f"assets/{uuid.uuid4()}.mp3"
+    await storage_service.upload_file(data, key)
+    a = Asset(id=uuid.uuid4(), title="Shiur with pauses", file_path=key, asset_type="music", duration=13.5)
+    db_session.add(a)
+    await db_session.commit()
+    regions = detect_silence(data, threshold_db=-30, min_duration=0.5)
+    r = await client.post(f"/api/v1/assets/{a.id}/remove-silence", json={"regions": regions, "keep_gap": 0.5},
+                          headers=auth_headers)
+    assert r.status_code == 200, r.text
+    assert abs(r.json()["duration"] - 9.0) < 0.3
+    assert r.json()["metadata_extra"]["trim_history"][-1]["keep_gap"] == 0.5
+    r = await client.post(f"/api/v1/assets/{a.id}/remove-silence", json={"regions": regions, "keep_gap": 20},
+                          headers=auth_headers)
+    assert r.status_code == 422

@@ -95,6 +95,10 @@ class BulkAutoTrimRequest(BaseModel):
     duration_max: float | None = None
     threshold_db: float = -35
     min_silence: float = 0.3
+    # Gaps in the middle longer than this many seconds are shortened to keep_gap
+    # (0 = leave the middle alone, only clip the start and end)
+    middle_gap_over: float = Field(2.0, ge=0, le=60)
+    keep_gap: float = Field(0.75, ge=0, le=10)
 
 
 class BulkAutoTrimStatusResponse(BaseModel):
@@ -105,6 +109,7 @@ class BulkAutoTrimStatusResponse(BaseModel):
     trimmed: int
     skipped: int
     errors: int
+    gaps_shortened: int = 0  # gaps in the middle made shorter, all items together
     detail: str | None = None  # why it failed (e.g. the server restarted mid-job)
 
 

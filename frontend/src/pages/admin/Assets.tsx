@@ -212,6 +212,12 @@ export default function Assets() {
   const [trimJobId, setTrimJobId] = useState<string | null>(null);
   const [trimStatus, setTrimStatus] = useState<BulkAutoTrimStatus | null>(null);
   const [showTrimModal, setShowTrimModal] = useState(false);
+  // Auto-Clip settings: the start and end always go; long gaps in the middle are
+  // shortened to keepGap seconds, not cut to nothing (Shmuel 2026-11-19)
+  const [showTrimSetup, setShowTrimSetup] = useState(false);
+  const [shortenMiddle, setShortenMiddle] = useState(true);
+  const [gapOver, setGapOver] = useState(2);
+  const [keepGap, setKeepGap] = useState(0.75);
 
   // Per-field search state
   const [titleSearch, setTitleSearch] = useState('');
@@ -232,6 +238,7 @@ export default function Assets() {
   const [showBulkDownload, setShowBulkDownload] = useState(false);
   useEscape(showBulkCategory, () => setShowBulkCategory(false));
   useEscape(showBulkDownload, () => setShowBulkDownload(false));
+  useEscape(showTrimSetup, () => setShowTrimSetup(false));
   // The clip-silence box closes only once its job is over (as a click beside it does)
   const closeTrimModal = useCallback(() => {
     setShowTrimModal(false);
@@ -368,8 +375,10 @@ export default function Assets() {
     const params = selectAllFiltered
       ? { ...filterParams, category: filterParams.category_filter, category_filter: undefined }
       : { asset_ids: Array.from(selected) };
-    bulkAutoTrimMutation.mutate(params, {
+    const gaps = { middle_gap_over: shortenMiddle ? gapOver : 0, keep_gap: keepGap };
+    bulkAutoTrimMutation.mutate({ ...params, ...gaps }, {
       onSuccess: (data) => {
+        setShowTrimSetup(false);
         setTrimJobId(data.job_id);
         setTrimStatus(null);
         setShowTrimModal(true);
@@ -502,7 +511,7 @@ export default function Assets() {
 
             {/* Auto-Clip Silence */}
             <button
-              onClick={handleBulkAutoTrim}
+              onClick={() => setShowTrimSetup(true)}
               disabled={bulkAutoTrimMutation.isPending}
               className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded text-sm transition disabled:opacity-50"
             >
@@ -519,6 +528,49 @@ export default function Assets() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Auto-Clip settings, before it starts */}
+      {showTrimSetup && (
+        <>
+          <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setShowTrimSetup(false)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+            <div role="dialog" aria-modal="true" aria-label="Auto-Clip Silence settings" className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md pointer-events-auto">
+              <h3 className="text-lg font-semibold mb-3">Auto-Clip Silence</h3>
+              <p className="text-sm text-gray-600 mb-3">
+                Silence at the start and end of each item is cut off.
+                The original file is always kept: Restore Original on the item brings it back.
+              </p>
+              <label className="flex items-start gap-2 text-sm text-gray-700 mb-2">
+                <input type="checkbox" checked={shortenMiddle} onChange={(e) => setShortenMiddle(e.target.checked)}
+                  data-testid="shorten-middle" className="mt-1" />
+                <span>Also shorten long gaps in the middle</span>
+              </label>
+              <div className={`flex flex-wrap items-center gap-2 text-sm text-gray-700 mb-4 ml-6 ${shortenMiddle ? '' : 'opacity-40'}`}>
+                Gaps longer than
+                <input type="number" min={0.5} max={60} step={0.5} value={gapOver} disabled={!shortenMiddle}
+                  onChange={(e) => setGapOver(Math.min(60, Math.max(0.5, Number(e.target.value) || 0.5)))}
+                  data-testid="gap-over" aria-label="Shorten gaps longer than (seconds)"
+                  className="w-16 border rounded px-2 py-1 text-sm" />
+                s become
+                <input type="number" min={0} max={10} step={0.25} value={keepGap} disabled={!shortenMiddle}
+                  onChange={(e) => setKeepGap(Math.min(10, Math.max(0, Number(e.target.value) || 0)))}
+                  data-testid="bulk-keep-gap" aria-label="Seconds of silence to leave in each gap"
+                  className="w-16 border rounded px-2 py-1 text-sm" />
+                s
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => setShowTrimSetup(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded">
+                  Cancel
+                </button>
+                <button onClick={handleBulkAutoTrim} disabled={bulkAutoTrimMutation.isPending}
+                  className="px-4 py-2 text-sm bg-amber-600 hover:bg-amber-700 text-white rounded disabled:opacity-50">
+                  {bulkAutoTrimMutation.isPending ? <><Spinner className="mr-1" />Starting...</> : 'Start'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       {/* Auto-Trim Progress Modal */}
@@ -554,6 +606,7 @@ export default function Assets() {
                     <div className="text-xs text-gray-500 space-y-0.5">
                       <div>Trimmed: {trimStatus.trimmed}</div>
                       <div>Skipped (no silence): {trimStatus.skipped}</div>
+                      {!!trimStatus.gaps_shortened && <div>Gaps in the middle shortened: {trimStatus.gaps_shortened}</div>}
                       {trimStatus.errors > 0 && <div className="text-red-500">Errors: {trimStatus.errors}</div>}
                     </div>
                   )}
@@ -567,6 +620,7 @@ export default function Assets() {
                   <div className="text-sm text-gray-700 space-y-1">
                     <div>Trimmed: <strong>{trimStatus.trimmed}</strong></div>
                     <div>Skipped (no silence): <strong>{trimStatus.skipped}</strong></div>
+                    {!!trimStatus.gaps_shortened && <div>Gaps in the middle shortened: <strong>{trimStatus.gaps_shortened}</strong></div>}
                     {trimStatus.errors > 0 && <div className="text-red-600">Errors: <strong>{trimStatus.errors}</strong></div>}
                     <div className="text-gray-500">Total processed: {trimStatus.processed}/{trimStatus.total}</div>
                   </div>
