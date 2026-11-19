@@ -288,57 +288,13 @@ def _callers(name: str) -> list[str]:
     return out
 
 
-def test_fm_feed_carries_only_live_host_audio_and_no_metadata():
-    """V2-116 (what is there today): the only audio pushed to the Icecast source is the
-    host's microphone (live show audio socket); the queue's music never is, and no code
-    sends now-playing metadata."""
-    pushes = _callers("push_audio")
-    assert pushes and all(p.startswith("api/v1/live_shows_ws.py") for p in pushes), pushes
-    assert _callers("update_icecast_metadata") == []
-
-
-@pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="found 2026-11-19: with no host audio the FM feed source sends nothing (the 'keepalive' only loops), so Icecast drops the source and the client reconnects every 5 s; what the FM feed should carry is undecided")
-async def test_fm_feed_sends_something_while_no_host_is_talking(monkeypatch):
-    """V2-116: between live shows the source must keep Icecast fed (music or silence)."""
-    from app.services import icecast_service
-    from app.services.icecast_service import IcecastSourceClient
-
-    real_wait_for = asyncio.wait_for
-    sent: list[bytes] = []
-    client = IcecastSourceClient(host="ice.test", port=8000, mount="/fm", password="pw")
-
-    class FakeHttp:
-        def __init__(self, *a, **k):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-        async def put(self, url, headers=None, content=None, auth=None):
-            async def take():
-                async for chunk in content:
-                    sent.append(chunk)
-            try:
-                await real_wait_for(take(), 0.3)
-            except asyncio.TimeoutError:
-                pass
-            client._running = False
-            return types.SimpleNamespace(status_code=200, text="")
-
-    async def quick_wait_for(aw, timeout):
-        return await real_wait_for(aw, min(timeout, 0.02))
-
-    shim = types.SimpleNamespace(**{k: getattr(asyncio, k) for k in dir(asyncio) if not k.startswith("__")})
-    shim.wait_for = quick_wait_for
-    monkeypatch.setattr(icecast_service, "asyncio", shim)
-    monkeypatch.setattr(icecast_service.httpx, "AsyncClient", FakeHttp)
-    client._running = True
-    await real_wait_for(client._stream_loop("FM"), 2)
-    assert sent, "nothing was sent to Icecast while no host audio arrived"
+def test_nothing_in_the_backend_feeds_an_fm_source_of_its_own():
+    """V2-116, decided 2026-11-19: the FM feed carries the whole station at all times,
+    which is the playout engine's stream. The backend's own Icecast source (host
+    microphone only, dropped between shows) is gone: nothing pushes audio to one."""
+    assert _callers("push_audio") == []
+    assert _callers("start_icecast_stream") == []
+    assert not (APP_DIR / "services" / "icecast_service.py").exists()
 
 
 # --------------------------------------------------------- site release (B-JOB-109)

@@ -1,62 +1,44 @@
 """
-Icecast OTA broadcast control endpoints.
+The old "FM feed" (backend-run Icecast source), retired 2026-11-19.
+
+The backend used to open an Icecast source itself and push the live show host's
+microphone to it. It carried no music, no callers' mix and no automation, and the
+source dropped between shows (checklist V2-116). The FM feed is the station's stream
+from the playout engine, which carries everything the station plays at all times,
+live shows included (wiki/streaming-architecture.md, wiki/local-fm-box.md).
+
+The routes stay so an old bookmark or script gets a clear answer instead of a 404.
 """
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.config import settings
-from app.core.dependencies import get_db, require_admin
-from app.models.station import Station
+from app.core.dependencies import require_admin
 
 router = APIRouter(prefix="/icecast", tags=["icecast"])
+
+GONE = ("The backend's own FM feed is retired. The FM feed is the station's stream from "
+        "the playout engine, which carries the whole station (music, live shows, callers).")
 
 
 @router.get("/status")
 async def icecast_status(_=Depends(require_admin)):
-    """Get Icecast configuration status."""
-    from app.services.icecast_service import _icecast_clients
+    """Where the FM feed comes from now, per station."""
     return {
-        "enabled": settings.icecast_enabled,
-        "host": settings.ICECAST_HOST or None,
-        "port": settings.ICECAST_PORT,
-        "format": settings.ICECAST_FORMAT,
-        "bitrate": settings.ICECAST_BITRATE,
-        "active_streams": list(_icecast_clients.keys()),
+        "enabled": False,
+        "retired": True,
+        "detail": GONE,
+        "active_streams": [],
+        "engine_streams": {sid: settings.engine_stream_url(sid) for sid in sorted(settings.engine_station_ids) if settings.playout_engine_enabled},
     }
 
 
 @router.post("/{station_id}/start")
-async def start_stream(
-    station_id: UUID,
-    mount: str | None = None,
-    db: AsyncSession = Depends(get_db),
-    _=Depends(require_admin),
-):
-    """Start Icecast OTA stream for a station."""
-    if not settings.icecast_enabled:
-        return {"error": "Icecast not configured. Set ICECAST_HOST environment variable."}
-
-    stmt = select(Station).where(Station.id == station_id)
-    result = await db.execute(stmt)
-    station = result.scalar_one_or_none()
-    if not station:
-        from app.core.exceptions import NotFoundError
-        raise NotFoundError("Station not found")
-
-    from app.services.icecast_service import start_icecast_stream
-    await start_icecast_stream(str(station_id), station.name, mount)
-    return {"status": "started", "station": station.name, "mount": mount or f"/{station_id}"}
+async def start_stream(station_id: UUID, _=Depends(require_admin)):
+    raise HTTPException(status_code=410, detail=GONE)
 
 
 @router.post("/{station_id}/stop")
-async def stop_stream(
-    station_id: UUID,
-    _=Depends(require_admin),
-):
-    """Stop Icecast OTA stream for a station."""
-    from app.services.icecast_service import stop_icecast_stream
-    await stop_icecast_stream(str(station_id))
-    return {"status": "stopped"}
+async def stop_stream(station_id: UUID, _=Depends(require_admin)):
+    raise HTTPException(status_code=410, detail=GONE)
