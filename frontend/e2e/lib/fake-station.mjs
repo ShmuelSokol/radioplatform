@@ -221,7 +221,7 @@ export function makeStation(opts = {}) {
     return {
       id: e.id, station_id: SID, asset_id: e.asset_id, position: e.position, status: e.status, estimated_start: est,
       source: e.source ?? 'manual', preempt_at: e.preempt_at ?? null, hard_timed: e.hard_timed, hard_by: e.hard_by ?? null,
-      blackout_name: e.blackout_name,
+      blackout_name: e.blackout_name, block_id: e.block_id, holiday: e.holiday,
       asset: { id: a.id, title: a.title, artist: a.artist, duration: a.duration, asset_type: a.asset_type, category: a.category, sponsor_id: a.sponsor_id ?? null, intro_seconds: a.intro_seconds ?? null },
     };
   };

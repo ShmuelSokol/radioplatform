@@ -78,3 +78,26 @@ async def test_queue_says_which_timed_items_cut_the_song(
     }
     assert by_name["limit"]["hard_by"] is not None
     assert by_name["soft"]["hard_by"] is None
+
+
+@pytest.mark.asyncio
+async def test_queue_names_the_block_an_automatic_song_was_drawn_for(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    """The control room's "Playing from" column names the playlist of the schedule block
+    an automatic song was drawn for, so each row carries that block's id (and only then)."""
+    res = await client.post("/api/v1/stations", json={"name": "Origin Station"}, headers=auth_headers)
+    station_id = uuid.UUID(res.json()["id"])
+    block_id = str(uuid.uuid4())
+    for i, (name, source, block) in enumerate([("drawn", "auto", block_id), ("by hand", "manual", None)]):
+        asset = Asset(id=uuid.uuid4(), title=name, artist="", duration=180.0,
+                      file_path=f"o{i}.mp3", asset_type="music")
+        db_session.add(asset)
+        db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=asset.id,
+                                  position=i + 1, status="pending", source=source, block_id=block))
+    await db_session.commit()
+
+    res = await client.get(f"/api/v1/stations/{station_id}/queue", headers=auth_headers)
+    by_name = {e["asset"]["title"]: e for e in res.json()["entries"]}
+    assert by_name["drawn"]["block_id"] == block_id
+    assert "block_id" not in by_name["by hand"]

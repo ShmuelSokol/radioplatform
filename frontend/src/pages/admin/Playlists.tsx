@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useStations } from '../../hooks/useStations';
 import {
   usePlaylistTemplates,
@@ -30,7 +31,17 @@ export default function Playlists() {
   const [formName, setFormName] = useState('');
   const [formDesc, setFormDesc] = useState('');
   const [formStation, setFormStation] = useState('');
-  const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
+  // ?open=<playlist>&step=<step>: opened from "Why it is in the queue" in the control room,
+  // so that playlist is open, scrolled to and the step the song filled is lit
+  const [params] = useSearchParams();
+  const openId = params.get('open');
+  const stepId = params.get('step');
+  const [expandedTemplate, setExpandedTemplate] = useState<string | null>(openId);
+  useEffect(() => {
+    if (!openId || !templates?.some(t => t.id === openId)) return;
+    const el = document.querySelector(`[data-template-id="${openId}"]`);
+    el?.scrollIntoView?.({ block: 'start' });
+  }, [openId, templates]);
 
   // Slot add form state
   const [addingSlotTo, setAddingSlotTo] = useState<string | null>(null);
@@ -154,7 +165,8 @@ export default function Playlists() {
       <div className="space-y-4">
         {templates?.length === 0 && <p className="text-gray-500 text-center py-8">No playlists yet. Press "New playlist" to make one.</p>}
         {templates?.map(template => (
-          <div key={template.id} className="bg-white rounded-lg shadow-md overflow-hidden">
+          <div key={template.id} data-template-id={template.id} data-nav-id={`playlist-${template.id}`}
+            className={`bg-white rounded-lg shadow-md overflow-hidden ${openId === template.id ? 'ring-2 ring-yellow-400' : ''}`}>
             <div className="p-4 flex justify-between items-center cursor-pointer hover:bg-gray-50"
               onClick={() => setExpandedTemplate(expandedTemplate === template.id ? null : template.id)}>
               <div>
@@ -232,7 +244,8 @@ export default function Playlists() {
                         // A step just added has no id until the server answers (a moment)
                         const saving = sorted.some(s => s.id.startsWith('pending-'));
                         return (
-                        <div key={slot.id} className="flex items-center justify-between bg-white p-2 rounded border">
+                        <div key={slot.id} data-testid={slot.id === stepId ? 'playlist-step-lit' : undefined}
+                          className={`flex items-center justify-between p-2 rounded border ${slot.id === stepId ? 'bg-yellow-100 border-yellow-500' : 'bg-white'}`}>
                           <div className="flex items-center gap-3">
                             <span className="text-xs text-gray-400 w-6 text-right">{idx + 1}</span>
                             <span className="text-sm font-medium">{slot.asset_type}</span>

@@ -1655,6 +1655,66 @@ KEEP_CUED_LAST_SECONDS = 45.0
 AUTO_FLUSH_MIN_INTERVAL = 15.0
 
 
+async def _take_back_held_id(db: AsyncSession, station_id, state: EngineState) -> bool:
+    """A station ID the engine holds and has not started yet, that may no longer air now
+    (station_id_guard.must_wait: a break is due before it would end), is taken back.
+
+    Main 2026-11-19: Short 03 was handed out at 15:34:25 for after Hashomayim, the engine
+    fetched the next song at once (the ID is short) and played that song first, keeping
+    the ID; it then aired at 15:45:10, right before the :45 sponsorships that had come
+    due meanwhile. The head check below never looked at it (it excludes what the engine
+    holds besides its cued track). The flushed ID stays ours (flushed_unplayed): asked
+    again, the guard passes it over and the start report moves it one song later."""
+    from app.services import station_id_guard as id_guard
+
+    held = set(state.given) | ({state.cued_entry_id} if state.cued_entry_id else set())
+    held -= set(state.recent_started) | set(state.timed_sent) | state.flushed_unplayed
+    ids = []
+    for raw in held:
+        try:
+            ids.append(uuid.UUID(str(raw)))
+        except ValueError:
+            continue
+    if not ids:
+        return False
+    rows = (await db.execute(
+        select(QueueEntry).options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.id.in_(ids), QueueEntry.station_id == station_id,
+               QueueEntry.status == "pending", QueueEntry.started_at.is_(None))
+    )).unique().scalars().all()
+    if not any(id_guard.is_auto_station_id(e) for e in rows):
+        return False
+    now = datetime.now(UTC)
+    # Not in the last seconds of the item on air: the ID may be starting already (its
+    # report not in yet), and a flush then leaves nothing ready (KEEP_CUED_LAST_SECONDS)
+    current = (await db.execute(
+        select(QueueEntry).options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast())
+    )).unique().scalars().first()
+    end = _airs_until(current) if current is not None else None
+    if end is None or (end - now).total_seconds() < KEEP_CUED_LAST_SECONDS:
+        return False
+    for entry in rows:
+        if not id_guard.is_auto_station_id(entry):
+            continue
+        if not await id_guard.must_wait(db, station_id, entry, now):
+            continue
+        mono = time.monotonic()
+        if mono - state.last_auto_flush < AUTO_FLUSH_MIN_INTERVAL:
+            return False
+        state.last_auto_flush = mono
+        logger.info("Station %s: taking back station ID %s the engine still holds (a break is due)",
+                    station_id, entry.id)
+        cued = state.cued_entry_id
+        await engine_flush(station_id)
+        state.flushed_unplayed.add(str(entry.id))
+        if cued and cued != str(entry.id):
+            state.flushed_unplayed.add(cued)
+        return True
+    return False
+
+
 async def _flush_if_head_changed(db: AsyncSession, station_id, state: EngineState, now) -> None:
     # Same exclusions as handle_next: an entry the engine already holds is never the head
     # it should be given, or the two would disagree and flush on every tick
@@ -2168,6 +2228,11 @@ async def tick(db: AsyncSession, station) -> None:
     await _prune_handoffs(db, station_id, state)
 
     # 3. The queue changed after the engine pre-loaded its next track: make it ask again
+    try:
+        await _take_back_held_id(db, station_id, state)
+    except Exception as e:
+        logger.warning("Station ID re-check failed for station %s: %s", station_id, e)
+        await db.rollback()
     if state.cued_entry_id:
         await _flush_if_head_changed(db, station_id, state, now)
     try:

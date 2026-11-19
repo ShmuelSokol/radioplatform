@@ -267,6 +267,7 @@ WRITE_POLICY = {
     ("POST", "/stations/{station_id}/queue/{entry_id}/skip-sponsorship"): ON_AIR,
     ("POST", "/studio/mix"): MANAGERS,
     ("PUT", "/time-announcements/{hour}"): MANAGERS,
+    ("PUT", "/omer-count/{day}"): MANAGERS,
     ("POST", "/users"): ADMIN,
     ("PATCH", "/users/me/preferences"): ANY_LOGIN,
     ("DELETE", "/users/{user_id}"): ADMIN,

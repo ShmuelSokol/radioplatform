@@ -47,6 +47,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [local-fm-box](local-fm-box.md) — Feeding FM from the transmitter room: the engine on a local box with a relay that keeps it on air with no internet (plan + library on disk); stages and gaps
 - [look-at-the-screen-tests](look-at-the-screen-tests.md) — the browser guard, the walk of every page and control on three stations, the station isolation sweep
 - [blackout-window-generation](blackout-window-generation.md) — Shabbos/Yom Tov windows: the rule, and how regenerate corrects stored ones without touching hand edits
+- [omer-count](omer-count.md) — Sefiras HaOmer on the hour after the time check, next day from shekia per station (days only, as the siddur), 49 clips, per-station setting
 - [shabbos-ending](shabbos-ending.md) — last song before Shabbos back-timed to end at candle lighting, the shofar, then the silence (per-station setting)
 - [station-simulator](station-simulator.md) — the real scheduling/playout decisions on a virtual clock with a fake engine: whole broadcast days in minutes, rules checked over the play log
 - [engine-harness](engine-harness.md) — run the real Liquidsoap engine locally with tones and check what was heard and when
