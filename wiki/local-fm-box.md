@@ -305,7 +305,17 @@ the Daf Yomi cut by the 8:30 PM check never came back.
 
 **Station IDs offline** (`station_id` in plan entries): only after a song, not within
 3 min of a timed item, not within 12 min of the last ID; two waiting IDs in a row, the
-earlier goes. Before this, the box put IDs next to sponsorship breaks.
+earlier goes. Before this, the box put IDs next to sponsorship breaks. Past the queue
+the extension's `ids` (the station's `automation_config.station_ids`: jingles of its
+category, min..max minutes, hours) let the box put one between its drawn songs
+(`draw_id`), same rules; the 7-day run had none for five days before this.
+
+**Back on the second after Shabbos:** the silence file is a minute long; in the last
+minute of a blackout it gets `liq_cue_out` at the blackout's end (the 7-day run was back
+37 s late).
+
+**Week-old reports:** `STARTED_AT_MAX_LATE` is 15 days (was 7: the first plays of a
+7-day outage were logged at the return).
 
 `/relay/status` and the health report add `offline_days_ahead`, `songs_for_rotation`,
 `songs_on_disk`, `timed_until`.

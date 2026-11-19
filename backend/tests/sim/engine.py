@@ -313,7 +313,8 @@ async def item_from_db(db, entry_id: str, lane: str, uri: str) -> Item | None:
         return Item(entry_id, lane, f, max(length - float(f.get("liq_cue_in") or 0.0), 0.0))
     fields = parse_uri(uri)
     if not entry_id:
-        return Item("", lane, fields, 60.0)  # the box's own silence file during a blackout
+        # the box's own silence file during a blackout (cut where the blackout ends)
+        return Item("", lane, fields, min(60.0, float(fields.get("liq_cue_out") or 60.0)))
     if row is None or row.asset is None:
         return None
     length = float(row.asset.duration or 0.0)

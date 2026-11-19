@@ -81,6 +81,9 @@ class Box:
                               clock=lambda: sim.t, mirror_library=False, offline_days=offline_days)
         self.last_sync = -1e9
         self.kept_max = 0
+        # entry id -> the box's item as it was when it went on air (the box's plan moves
+        # on after the line is back, so the checks look here)
+        self.aired_items: dict[str, dict] = {}
 
     # the backend's playout routes, as app/api/v1/playout.py calls them
     async def backend(self, method: str, path: str, body: bytes | None):
@@ -117,7 +120,7 @@ class Box:
         out = {}
         for seg in self.sim.log:
             eid = seg.entry_id or ""
-            item = self.relay.find_item(eid) if eid else None
+            item = self.aired_items.get(eid) or (self.relay.find_item(eid) if eid else None)
             if item is None and eid in self.relay.served:
                 # a queue entry removed on the site meanwhile: the box remembers its item
                 item = {"asset_id": self.relay.served[eid]}
@@ -139,6 +142,12 @@ class Box:
         return json.loads(data) if status == 200 else None
 
     async def started(self, entry_id, lane, at):
+        if entry_id and entry_id not in self.aired_items:
+            item = self.relay.find_item(entry_id)
+            if item is None and entry_id in self.relay.served:
+                item = {"asset_id": self.relay.served[entry_id]}
+            if item is not None:
+                self.aired_items[entry_id] = dict(item)
         body = json.dumps({"entry_id": entry_id, "lane": lane, "at": at}).encode()
         await asyncio.to_thread(self.relay.started, body)
 
@@ -292,9 +301,11 @@ async def _after(sim, sid, result, cut, back, made, notes) -> list[str]:
                      + (f"at {wanted[0].local_start} ({(wanted[0].start - b) / 60:+.0f} min from the line's return)"
                         if wanted else "never (by the end of the run)"))
     after = [r for r in result.rows if r.start >= b]
-    seen = {r.asset_id for r in off if r.asset_id and r.kind == "music"}
+    # A repeat is a song heard again soon: over days offline every song airs, so only
+    # the last hours before the return count (the site's own rest rule)
+    seen = {r.asset_id for r in off if r.asset_id and r.kind == "music" and r.start >= b - 4 * 3600}
     again = [r for r in after[:40] if r.kind == "music" and r.asset_id in seen]
-    notes.append(f"first 40 items after the return: {len(again)} songs that already aired while offline")
+    notes.append(f"first 40 items after the return: {len(again)} songs that aired in the last 4 h offline")
     stuck = [e for e in entries.values() if e.status == "playing"]
     notes.append(f"queue rows marked on air at the end: {len(stuck)}")
     return notes

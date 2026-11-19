@@ -46,7 +46,7 @@ MIN_LOGGED_PLAY_SECONDS = 1.0
 # A start report that carries its own time (a local FM box's kept report) is believed
 # when it is this far in the past
 STARTED_AT_MIN_LATE = 2.0
-STARTED_AT_MAX_LATE = 7 * 86400.0
+STARTED_AT_MAX_LATE = 15 * 86400.0  # a local FM box can be offline up to 14 days (playout_plan.MAX_EXTENSION_DAYS)
 # An ordinary start report's own time is used when it is at most this old
 STARTED_AT_LIVE_MAX_LATE = 60.0
 # Raise an alert if the engine has not contacted us for this long

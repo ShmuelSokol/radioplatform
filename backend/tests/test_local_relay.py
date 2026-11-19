@@ -373,6 +373,10 @@ def test_offline_blackout_is_silence_and_music_returns_after(rig):
     assert status == 200 and item["entry_id"] == "" and item["uri"].endswith("silence-60s.wav")
     assert Path(item["uri"].rsplit(":", 1)[1]).stat().st_size > 1_000_000
     assert relay.hand_over_timed() == 0  # the missed time check stays off the air
+    # The last minute of the blackout: the silence file is cut where it ends, so the
+    # station is back on the second (a week offline: back 37 s late after Shabbos)
+    clock["now"] = now + 480
+    assert 'liq_cue_out="20.000"' in _next(relay)[1]["uri"]
     clock["now"] = now + 501
     assert _next(relay)[1]["entry_id"] == "song"
 
@@ -1202,3 +1206,43 @@ async def test_kept_report_of_an_item_not_in_the_queue_is_logged_by_its_asset(cl
     db_session.expire_all()
     logs = (await db_session.execute(select(PlayLog).where(PlayLog.station_id == sid))).scalars().all()
     assert [(str(p.asset_id), round(p.start_utc.replace(tzinfo=UTC).timestamp() - t0)) for p in logs] == [(aid, 0)]
+
+
+def test_offline_past_the_queue_station_ids_come_between_songs(rig):
+    """Days offline: the box puts the station's IDs between the songs it draws, after a
+    song, at the station's spacing and clear of a break (a week offline had none for
+    five days)."""
+    fake, relay, clock = rig
+    now = clock["now"]
+    fake.plan = {"blackouts": [], "entries": []}
+    ext = _ext(fake, now, songs=("s1", "s2", "s3", "s4", "s5", "s6"))
+    template = ext["template_entry"]
+    ext["songs"]["id1"] = {"title": "ID", "duration": 8.0, "kind": "jingle", "station_id": True,
+                           "url": fake.url("id1"),
+                           "uri": f'annotate:kbr_entry="{template}",kbr_kind="jingle":{fake.url("id1")}'}
+    ext["ids"] = {"enabled": True, "assets": ["id1"], "min_minutes": 12, "max_minutes": 12,
+                  "clear_minutes": 3, "start_hour": 0, "end_hour": 24}
+    fake.extension = ext
+    assert relay.sync_extension()
+    relay.fetch_plan_audio()
+    fake.up = False
+    relay.online = False
+    kinds = []
+    for _ in range(12):
+        status, item = _next(relay)
+        assert status == 200
+        got = relay.local_items[item["entry_id"]]
+        relay.started(json.dumps({"entry_id": item["entry_id"], "lane": "main"}).encode())
+        kinds.append(got["kind"])
+        clock["now"] += float(got["duration"])
+    # never first (nothing before it was a song), never two together, 12 min apart
+    assert kinds[0] == "music" and "jingle" in kinds
+    assert all(not (a == b == "jingle") for a, b in zip(kinds, kinds[1:]))
+    ids_at = [i for i, k in enumerate(kinds) if k == "jingle"]
+    assert len(ids_at) >= 2 and all(b - a >= 4 for a, b in zip(ids_at, ids_at[1:]))  # 200 s songs: 12 min
+    # no ID right before a break
+    for e in list(relay.extension["timed"]):
+        relay.extension["timed"].remove(e)
+    relay.extension["timed"].append(fake.entry("tc", None, at=clock["now"] + 60, mode="hard", kind="time"))
+    relay.last_id_at = clock["now"] - 3600
+    assert relay.draw_id(relay.now(), relay.timed_entries()) is None

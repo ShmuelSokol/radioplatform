@@ -431,7 +431,7 @@ class Relay:
         hour_list = self.extension.get("music", {}).get(str(self._local_hour(now)), [])
         cands = [a for a in hour_list if a in songs and self.have(songs[a]["url"])]
         if not cands:
-            cands = [a for a in songs if self.have(songs[a]["url"])]
+            cands = [a for a in songs if not songs[a].get("station_id") and self.have(songs[a]["url"])]
         if not cands:
             return None
         rested = [a for a in cands if now - self.aired.get(a, 0.0) >= SONG_REST_HOURS * 3600] or cands
@@ -444,6 +444,38 @@ class Relay:
             "entry_id": eid, "asset_id": pick, "title": song.get("title", ""), "kind": "music",
             "duration": song.get("duration"), "url": song["url"], "long": False,
             "uri_main": song["uri"].replace(template, eid), "local": "song",
+        }
+        self.local_items[eid] = item
+        return item
+
+    def draw_id(self, now: float, timed_waiting: list[dict]) -> dict | None:
+        """Past the end of the queue: a station ID after a song, every min..max minutes of
+        the station's setting, in its hours, clear of breaks (as the site's fill)."""
+        ids = self.extension.get("ids") or {}
+        songs = self.extension.get("songs", {})
+        if not ids.get("enabled"):
+            return None
+        start, end, hour = int(ids.get("start_hour", 0)), int(ids.get("end_hour", 24)), self._local_hour(now)
+        if not (start == end or (start, end) == (0, 24) or (start <= hour < end if start < end else (hour >= start or hour < end))):
+            return None
+        last = float(self.last_id_at or 0.0)
+        low = float(ids.get("min_minutes") or 12.0) * 60
+        high = max(low, float(ids.get("max_minutes") or 20.0) * 60)
+        if last and now - last < random.Random(last).uniform(low, high):
+            return None
+        if self._id_must_wait(now, timed_waiting):
+            return None
+        cands = [a for a in ids.get("assets", []) if a in songs and self.have(songs[a]["url"])]
+        if not cands:
+            return None
+        pick = min(cands, key=lambda a: (self.aired.get(a, 0.0), random.random()))
+        song = songs[pick]
+        eid = str(uuid.uuid4())
+        template = self.extension.get("template_entry") or "00000000-0000-0000-0000-000000000000"
+        item = {
+            "entry_id": eid, "asset_id": pick, "title": song.get("title", ""), "kind": "jingle",
+            "duration": song.get("duration"), "url": song["url"], "long": False, "station_id": True,
+            "uri_main": song["uri"].replace(template, eid), "local": "id",
         }
         self.local_items[eid] = item
         return item
@@ -465,7 +497,11 @@ class Relay:
         clock_ok = self.clock_ok()
         with self.lock:
             if self.in_blackout(now):
-                uri = f'annotate:kbr_entry="",kbr_lane="main",kbr_kind="silence",title="Off air":{self.silence_file()}'
+                # The file is a minute long: cut it where the blackout ends, so the station
+                # is back on the second (a week offline: back 37 s late after Shabbos)
+                left = max((b["end"] for b in self.blackouts() if b["start"] <= now < b["end"]), default=now) - now
+                cut = f',liq_cue_out="{max(left, 1.0):.3f}"' if left < 60.0 else ""
+                uri = f'annotate:kbr_entry="",kbr_lane="main",kbr_kind="silence",title="Off air"{cut}:{self.silence_file()}'
                 return 200, json.dumps({"uri": uri, "entry_id": ""}).encode()
             done = set(self.done)
             if self.resume and self.resume["entry_id"] not in done:
@@ -510,8 +546,9 @@ class Relay:
                         chosen = e
                         break
             if chosen is None:
-                # The queue is used up (days offline): the box draws the station's songs
-                chosen = self.draw_song(now)
+                # The queue is used up (days offline): the box draws the station's songs,
+                # with a station ID between them now and then
+                chosen = self.draw_id(now, timed_waiting) or self.draw_song(now)
             if chosen is None:
                 # Nothing left that is on this disk: the engine plays its emergency folder
                 return 204, b""

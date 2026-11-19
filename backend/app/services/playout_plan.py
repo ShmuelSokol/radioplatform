@@ -349,6 +349,36 @@ async def build_extension(db: AsyncSession, station, queued: list[dict], days: f
                 }
     for hour in music:
         music[hour] = [i for i in music[hour] if i in library]
+
+    # Station IDs between songs (automation_config.station_ids): the box puts one after
+    # a song every so often past the end of its queue, as the site's fill does
+    from app.services.playlist_generator_service import id_settings_for
+
+    ids_cfg = id_settings_for(config)
+    id_list: list[str] = []
+    if ids_cfg.enabled:
+        from app.models.asset import (
+            MIN_STATION_ID_SECONDS, STATION_ID_CATEGORY_PREFIX, in_category, not_contract_audio,
+            not_holiday_only,
+        )
+
+        stmt = select(Asset).where(
+            Asset.asset_type == "jingle", in_category(ids_cfg.category), not_placeholder(),
+            not_contract_audio(), not_holiday_only(), Asset.id.notin_(blocked_asset_ids(station.id)),
+        )
+        if ids_cfg.category.lower().startswith(STATION_ID_CATEGORY_PREFIX):
+            stmt = stmt.where(Asset.duration >= MIN_STATION_ID_SECONDS)
+        for a in (await db.execute(stmt.limit(200))).scalars().all():
+            entry = QueueEntry(id=TEMPLATE_ENTRY, station_id=station.id, asset_id=a.id, position=0,
+                               status="pending", source="auto")
+            entry.asset = a
+            uri = playout_engine.build_uri(entry, "main")
+            if uri:
+                library[str(a.id)] = {
+                    "title": a.title or "", "duration": a.duration, "kind": "jingle",
+                    "url": playout_engine.audio_url(a), "uri": uri, "station_id": True,
+                }
+                id_list.append(str(a.id))
     return {
         "days": days,
         "until": end.timestamp(),
@@ -357,6 +387,12 @@ async def build_extension(db: AsyncSession, station, queued: list[dict], days: f
         "music": music,
         "songs": library,
         "template_entry": str(TEMPLATE_ENTRY),
+        "ids": {
+            "enabled": bool(id_list), "assets": id_list,
+            "min_minutes": ids_cfg.min_minutes, "max_minutes": ids_cfg.max_minutes,
+            "clear_minutes": ids_cfg.clear_minutes,
+            "start_hour": ids_cfg.start_hour, "end_hour": ids_cfg.end_hour,
+        },
         "blackouts": [
             {"start": b.start.timestamp(), "end": b.end.timestamp(), "name": b.name}
             for b in blackouts
