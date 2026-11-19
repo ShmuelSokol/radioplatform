@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
 import PlayoutBadge from '../../components/audio/PlayoutBadge';
-import type { LiveStream } from '../../lib/liveStream';
+import { STREAM_STATE_EVENT, streamStateOf, type LiveStream, type StreamState } from '../../lib/liveStream';
 import { adoptStationStream, playStationStream, releaseStationStream, stationStreamElement, stationStreamSounding } from '../../lib/stationStream';
 import { useQuery } from '@tanstack/react-query';
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -288,14 +288,17 @@ export default function Listen({ stationId: given }: { stationId?: string } = {}
     };
   }, []);
 
-  // Listen for stream errors to trigger fallback
+  // How the stream is doing: lib/liveStream reconnects a dropped stream by itself (an
+  // element error no longer switches to the built-in player) and says 'blocked' when the
+  // browser needs a tap to play again, which the page then asks for
+  const [streamState, setStreamState] = useState<StreamState>(() => streamStateOf(streamAudioRef.current));
   useEffect(() => {
     const audio = streamAudioRef.current;
-    if (!audio || !useStream) return;
-    const onError = () => onStreamFail();
-    audio.addEventListener('error', onError);
-    return () => audio.removeEventListener('error', onError);
-  }, [useStream, onStreamFail]);
+    if (!audio) return;
+    const on = () => setStreamState(streamStateOf(audio));
+    audio.addEventListener(STREAM_STATE_EVENT, on);
+    return () => audio.removeEventListener(STREAM_STATE_EVENT, on);
+  }, []);
 
   // Once Listen is pressed, a new release must not reload the page and silence it
   useEffect(() => {
@@ -616,6 +619,17 @@ export default function Listen({ stationId: given }: { stationId?: string } = {}
             >
               Listen Live
             </button>
+          )}
+          {userStarted && useStream && streamState === 'blocked' && (
+            <button onClick={handlePlay} data-testid="listen-resume"
+              className="bg-amber-500 hover:bg-amber-600 text-white px-6 py-3 rounded-full text-lg font-medium transition">
+              Sound stopped: tap to resume
+            </button>
+          )}
+          {userStarted && useStream && streamState === 'reconnecting' && (
+            <span role="status" data-testid="listen-reconnecting" className="px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-800">
+              Reconnecting…
+            </span>
           )}
           <span className={`px-3 py-1 rounded-full text-sm font-medium ${
             isWsPlaying || streamPlaying ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'

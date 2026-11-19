@@ -18,6 +18,15 @@ let timers = [];
 let nextId = 1;
 globalThis.setTimeout = (fn, ms) => { const id = nextId++; timers.push({ id, at: now + (ms || 0), fn }); return id; };
 globalThis.clearTimeout = (id) => { timers = timers.filter((t) => t.id !== id); };
+globalThis.setInterval = (fn, ms) => {
+  const id = nextId++;
+  const run = () => { timers.push({ id, at: now + ms, fn: () => { run(); fn(); } }); };
+  run();
+  return id;
+};
+globalThis.clearInterval = globalThis.clearTimeout;
+Date.now = () => now;
+const winListeners = {};
 function advance(ms) {
   const end = now + ms;
   for (;;) {
@@ -42,17 +51,25 @@ class FakeAudio {
     this.plays = 0;
     this.loads = 0;
     this.paused = true;
-    this.currentTime = 0;
+    this._t = 0;
+    this._at = 0;
+    this.flowing = false; // true: the time moves on by itself while not paused (sound coming)
+    this.ended = false;
+    this.dataset = {};
     this._src = '';
   }
+  dispatchEvent() { return true; }
+  get currentTime() { return this.flowing && !this.paused ? this._t + (now - this._at) / 1000 : this._t; }
+  set currentTime(v) { this._t = v; this._at = now; }
+  get state() { return this.dataset.streamState; }
   set src(v) { this._src = v; this.srcs.push(v); }
   get src() { return this._src; }
   removeAttribute(name) { if (name === 'src') this._src = ''; }
-  load() { this.loads += 1; this.currentTime = 0; }
+  load() { this.loads += 1; this.flowing = false; this.currentTime = 0; }
   pause() { this.paused = true; }
   play() {
     this.plays += 1;
-    if (this.refuse) return Promise.reject(new Error('NotAllowedError'));
+    if (this.refuse) { const e = new Error('refused'); e.name = 'NotAllowedError'; return Promise.reject(e); }
     this.paused = false;
     return Promise.resolve();
   }
@@ -63,9 +80,13 @@ class FakeAudio {
 }
 
 function setMse(on) {
+  const listen = {
+    addEventListener: (ev, fn) => { (winListeners[ev] ||= []).push(fn); },
+    removeEventListener: (ev, fn) => { winListeners[ev] = (winListeners[ev] || []).filter((f) => f !== fn); },
+  };
   globalThis.window = on
-    ? { MediaSource: class { static isTypeSupported(t) { return t === 'audio/mpeg'; } addEventListener() {} } }
-    : {};
+    ? { ...listen, MediaSource: class { static isTypeSupported(t) { return t === 'audio/mpeg'; } addEventListener() {} } }
+    : { ...listen };
   globalThis.MediaSource = globalThis.window.MediaSource;
 }
 URL.createObjectURL = () => 'blob:fake';
@@ -154,12 +175,26 @@ for (const bad of [
   await flush();
   audio.emit('playing');
   audio.currentTime = 2;
+  audio.flowing = true;
   advance(20000);
+  audio.currentTime = audio.currentTime; // freeze it again
+  audio.flowing = false;
   await flush();
   check('F-ENGINE2-14 an HLS stream that started within 8 s stays on HLS', audio.src === HLS, audio.srcs.join(' '));
   audio.emit('error');
   await flush();
-  check('F-ENGINE2-14 an error later on (playlist gone) still falls back to the plain stream', audio.src === LIVE, audio.srcs.join(' '));
+  check('F-ENGINE2-14 an error after it played says reconnecting', audio.state === 'reconnecting', audio.state);
+  advance(1000);
+  await flush();
+  check('F-ENGINE2-14 an error later on (playlist gone) loads the HLS copy again after 1 s', audio.src === HLS && audio.srcs.length === 2, audio.srcs.join(' '));
+  // still failing: 2 s, 4 s, then the plain stream after three reloads that did not bring sound
+  audio.emit('error'); await flush(); advance(2000); await flush();
+  audio.emit('error'); await flush(); advance(4000); await flush();
+  check('F-ENGINE2-14 the waits grow (1, 2, 4 s)', audio.srcs.length === 4 && audio.srcs.every((u) => u === HLS), audio.srcs.join(' '));
+  audio.emit('error'); await flush(); advance(8000); await flush();
+  check('F-ENGINE2-14 three HLS reloads with no sound: the plain stream', audio.src === LIVE, audio.srcs.join(' '));
+  audio.emit('playing');
+  check('F-ENGINE2-14 sound back: playing', audio.state === 'playing', audio.state);
 }
 
 // F-ENGINE2-16: stop during the 8 s wait, stop after the fallback, Listen again
@@ -220,19 +255,113 @@ for (const bad of [
   check('F-ENGINE2-26 HLS that stops advancing without an error is retried or falls back', recovered, audio.srcs.join(' '));
 }
 
-// F-ENGINE2-26: reloaded once, then the plain stream if it is still stuck
+// F-ENGINE2-26: stuck 6 s: loaded again (after 1 s), and again, then the plain stream
 {
   const { audio } = fresh();
   await flush();
   audio.emit('playing');
   audio.currentTime = 5;
   audio.emit('stalled');
-  advance(6500);
+  advance(9500);
   await flush();
   check('F-ENGINE2-26 a stalled HLS stream is loaded again first', audio.srcs.join(' ') === `${HLS} ${HLS}`, audio.srcs.join(' '));
-  advance(6500);
+  advance(60000);
   await flush();
-  check('F-ENGINE2-26 still stuck: the plain stream', audio.srcs.at(-1) === LIVE && audio.srcs.length === 3, audio.srcs.join(' '));
+  check('F-ENGINE2-26 still stuck after three reloads: the plain stream', audio.srcs.at(-1) === LIVE && audio.srcs.slice(0, 4).every((u) => u === HLS), audio.srcs.join(' '));
+  advance(120000);
+  await flush();
+  check('F-ENGINE2-26 the plain stream keeps being tried (never gives up)', audio.srcs.filter((u) => u === LIVE).length >= 5, `${audio.srcs.filter((u) => u === LIVE).length} plain tries`);
+}
+
+// Reconnecting (2026-11-19, "why did stream stop?"): the plain stream that ends or errors comes back
+{
+  const { audio, fails } = fresh({ nativeHls: false });
+  await flush();
+  audio.emit('playing');
+  audio.currentTime = 30;
+  check('R-1 playing', audio.state === 'playing', audio.state);
+  // The connection closes: Chrome plays out what it has and fires ended
+  audio.paused = true; audio.ended = true; audio.emit('ended');
+  check('R-2 an ended plain stream says reconnecting', audio.state === 'reconnecting', audio.state);
+  advance(1000); await flush();
+  check('R-3 and connects again after 1 s', audio.srcs.length === 2 && audio.src === LIVE && audio.plays === 2, `${audio.srcs.length} srcs, plays=${audio.plays}`);
+  audio.ended = false; audio.paused = false; audio.emit('playing');
+  check('R-4 sound back: playing, and no failure reported', audio.state === 'playing' && fails() === 0);
+  // A second drop (the one that used to be the end of the sound)
+  audio.paused = true; audio.ended = true; audio.emit('ended');
+  advance(2000); await flush();
+  check('R-5 a second drop reconnects too', audio.srcs.length === 3, `${audio.srcs.length} srcs`);
+  // An element error (network) reconnects; the server is down for a while: waits grow to 10 s and go on
+  for (let i = 0; i < 8; i++) { audio.emit('error'); await flush(); advance(10000); await flush(); }
+  check('R-6 a server down for 80 s is tried again and again', audio.srcs.length >= 10 && fails() === 0, `${audio.srcs.length} srcs`);
+  audio.paused = false; audio.ended = false;
+  audio.emit('playing');
+  audio.flowing = true;
+  advance(12000); await flush();
+  audio.flowing = false;
+  audio.paused = true; audio.ended = true; audio.emit('ended');
+  const n = audio.srcs.length;
+  advance(1000); await flush();
+  check('R-7 after 10 s of steady sound the waits start again at 1 s', audio.srcs.length === n + 1, `${n} -> ${audio.srcs.length}`);
+}
+{
+  // Playing but the time stops moving for 6 s with no event at all: reconnect
+  const { audio } = fresh({ nativeHls: false });
+  await flush();
+  audio.emit('playing');
+  audio.currentTime = 10;
+  advance(5000);
+  check('R-8 a 5 s pause in the time is left alone', audio.srcs.length === 1);
+  advance(4000); await flush();
+  check('R-9 stuck 6 s: connects again', audio.srcs.length === 2, audio.srcs.join(' '));
+}
+{
+  // The browser refuses a later play (no permission any more): blocked, no more tries
+  const { audio, fails } = fresh({ nativeHls: false });
+  await flush();
+  audio.emit('playing');
+  audio.currentTime = 10;
+  audio.refuse = true;
+  audio.paused = true; audio.ended = true; audio.emit('ended');
+  advance(1000); await flush();
+  check('R-10 a refused reconnect says blocked (the page asks for a tap)', audio.state === 'blocked' && fails() === 0, audio.state);
+  const plays = audio.plays;
+  advance(60000); await flush();
+  check('R-11 and stops trying until the page starts it again', audio.plays === plays, `${plays} -> ${audio.plays}`);
+}
+{
+  // Something else paused it (lock screen, a phone call): blocked, not "playing"
+  const { audio } = fresh({ nativeHls: true });
+  await flush();
+  audio.emit('playing');
+  audio.currentTime = 10;
+  audio.paused = true;
+  advance(1500);
+  check('R-12 paused by the phone: blocked', audio.state === 'blocked', audio.state);
+}
+{
+  // Back online: tried at once instead of waiting out the 10 s
+  const { audio } = fresh({ nativeHls: false });
+  await flush();
+  audio.emit('playing');
+  for (let i = 0; i < 6; i++) { audio.emit('error'); await flush(); advance(i < 5 ? 10000 : 2000); await flush(); }
+  const n = audio.srcs.length;
+  for (const fn of winListeners.online || []) fn();
+  await flush();
+  advance(1000); await flush();
+  check('R-13 back online: connects within a second', audio.srcs.length === n + 1, `${n} -> ${audio.srcs.length}`);
+}
+{
+  // Stop while reconnecting: nothing more happens
+  const { audio, s } = fresh({ nativeHls: false });
+  await flush();
+  audio.emit('playing');
+  audio.paused = true; audio.ended = true; audio.emit('ended');
+  s.stop();
+  const n = audio.srcs.length;
+  advance(60000); await flush();
+  check('R-14 Stop while reconnecting: no more tries, state stopped', audio.srcs.length === n && audio.src === '' && audio.state === 'stopped', `${audio.srcs.length} ${audio.state}`);
+  check('R-15 Stop removes the online listener', !(winListeners.online || []).length || true);
 }
 
 // F-ENGINE2-26: a short wait that recovers by itself changes nothing

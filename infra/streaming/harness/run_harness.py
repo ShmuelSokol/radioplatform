@@ -3757,6 +3757,33 @@ async def sc_next_after_idle(h: Harness) -> None:
             f"Next after 35 s idle: {'no change' if took is None else f'{took:.1f} s'}")
 
 
+async def sc_levels_feed(h: Harness) -> None:
+    """The control room meters (2026-11-19): the engine measures what is on air and the
+    backend passes it to the station's pages each second, ten RMS values per side. A page
+    with no sound of its own sees the level while music plays, and flat meters in a hold
+    (quiet) or dead air."""
+    import websockets
+
+    name = "levels_feed"
+    await wait_music(h)
+    got: list[dict] = []
+    async with websockets.connect(f"ws://127.0.0.1:{BACKEND_PORT}/api/v1/ws/now-playing/{STATION_ID}") as ws:
+        t0 = time.time()
+        while time.time() - t0 < 6:
+            try:
+                msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=2))
+            except (asyncio.TimeoutError, ValueError):
+                continue
+            if msg.get("type") == "levels":
+                got.append(msg["data"])
+    h.check(name, len(got) >= 4, f"{len(got)} level messages in 6 s (one a second)")
+    if got:
+        sizes = {len(d["l"]) for d in got} | {len(d["r"]) for d in got}
+        h.check(name, sizes <= {9, 10, 11}, f"values per message: {sorted(sizes)}")
+        loud = max(max(d["l"] + d["r"]) for d in got)
+        h.check(name, loud > 0.05, f"music on air shows a level (max RMS {loud:.3f})")
+
+
 async def sc_next_twice(h: Harness) -> None:
     """A second Next shortly after the first also changes the item (an operator stepping
     through items). Found 2026-11-17: 0.3 s after a Next the second one answered
@@ -4657,6 +4684,7 @@ async def sc_emergency_alert_line(h: Harness) -> None:
             f"{row.status if row else None}, {row.seconds_on_air if row else None} s")
 
 SCENARIOS = {
+    "levels_feed": sc_levels_feed,
     "hour_change_slow_backend": sc_hour_change_slow_backend,
     "soft_timed_waits_for_song_slow_backend": with_slow_backend(sc_soft_waits_for_song),
     "live_show_over_hard_item_slow_backend": with_slow_backend(sc_live_show_over_hard_item),

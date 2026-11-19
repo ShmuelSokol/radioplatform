@@ -174,7 +174,7 @@ radioplatform/
 | live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, `/ws/live/{show}/talk/{call}` (staff talk to a caller off the air), `/ws/live/phone/{call}` (a phone caller's Twilio media stream), `/ws/live/{show}/cohost` (a co-host joins from another place), `/ws/live/{show}/video` (the host's camera) and `/ws/live/station/{id}/watch` (pages watching it), and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
-| playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login); one engine per station: hello/next/started from a second engine (other `X-Playout-Instance`) get 409 and an alert; /plan and /library (token only) and /commands/poll for a local FM box's relay (the poll also carries the box's health report); `/live.mp3` (token only): the live show as listeners hear it, for the engine's live lane (see `wiki/live-shows.md`) |
+| playout | playout.py | /playout/{station_id}/next, /started, /hello, /levels (the on-air level for the control room meters, passed to the station's sockets): called by the playout engine only, guarded by `X-Playout-Token` (no user login); one engine per station: hello/next/started from a second engine (other `X-Playout-Instance`) get 409 and an alert; /plan and /library (token only) and /commands/poll for a local FM box's relay (the poll also carries the box's health report); `/live.mp3` (token only): the live show as listeners hear it, for the engine's live lane (see `wiki/live-shows.md`) |
 | rds | rds.py | Public `/stations/{id}/rds.txt` (RadioText now; `?mode=now_playing` = song only), `/rds-ps.txt`, `/rds.json` for the RDS encoder; staff `/rds/...`: settings, messages CRUD, check, preview, plays (see `wiki/rds-feed.md`) |
 | site_release | site_release.py | /site-release (GET public; PUT mode, POST/DELETE push, GET tabs: admin) and WebSocket /ws/site that every tab keeps open (see `wiki/release-pickup.md`) |
 | emergency | emergency.py | /emergency: `POST /device/activate` (the EAS box, `X-Emergency-Token` or Basic auth password = `EMERGENCY_API_TOKEN`; real alert audio, tones allowed), `POST /activate` (manager: a spoken test, EAS tones refused, 47 CFR 11.45), `POST /{id}/stop`, `GET` log, `/status`, `/active` (staff banner); engine reports on `POST /playout/{id}/alert` (see `wiki/emergency-alerts.md`) |
@@ -324,6 +324,7 @@ radioplatform/
 | useAudioEngine.ts | Audio engine integration |
 | useNowPlaying.ts | Now-playing polling |
 | useNowPlayingWS.ts | Now-playing WebSocket (with polling fallback) |
+| useOnAirLevels.ts | The engine's on-air level for the control room meters (socket `levels` messages), no sound or click needed |
 | usePlaylists.ts | Playlist template CRUD + asset type combos |
 | useSponsorPortal.ts | Sponsor play history, stats, upcoming schedule |
 | useCampaigns.ts | Campaign CRUD (list takes an optional sponsor), status, drafts, comments |
@@ -579,6 +580,9 @@ cd frontend && for s in library-display display-findings; do BASE_URL=http://loc
 
 # Sound in the control room on an iPhone: the Listen button and tap-to-sound time, in Chromium made to follow Safari's tap rule
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-iphone-sound.mjs
+
+# The stream reconnects by itself, the Listen button says when this device is silent, meters from the engine with no click (fake backend + stand-in Icecast)
+cd frontend && BASE_URL=http://localhost:4173 node e2e/stream-keeps-playing.mjs
 
 # A new release published under an open page, then every late-loading screen opened (builds the site twice itself)
 cd frontend && node e2e/stale-release.mjs

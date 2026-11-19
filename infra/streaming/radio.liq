@@ -1254,6 +1254,42 @@ if alsa_device != "" then
   end
 end
 
+# ── Level meters for the control room ────────────────────────────────────────
+# The control room's LEFT/RIGHT meters show what is really on air, on every screen,
+# whether or not that screen plays the sound (Shmuel, 2026-11-19: "It should always be
+# showing the levels, even if you didn't hit listen"). The level of the finished signal
+# (after all the sound processing, exactly as Icecast and HLS get it) is taken every 0.1 s and sent
+# to the backend once a second, ten values per side (RMS, 0 to 1); the backend passes
+# them to the station's pages (POST /playout/{station}/levels). Dead air shows as flat
+# meters, which is the point. A lost post is simply skipped: the next second follows.
+radio = rms.stereo(duration=0.1, radio)
+meter_l = ref([])
+meter_r = ref([])
+def meter_round(x) = float_of_int(int_of_float(x * 10000.)) / 10000. end
+thread.run.recurrent(delay=0.1, fun () -> begin
+  let (l, r) = radio.rms()
+  if list.length(meter_l()) < 30 then
+    meter_l := list.append(meter_l(), [meter_round(l)])
+    meter_r := list.append(meter_r(), [meter_round(r)])
+  end
+  0.1
+end)
+thread.run.recurrent(fast=false, delay=1., fun () -> begin
+  ls = meter_l()
+  rs = meter_r()
+  meter_l := []
+  meter_r := []
+  if ls != [] then
+    try
+      ignore(http.post(headers=auth_headers, timeout=2., data=json.stringify({l=ls, r=rs, step=0.1, at=time()}),
+                       "#{backend_url}/playout/#{station_id}/levels"))
+    catch _ do
+      ()
+    end
+  end
+  1.
+end)
+
 # ── One MP3 encode for both outputs ──────────────────────────────────────────
 # Best MP3 quality: 320 kbps, 44.1 kHz stereo, slowest and best encoder setting
 # (compression_level 0 is LAME's quality 0). Encoded once and copied to Icecast and to
