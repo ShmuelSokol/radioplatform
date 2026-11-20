@@ -494,3 +494,4 @@ INGEST 2026-11-19 local-fm-box.md box return: last batch sets aside queued auto 
 INGEST 2026-11-19 local-fm-box.md control room on the box (infra/local/kbr_panel.py, port 8080, password on the network): on air, coming up, Next, play now/next/at a time, take off, move, library search, USB load; offline only (site in charge online); on return USB recordings -> POST /playout/{id}/box-upload, kept reports renamed, additions -> POST /playout/{id}/box-changes (queue + alert; removals only listed)
 UPDATE 2026-11-19 playlist-generation.md songs after Shabbos/Yom Tov are drawn again 15 min before it ends (redraw_before_blackout_end), so Motzei Shabbos starts on time
 UPDATE 2026-11-19 playlist-generation.md pull_late_id also takes out an ID waiting far too close after the one before; station ID decisions log their reason
+UPDATE 2026-11-20 playlist-generation.md a station ID already past max_minutes keeps only 1 min from breaks (id_margin)

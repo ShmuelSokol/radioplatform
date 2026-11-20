@@ -109,14 +109,14 @@ async def must_wait(
         select(QueueEntry.started_at).join(Asset, QueueEntry.asset_id == Asset.id)
         .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["playing", "played"]),
                QueueEntry.started_at.isnot(None), QueueEntry.id != entry.id,
-               QueueEntry.started_at > start - timedelta(minutes=settings.min_minutes),
+               QueueEntry.started_at > start - timedelta(hours=3),
                func.lower(Asset.category).like(f"{STATION_ID_CATEGORY_PREFIX}%"))
         .order_by(QueueEntry.started_at.desc()).limit(1)
     )).scalar()
     if last_id is not None and start - _aware(last_id) < timedelta(minutes=settings.min_minutes):
         return _refused(station_id, entry, f"only {(start - _aware(last_id)).total_seconds() / 60:.1f} min after the last ID")
     length = float(getattr(entry.asset, "duration", None) or 10.0)
-    margin = timedelta(minutes=settings.clear_minutes)
+    margin = id_margin(settings, last_id, start)
     # Half a minute more than the setting ahead: the start is an estimate (the engine asks
     # for the next item before the one now starting is reported), and the simulator
     # found an ID 2 min 59.9 s before a :30 time check
@@ -151,6 +151,23 @@ def _refused(station_id, entry: QueueEntry, why: str) -> bool:
     """Log why an automatic ID may not air now (Main 2026-11-19: IDs 36-39 min apart)."""
     logger.info("Station %s: station ID %s waits: %s", station_id, entry.id, why)
     return True
+
+
+# Once an ID is already more than max_minutes after the last one, it keeps only this far
+# from breaks instead of clear_minutes. Main 2026-11-19 23:36Z: an ID due 2 min after a
+# sponsorship that ran late was passed over song by song past the :45 sponsorships and
+# toward the :00 break, 32 min after the last; with breaks every 15 min and 3 min kept
+# clear on both sides, some half hours had no song end that passed.
+LATE_MARGIN = timedelta(minutes=1)
+
+
+def id_margin(settings, last_id: datetime | None, at: datetime) -> timedelta:
+    """How far from timed items an ID starting at `at` keeps: clear_minutes, or
+    LATE_MARGIN (if smaller) once it would come more than max_minutes after the last ID."""
+    margin = timedelta(minutes=settings.clear_minutes)
+    if last_id is not None and at - _aware(last_id) > timedelta(minutes=settings.max_minutes):
+        return min(margin, LATE_MARGIN)
+    return margin
 
 
 def pass_over(station_id, entry_id) -> None:
@@ -225,6 +242,20 @@ _TIDY_FROM = timedelta(minutes=5)
 _TIDY_UNTIL = timedelta(minutes=90)
 
 
+async def _last_aired_id(db: AsyncSession, station_id, now: datetime) -> datetime | None:
+    """When the last station ID went on air (within 3 hours), or None."""
+    from app.models.asset import Asset
+
+    last = (await db.execute(
+        select(QueueEntry.started_at).join(Asset, QueueEntry.asset_id == Asset.id)
+        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["playing", "played"]),
+               QueueEntry.started_at.isnot(None), QueueEntry.started_at > now - timedelta(hours=3),
+               func.lower(Asset.category).like(f"{STATION_ID_CATEGORY_PREFIX}%"))
+        .order_by(QueueEntry.started_at.desc()).limit(1)
+    )).scalar()
+    return _aware(last) if last is not None else None
+
+
 async def drop_misplaced(db: AsyncSession, station_id, now: datetime | None = None) -> int:
     """Move later waiting automatic IDs that the queue's own timeline now
     puts where they would be passed over at air time: right after a break, sponsorship or other spoken
@@ -270,13 +301,16 @@ async def drop_misplaced(db: AsyncSession, station_id, now: datetime | None = No
             waiting.append((entry, seconds))
 
     clock = Clock(start, timed)
-    margin = timedelta(minutes=settings.clear_minutes)
+    # the last ID that aired, then each one kept in the walk: an ID already late keeps
+    # only LATE_MARGIN from breaks (id_margin), as at air time
+    previous_id = await _last_aired_id(db, station_id, now)
     furthest = timedelta(minutes=max(settings.max_minutes - settings.min_minutes, 3.0))
 
     def fits(seconds: float, previous_kind: str | None) -> bool:
         at = clock.start()
         if previous_kind is not None and previous_kind in NOT_BEFORE_AN_ID:
             return False
+        margin = id_margin(settings, previous_id, at)
         before = clock.last_timed_end
         if before is not None and at - before < margin:
             return False
@@ -308,6 +342,7 @@ async def drop_misplaced(db: AsyncSession, station_id, now: datetime | None = No
                 for moved, place in zip(passed, places):
                     moved.position = place
                 carried.position = places[-1]
+                previous_id = clock.start()
                 clock.play(carried_seconds)
                 previous_kind = "jingle"
                 carried = None
@@ -319,6 +354,7 @@ async def drop_misplaced(db: AsyncSession, station_id, now: datetime | None = No
             if _TIDY_FROM <= at - now <= _TIDY_UNTIL and not fits(seconds, previous_kind):
                 carried, carried_seconds, carried_from, passed = entry, seconds, at, []
                 continue  # lifted out: it takes no air time here
+            previous_id = at
         clock.play(seconds)
         previous_kind = (getattr(entry.asset, "asset_type", None) or "").lower() or None
         if carried is not None:
@@ -408,7 +444,6 @@ async def pull_late_id(db: AsyncSession, station_id, now: datetime | None = None
 
     held = {str(x) for x in held_entry_ids(station_id)}
     zone = ZoneInfo(station.timezone or "America/New_York")
-    margin = timedelta(minutes=settings.clear_minutes)
     # An ID waiting far too close after the one before it (aired or waiting) would be
     # passed over at air time song after song and push the ones behind it later.
     # Main 2026-11-19 22:50Z: an ID passed over since 17:49 sat at 22:54:30 and the
@@ -456,8 +491,8 @@ async def pull_late_id(db: AsyncSession, station_id, now: datetime | None = None
         if (spot is None and i > 0 and str(entry.id) not in held and at - now >= _PULL_FROM
                 and at >= earliest and previous_kind is not None and previous_kind not in NOT_BEFORE_AN_ID
                 and kind not in NOT_BEFORE_AN_ID and settings.in_hours(at.astimezone(zone).hour)
-                and (clock.last_timed_end is None or at - clock.last_timed_end >= margin)
-                and clock.clear_of_timed(at, 10.0, margin)):
+                and (clock.last_timed_end is None or at - clock.last_timed_end >= id_margin(settings, last_id, at))
+                and clock.clear_of_timed(at, 10.0, id_margin(settings, last_id, at))):
             spot = i
         clock.play(seconds)
         previous_kind = kind or None
