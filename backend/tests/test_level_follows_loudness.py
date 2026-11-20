@@ -61,3 +61,22 @@ def test_the_engine_is_handed_the_recomputed_level():
                             source="auto", timing_mode=None, block_id=None)
     uri = playout_engine.build_uri(entry, "main")
     assert 'liq_amplify="-15.50 dB"' in uri
+
+
+def test_a_silence_is_never_handed_its_analysis():
+    # Production's "Silence (5 min)" (2026-11-20): the analysis of a silent file put the
+    # start cue at the end, so every silence ended at once and emergency music filled in
+    from types import SimpleNamespace
+
+    extra = {"audio_analysis": {"version": 2, "duration": 300.01, "loudness_lufs": -18.0,
+                                "cue_in_seconds": 300.017, "cue_out_seconds": 0.0,
+                                "cross_start_seconds": 305.017, "replay_gain_db": 0.0}}
+    asset = SimpleNamespace(
+        id="s1", title="Silence (5 min)", artist=None, album=None, asset_type="silence", duration=300.0,
+        file_path="https://files.example.test/silence_5min.mp3", category=None, metadata_extra=extra)
+    for lane in ("main", "timed"):
+        entry = SimpleNamespace(id="e1", asset=asset, asset_id="s1", station_id="s1", preempt_at=None,
+                                source="blackout", timing_mode=None, block_id=None)
+        uri = playout_engine.build_uri(entry, lane)
+        assert "liq_cue_in" not in uri and "liq_cue_out" not in uri and "liq_amplify" not in uri
+        assert uri.endswith(":https://files.example.test/silence_5min.mp3")

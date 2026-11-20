@@ -750,7 +750,13 @@ class Harness:
             self.assets["silence"] = aid
             db.add(Asset(id=aid, title="Silence", artist="Harness", duration=60.0,
                          file_path=f"http://127.0.0.1:{AUDIO_PORT}/silence.mp3", asset_type="silence",
-                         review_status="approved"))
+                         review_status="approved",
+                         # As production's "Silence (5 min)" has it: the level analysis of a
+                         # silent file puts the start cue at its end (2026-11-20 candle lighting)
+                         metadata_extra={"audio_analysis": {
+                             "version": 99, "cue_in_seconds": 60.0, "cue_out_seconds": 0.0,
+                             "cross_start_seconds": 65.0, "replay_gain_db": 12.0,
+                             "loudness_lufs": -70.0}}))
             # song1's file at -6 dB, a jingle for mix-over (its own tone, so it can be told
             # apart from a timed song3quiet still playing)
             aid = uuid.uuid4()
