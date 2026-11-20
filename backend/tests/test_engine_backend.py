@@ -2289,3 +2289,42 @@ async def test_a_backend_restart_in_a_blackout_hands_no_more_silence_to_the_time
     assert len(engine.timed()) == playout_engine.SILENCE_TIMED_MAX
     r = await _next(client, station)
     assert r.json()["entry_id"] in {str(x.id) for x in rows}
+
+
+@pytest.mark.asyncio
+async def test_an_active_blackout_with_silence_on_air_is_not_refilled(client, db_session, eng):
+    """KBR Jerusalem 2026-11-20 ~17:30Z: the active-blackout refill came up one short on
+    every pass, marked the silences played and skipped the engine each time, so it raced
+    through a silence every second or two. With silence on air it leaves it alone."""
+    station, _, engine, _ = eng
+    silence, rows = await _blackout_with_silences(db_session, station, 3, started_ago=600)
+    await _on_air(client, station, rows[0].id, lane="main")
+    sent = len(engine.paths())
+    for _ in range(3):
+        assert await queue_module.fill_blackout_queue(db_session, station.id) == 0
+    assert "/skip" not in engine.paths()[sent:] and "/flush" not in engine.paths()[sent:]
+    for r in rows[1:]:
+        assert (await _fresh(db_session, r.id)).status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_two_silence_items_do_not_make_the_refill_run_every_pass(client, db_session, eng):
+    """With a second silence item in the library, a refill counts both (it counted one)."""
+    station, entries, engine, _ = eng
+    await _on_air(client, station, entries[0].id)
+    first = Asset(id=uuid.uuid4(), title="Silence", duration=300.0, asset_type="silence",
+                  file_path="https://cdn.example.com/audio/silence.mp3")
+    db_session.add(first)
+    await db_session.flush()
+    db_session.add(Asset(id=uuid.uuid4(), title="Silence 60", duration=60.0, asset_type="silence",
+                         file_path="https://cdn.example.com/audio/silence60.mp3"))
+    now = datetime.now(UTC)
+    db_session.add(HolidayWindow(id=uuid.uuid4(), name="Shabbos", is_blackout=True,
+                                 start_datetime=now - timedelta(seconds=5),
+                                 end_datetime=now + timedelta(minutes=20)))
+    await db_session.commit()
+    assert await queue_module.fill_blackout_queue(db_session, station.id) >= 4
+    skips = engine.paths().count("/skip")
+    for _ in range(3):
+        assert await queue_module.fill_blackout_queue(db_session, station.id) == 0
+    assert engine.paths().count("/skip") == skips
