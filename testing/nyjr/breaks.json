@@ -1934,5 +1934,16 @@
   "block_names": "Kol B'Ramah Sponsors",
   "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
   "next_item": "Silberstein Tzvi  Simcha - V'atem"
+ },
+ {
+  "start_utc": "2026-11-20T17:59:59Z",
+  "start_et": "2026-11-20 12:59:59",
+  "hour_et": "2026-11-20 12:00",
+  "spots": 1,
+  "total_seconds": null,
+  "spot_seconds": "?",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": ""
  }
 ]
