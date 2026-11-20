@@ -25,6 +25,16 @@
  * refuses anyway, or something else paused it (the lock screen, a phone call), the
  * stream says 'blocked' and the page asks for one tap.
  *
+ * Taken away just after the start (2026-11-20): on Shmuel's iPhone the stream played
+ * about a second and stopped, and only "mute, then Listen again" brought it back. The
+ * phone had paused the element itself (iPhone Safari pauses a page's player when it
+ * moves the sound between the page's players or briefly takes the audio session);
+ * that was shown as 'blocked' and waited for a tap. A pause that is not this player's,
+ * within RESUME_WINDOW_MS of the sound starting, is now answered with play() on the
+ * same element, which a tap already unlocked, so no new tap is needed. At most
+ * RESUME_TRIES times a minute; after that, or when the browser refuses, 'blocked'.
+ * A pause after steady sound (the lock screen, headphones out) is still left alone.
+ *
  * The state is on the element: `audio.dataset.streamState` and a STREAM_STATE_EVENT
  * event each time it changes (the element is the tab's shared one, lib/stationStream).
  */
@@ -54,6 +64,12 @@ const WATCH_EVERY = 1000;
 export const RETRY_DELAYS = [1000, 2000, 4000, 8000, 10000];
 // HLS reloads that did not bring the sound back before trying the plain stream
 const HLS_RELOADS_BEFORE_PLAIN = 3;
+// A pause that is not this player's this soon after the sound started: play again (ms)
+export const RESUME_WINDOW_MS = 20_000;
+// How long after such a pause play() is called again (ms)
+export const RESUME_AFTER_MS = 400;
+// At most this many such resumes a minute; then the page asks for a tap
+export const RESUME_TRIES = 3;
 
 /** The engine's HLS copy of an Icecast mount: /live-<id> -> /hls/<id>/mp3.m3u8 */
 export function hlsUrlFor(url: string): string | null {
@@ -110,6 +126,9 @@ export function startLiveStream(audio: HTMLAudioElement, url: string, onFail: ()
   let wake: (() => void) | null = null;
   let lastDataAt = Date.now();
   const startedAt = Date.now();
+  // Pauses this player answered by playing again (times), and the one waiting to
+  let resumes: number[] = [];
+  let resumeTimer: ReturnType<typeof setTimeout> | undefined;
 
   const fail = () => {
     if (failedOnce || stopped) return;
@@ -282,6 +301,32 @@ export function startLiveStream(audio: HTMLAudioElement, url: string, onFail: ()
     setState(audio, 'playing');
   };
   const onEnded = () => { if (!stopped) { playingSince = 0; scheduleReconnect(); } };
+  // Paused, and not by this player (it pauses only when stopped): the phone took the
+  // sound. Just after the start, take it back; otherwise wait for a tap.
+  const onForeignPause = () => {
+    if (stopped || audio.ended || resumeTimer !== undefined) return;
+    if (streamStateOf(audio) !== 'playing') return;
+    const now = Date.now();
+    const soon = playingSince > 0 && now - playingSince < RESUME_WINDOW_MS;
+    resumes = resumes.filter((t) => now - t < 60_000);
+    playingSince = 0;
+    if (!soon || resumes.length >= RESUME_TRIES) { setState(audio, 'blocked'); return; }
+    resumes.push(now);
+    resumeTimer = setTimeout(() => {
+      resumeTimer = undefined;
+      if (stopped || !audio.paused) return;
+      // MSE: back near the newest audio (keepNearLive does it on the next data);
+      // HLS and plain: the element goes on from where it was paused
+      let p: Promise<void> | undefined;
+      try { p = audio.play(); } catch (e) { p = Promise.reject(e); }
+      Promise.resolve(p).catch((e) => {
+        if (stopped) return;
+        if (refused(e)) { setState(audio, 'blocked'); return; }
+        scheduleReconnect();
+      });
+    }, RESUME_AFTER_MS);
+  };
+  const onPause = () => { if (!stopped && audio.paused) onForeignPause(); };
   const onError = () => {
     if (stopped) return;
     // An error before HLS ever played: the HLS copy is missing, use the plain stream
@@ -311,8 +356,10 @@ export function startLiveStream(audio: HTMLAudioElement, url: string, onFail: ()
       if (mode !== 'hls' && now - startedAt > 15_000 && now - lastMoveAt > 15_000) { lastMoveAt = now; scheduleReconnect(); }
       return;
     }
-    // Paused by something other than this player (lock screen, a call, headphones out)
-    if (state === 'playing' && audio.paused && !audio.ended) { playingSince = 0; setState(audio, 'blocked'); return; }
+    // Paused by something other than this player (lock screen, a call, headphones out,
+    // or the phone just after the start): the 'pause' event normally gets here first
+    if (resumeTimer !== undefined) return;
+    if (state === 'playing' && audio.paused && !audio.ended) { onForeignPause(); return; }
     if (mode === 'mse') {
       // The connection is open but nothing comes (a network black hole): drop it, the
       // fetch loop connects again
@@ -339,8 +386,11 @@ export function startLiveStream(audio: HTMLAudioElement, url: string, onFail: ()
     stopped = true;
     clearTimeout(retryTimer);
     clearTimeout(startTimer);
+    clearTimeout(resumeTimer);
+    resumeTimer = undefined;
     clearInterval(watchTimer);
     audio.removeEventListener('playing', onPlaying);
+    audio.removeEventListener('pause', onPause);
     audio.removeEventListener('ended', onEnded);
     audio.removeEventListener('error', onError);
     if (typeof window !== 'undefined' && window.removeEventListener) window.removeEventListener('online', onOnline);
@@ -358,6 +408,7 @@ export function startLiveStream(audio: HTMLAudioElement, url: string, onFail: ()
 
   setState(audio, 'starting');
   audio.addEventListener('playing', onPlaying);
+  audio.addEventListener('pause', onPause);
   audio.addEventListener('ended', onEnded);
   audio.addEventListener('error', onError);
   if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('online', onOnline);

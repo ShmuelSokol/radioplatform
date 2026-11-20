@@ -353,7 +353,14 @@ export default function Dashboard() {
   const remaining = cutsShort ? cutInSec : naturalRemaining;
   const cutAtIso = cutsShort ? nextPreempt!.preempt_at : null;
 
-  const dashStreamUrl = wsNowPlaying?.stream_url || null;
+  // A moment of "nothing on air" from the server keeps the station's stream address, so
+  // the stream plays on instead of stopping and starting again outside a tap (an iPhone
+  // may refuse that restart; 2026-11-20). An item on air with no address drops it.
+  const knownStreamUrl = useRef<{ station: string | null | undefined; url: string | null }>({ station: stationId, url: null });
+  if (knownStreamUrl.current.station !== stationId) knownStreamUrl.current = { station: stationId, url: null };
+  if (wsNowPlaying?.stream_url) knownStreamUrl.current.url = wsNowPlaying.stream_url;
+  else if (wsNowPlaying) knownStreamUrl.current.url = null;
+  const dashStreamUrl = wsNowPlaying?.stream_url || knownStreamUrl.current.url;
   const [streamFailed, setStreamFailed] = useState(false);
   // A stream that failed is tried again on another station's stream, and on this one
   // after a while: it used to stay on the built-in player for the rest of the session

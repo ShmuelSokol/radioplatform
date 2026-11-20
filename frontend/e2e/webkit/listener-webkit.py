@@ -20,7 +20,7 @@ Setup (Ubuntu 24.04, once):
   pip install selenium
 Run:
   cd frontend && npm run build && (npx vite preview --port 4183 --strictPort &)
-  xvfb-run -a python3 e2e/webkit/listener-webkit.py        # ONLY=listen,stream,bar,stale,callin,release,pages
+  xvfb-run -a python3 e2e/webkit/listener-webkit.py        # ONLY=listen,stream,bar,taken,stale,callin,release,pages
 
 Exits non-zero if a check fails. KNOWN_BUGS lists checks expected to fail (XFAIL); a pass
 there prints XPASS and fails, like pytest's xfail(strict=True).
@@ -495,6 +495,32 @@ def stream_missing(tag, args, no_mse=False):
         d.quit()
 
 
+# ── The phone takes the sound just after it started (Shmuel, 2026-11-20) ─────────────
+def taken(tag, args, no_mse=False, hls=False):
+    """A second after Listen the stream element is paused by something other than the page
+    (iPhone Safari does this): it must play again by itself, with no new tap. This runs the
+    part that only a real engine can say: play() on the element, outside any click, after a
+    click once started it, is allowed (WebKit keeps that per element, as iPhone Safari does)."""
+    np = ctl('reset', {'mode': 'server', 'stream': 'hls' if hls else 'ok', 'show': False})
+    d = browser(args, no_mse, native_hls=hls)
+    try:
+        open_page(d, f'/listen/{np["sid"]}')
+        wait_for(d, "document.body.innerText.includes('Live stream')", 8)
+        ms = press(d, STREAM_PLAYING, button(d, 'Listen Live'), 8)
+        check(f'{tag}: (set up) Listen Live heard', ms >= 0, f'{ms} ms')
+        time.sleep(1.0)
+        js(d, "document.querySelector('[data-testid=station-stream]').pause();")
+        back = wait_for(d, "(() => { const a = document.querySelector('[data-testid=station-stream]'); "
+                           "if (!a || a.paused) return false; if (window.__tk === undefined) window.__tk = a.currentTime; "
+                           "return a.currentTime > window.__tk + 0.5; })()", 8)
+        st = js(d, "const a = document.querySelector('[data-testid=station-stream]'); return [a.paused, a.dataset.streamState];")
+        check(f'{tag}: paused by the phone a second after the start: plays again by itself, no tap', back >= 0, f'{back} ms, {st}')
+        check(f'{tag}: no "tap to resume" asked', js(d, "return !document.querySelector('[data-testid=listen-resume]')"))
+        check(f'{tag}: no script errors', not errors(d), ' | '.join(errors(d)))
+    finally:
+        d.quit()
+
+
 # ── /call/:id ─────────────
 def call_in(tag, args):
     np = ctl('reset', {'mode': 'browser', 'show': True})
@@ -641,6 +667,9 @@ def main():
             bar('bar WebKit', SAFARI, 'browser')
             bar('bar WebKit no MSE (iPhone path), server stream', SAFARI, 'server', no_mse=True)
             bar('bar WebKit as iPhone (no MSE, native HLS), server stream', SAFARI, 'server', no_mse=True, hls=True)
+        if run('taken'):
+            taken('taken WebKit no MSE (iPhone path)', SAFARI, no_mse=True)
+            taken('taken WebKit as iPhone (no MSE, native HLS)', SAFARI, no_mse=True, hls=True)
         if run('stale'):
             stale_release('stale WebKit, built-in player', SAFARI, 'browser')
             stale_release('stale WebKit as iPhone (no MSE, native HLS), server stream', SAFARI, 'server', no_mse=True, hls=True)
