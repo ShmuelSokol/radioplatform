@@ -2271,3 +2271,21 @@ async def test_emergency_music_in_a_blackout_pushes_and_moves_the_engine_off(cli
     assert "/skip" in engine.paths()
     r = await _next(client, station)
     assert (await _fresh(db_session, uuid.UUID(r.json()["entry_id"]))).asset_id == silence.id
+
+
+@pytest.mark.asyncio
+async def test_a_backend_restart_in_a_blackout_hands_no_more_silence_to_the_timed_lane(client, db_session, eng):
+    """Harness shabbos_long_restart 2026-11-20: a restart within 5 min of candle lighting
+    forgot the silences it had handed and handed 2 more; each restart would add to them.
+    With silence already on air, /next goes on with it and the timed lane gets nothing."""
+    station, _, engine, _ = eng
+    _, rows = await _blackout_with_silences(db_session, station, 20)
+    await playout_engine.tick(db_session, station)
+    first = [c["id"] for c in engine.timed()]
+    assert len(first) == playout_engine.SILENCE_TIMED_MAX
+    await _on_air(client, station, first[0], lane="timed")
+    playout_engine.reset_state()  # the restart
+    await playout_engine.tick(db_session, station)
+    assert len(engine.timed()) == playout_engine.SILENCE_TIMED_MAX
+    r = await _next(client, station)
+    assert r.json()["entry_id"] in {str(x.id) for x in rows}
