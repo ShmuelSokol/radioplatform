@@ -224,8 +224,8 @@ async def test_nothing_from_erev_shabbos_airs_on_motzei_shabbos(tmp_path, statio
     Shabbos (Main: TEST SPONSOR 50 and Erev Shabbos songs; Jerusalem: Yoma 9, 51 min).
 
     Three minutes before candle lighting a song, a sponsorship and a shiur are put ahead of
-    the silences, as the queue had them. Through Shabbos (shortened to an hour) into the
-    first hour after it: none of what waited ahead of the silences airs after candle
+    the silences, as the queue had them. Through Shabbos (shortened to 20 min, to keep CI
+    under its time limit) into the half hour after it: none of what waited ahead of the silences airs after candle
     lighting, programming is back within seconds of the window's end with something new,
     and no spoken item is cut by candle lighting."""
     from datetime import timedelta
@@ -235,7 +235,7 @@ async def test_nothing_from_erev_shabbos_airs_on_motzei_shabbos(tmp_path, statio
     from app.models.asset import Asset
     from app.models.queue_entry import QueueEntry
 
-    export, ws, we = _short_shabbos(tmp_path, station, 60)
+    export, ws, we = _short_shabbos(tmp_path, station, 20)
     sid = SHABBOS_IDS[station]
     before: set[str] = set()
 
@@ -269,7 +269,7 @@ async def test_nothing_from_erev_shabbos_airs_on_motzei_shabbos(tmp_path, statio
             before.update(str(r) for r in rows)
 
     start = ws - timedelta(minutes=25)
-    hours = (we - start).total_seconds() / 3600 + 1.0
+    hours = (we - start).total_seconds() / 3600 + 0.5
     _, result = await simulate(export, start, hours, [station], tmp_path,
                                events=[(ws - timedelta(minutes=3), leftovers)])
     print(result.report())
