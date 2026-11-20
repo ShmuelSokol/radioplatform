@@ -166,6 +166,11 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
 
 # How long before a blackout the item that would be cut by its silence is looked for
 SPOT_CUT_LOOKAHEAD = timedelta(minutes=20)
+# The queue's timeline runs a few seconds early (song ends are estimated): a spoken item
+# must end this long before the blackout to stay. Main's TEST SPONSOR 29 (22 s) seemed to
+# fit by under a second, started 4 s later than estimated and was cut at 19 s (review
+# simulator run 2026-11-19).
+SPOT_CUT_MARGIN = timedelta(seconds=8)
 # What may never be cut off by the blackout's silence (music just fades, as at :00)
 _SPOKEN_TYPES = (
     "spot", "jingle", "sweeper", "station_id", "time", "weather", "psa", "announcement",
@@ -265,7 +270,8 @@ async def _drop_spots_cut_by(db: AsyncSession, station_id, start) -> int:
         est = _aware(datetime.fromisoformat(d["estimated_start"]))
         if est >= start:
             continue
-        if est + timedelta(seconds=float(asset.get("duration") or DEFAULT_DURATION)) > start:
+        end = est + timedelta(seconds=float(asset.get("duration") or DEFAULT_DURATION))
+        if end + SPOT_CUT_MARGIN > start:
             ids.append(d["id"])
     if not ids:
         return 0
@@ -276,6 +282,14 @@ async def _drop_spots_cut_by(db: AsyncSession, station_id, start) -> int:
     await db.commit()
     logger.warning("Station %s: %d spoken item(s) that the blackout at %s would cut left the queue",
                    station_id, len(ids), start)
+    if settings.engine_drives(station_id):
+        from app.services import playout_engine
+
+        state = playout_engine.get_state(station_id)
+        held = {str(i) for i in ({state.cued_entry_id} | set(state.given)) if i}
+        if held & {str(i) for i in ids}:
+            # already pre-loaded in the engine: it would still play it
+            await playout_engine.engine_flush(station_id)
     return len(ids)
 
 
