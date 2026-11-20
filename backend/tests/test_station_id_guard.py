@@ -22,7 +22,7 @@ async def _setup(db: AsyncSession, before: str, break_in_minutes: float | None, 
     soft break due `break_in_minutes` from now."""
     now = datetime.now(UTC)
     station = Station(id=uuid.uuid4(), name=f"S {uuid.uuid4().hex[:6]}", timezone="America/New_York",
-                      automation_config={"station_ids": {"enabled": True}})
+                      automation_config={"station_ids": {"enabled": True, "placement": "between_songs"}})
     db.add(station)
     await db.flush()
 
@@ -224,7 +224,7 @@ async def test_queue_tidy_moves_ids_away_from_breaks_and_keeps_clear_ones(db_ses
     timeline puts beside a break is taken out; one well clear stays."""
     now = datetime.now(UTC)
     station = Station(id=uuid.uuid4(), name=f"S {uuid.uuid4().hex[:6]}", timezone="America/New_York",
-                      automation_config={"station_ids": {"enabled": True}})
+                      automation_config={"station_ids": {"enabled": True, "placement": "between_songs"}})
     db_session.add(station)
     await db_session.flush()
 
@@ -308,7 +308,7 @@ async def test_a_late_id_is_brought_forward_to_keep_them_12_to_20_minutes_apart(
     least min_minutes (12) after it that the air-time check accepts."""
     now = datetime.now(UTC)
     station = Station(id=uuid.uuid4(), name=f"S {uuid.uuid4().hex[:6]}", timezone="America/New_York",
-                      automation_config={"station_ids": {"enabled": True, "clear_minutes": 1}})
+                      automation_config={"station_ids": {"enabled": True, "placement": "between_songs", "clear_minutes": 1}})
     db_session.add(station)
     await db_session.flush()
 
@@ -358,7 +358,7 @@ async def test_an_id_on_time_is_left_where_the_fill_put_it(db_session: AsyncSess
     """An ID the timeline puts within max_minutes of the last one stays put."""
     now = datetime.now(UTC)
     station = Station(id=uuid.uuid4(), name=f"S {uuid.uuid4().hex[:6]}", timezone="America/New_York",
-                      automation_config={"station_ids": {"enabled": True, "clear_minutes": 1}})
+                      automation_config={"station_ids": {"enabled": True, "placement": "between_songs", "clear_minutes": 1}})
     db_session.add(station)
     await db_session.flush()
     song = Asset(id=uuid.uuid4(), title="s", file_path="s.mp3", asset_type="music", category="lively", duration=243.0)
@@ -386,7 +386,7 @@ async def test_an_id_waiting_far_too_close_after_the_one_before_is_taken_out(db_
     push the ones behind it later. The later one is taken out; the first stays."""
     now = datetime.now(UTC)
     station = Station(id=uuid.uuid4(), name=f"S {uuid.uuid4().hex[:6]}", timezone="America/New_York",
-                      automation_config={"station_ids": {"enabled": True, "clear_minutes": 1}})
+                      automation_config={"station_ids": {"enabled": True, "placement": "between_songs", "clear_minutes": 1}})
     db_session.add(station)
     await db_session.flush()
     song = Asset(id=uuid.uuid4(), title="s", file_path="s.mp3", asset_type="music", category="lively", duration=243.0)
@@ -433,7 +433,7 @@ async def test_an_id_already_late_keeps_only_a_minute_from_breaks(
     once later than that, only LATE_MARGIN (1)."""
     now = datetime.now(UTC)
     station = Station(id=uuid.uuid4(), name=f"S {uuid.uuid4().hex[:6]}", timezone="America/New_York",
-                      automation_config={"station_ids": {"enabled": True}})
+                      automation_config={"station_ids": {"enabled": True, "placement": "between_songs"}})
     db_session.add(station)
     await db_session.flush()
     song = Asset(id=uuid.uuid4(), title="s", file_path="s.mp3", asset_type="music", category="lively", duration=100.0)

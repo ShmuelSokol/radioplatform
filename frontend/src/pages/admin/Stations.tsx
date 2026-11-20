@@ -445,7 +445,9 @@ interface OmerOverview { first_day: string; last_day: string; recorded: number; 
 interface OmerHour { at: string; local: string; omer_day: number | null; text: string | null; recorded: boolean; off_air: string | null }
 interface StationOmer { enabled: boolean; switch_minutes: number; place_known: boolean; date: string; sunrise: string | null; shekia: string | null; switch_at: string | null; hours: OmerHour[] }
 
-function longDate(iso: string): string {
+function longDate(iso: string | null | undefined): string {
+  // an answer without the date (a fake or older backend) left the whole Stations page on "Something went wrong"
+  if (!iso) return '';
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 }
@@ -577,6 +579,10 @@ function AutomationConfig({ stationId, config, onSave, saving }: {
   const [crossfade, setCrossfade] = useState<string>(String(config.crossfade_seconds ?? 1));
   const ids = (config.station_ids ?? {}) as Record<string, any>;
   const [idsOn, setIdsOn] = useState<boolean>(ids.enabled === true);
+  // Where they air: in the breaks (Shmuel 2026-11-19: "part of the ad blocks. Or once an hour.
+  // Not randomly between songs"); between songs is the old way, kept as a choice
+  const [idsWhere, setIdsWhere] = useState<string>(
+    ['hourly', 'every_block', 'between_songs'].includes(ids.placement) ? ids.placement : 'hourly');
   const [idsMin, setIdsMin] = useState<string>(String(ids.min_minutes ?? 12));
   const [idsMax, setIdsMax] = useState<string>(String(ids.max_minutes ?? 20));
   const [idsCategory, setIdsCategory] = useState<string>(String(ids.category ?? 'station_id'));
@@ -618,6 +624,7 @@ function AutomationConfig({ stationId, config, onSave, saving }: {
       station_ids: {
         ...ids, // keep anything set elsewhere (clear_minutes)
         enabled: idsOn,
+        placement: idsWhere,
         min_minutes: idsLow,
         max_minutes: Math.max(idsLow, minutes(idsMax, 20)),
         category: idsCategory.trim() || 'station_id',
@@ -694,24 +701,33 @@ function AutomationConfig({ stationId, config, onSave, saving }: {
           <input type="checkbox" checked={idsOn} onChange={e => setIdsOn(e.target.checked)}
             className="mt-1" data-testid="station-ids-on" />
           <span>
-            <span className="block font-medium text-gray-700">Station IDs between songs</span>
+            <span className="block font-medium text-gray-700">Station IDs</span>
             <span className="block mt-1 text-xs text-gray-500">
-              A station ID jingle plays after a song (or a story) now and then, taking turns so each one is used before any repeats.
-              Never within 3 minutes of a time check, weather or sponsorship break, never right after another short item (a sponsorship, a jingle),
-              never on Shabbos or Yom Tov. On a stories station they go between stories.
+              A station ID jingle, taking turns so each one is used before any repeats. Once an hour: last in the
+              top-of-hour break (none after a shiur). In every break: last in each break. Between songs: the old way,
+              every few minutes. Never on Shabbos or Yom Tov.
             </span>
           </span>
         </label>
         <div className="mt-2 ml-6 flex flex-wrap items-center gap-2">
+          <span>Where</span>
+          <select value={idsWhere} disabled={!idsOn} onChange={e => setIdsWhere(e.target.value)}
+            aria-label="Where station IDs play" className="px-2 py-1 border rounded" data-testid="station-ids-where">
+            <option value="hourly">Once an hour</option>
+            <option value="every_block">In every break</option>
+            <option value="between_songs">Between songs</option>
+          </select>
+        </div>
+        <div className="mt-2 ml-6 flex flex-wrap items-center gap-2">
           <span>Every</span>
-          <input type="number" value={idsMin} min={3} max={240} step={1} disabled={!idsOn}
+          <input type="number" value={idsMin} min={3} max={240} step={1} disabled={!idsOn || idsWhere !== 'between_songs'}
             onChange={e => setIdsMin(e.target.value)} aria-label="Fewest minutes between station IDs"
             className="w-16 px-2 py-1 border rounded" data-testid="station-ids-min" />
           <span>to</span>
-          <input type="number" value={idsMax} min={3} max={240} step={1} disabled={!idsOn}
+          <input type="number" value={idsMax} min={3} max={240} step={1} disabled={!idsOn || idsWhere !== 'between_songs'}
             onChange={e => setIdsMax(e.target.value)} aria-label="Most minutes between station IDs"
             className="w-16 px-2 py-1 border rounded" data-testid="station-ids-max" />
-          <span>minutes, from jingles of category</span>
+          <span>minutes (between songs only), from jingles of category</span>
           <input type="text" value={idsCategory} disabled={!idsOn}
             onChange={e => setIdsCategory(e.target.value)} aria-label="Category of the station ID jingles"
             className="w-44 px-2 py-1 border rounded" data-testid="station-ids-category" />

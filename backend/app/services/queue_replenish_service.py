@@ -227,6 +227,14 @@ class QueueReplenishService:
             self.max_pos = max(self.max_pos, blocks_result["max_pos"])
         if blocks_result is None and (wants_hourly or wants_id) and not keep_hourly:
             await self._schedule_top_of_hour(wants_hourly, wants_id)
+        # Station IDs "once an hour" / "in the breaks" (automation_config.station_ids):
+        # a station with program blocks gets them in its breaks (program_block_service);
+        # one without gets the ID in its hh:00 group, after the time check and weather
+        from app.services.playlist_generator_service import id_settings_for
+
+        ids = id_settings_for(self.automation_config)
+        if blocks_result is None and ids.on and ids.placement in ("hourly", "every_block") and not wants_id:
+            await self._schedule_hourly_station_ids(ids.category, ids)
 
         # Sefiras HaOmer: the day's count in each hh:00 group, after the time check
         try:
@@ -1213,7 +1221,7 @@ class QueueReplenishService:
         if station_id:
             await self._schedule_hourly_station_ids()
 
-    async def _schedule_hourly_station_ids(self) -> None:
+    async def _schedule_hourly_station_ids(self, category: str = "hourly_id", ids=None) -> None:
         """Queue the station ID jingle (jingle / hourly_id) at each of the station's own
         hh:00 for the next 48 hours, in the same timed group as the time check and
         weather and after them (the time check stays on the second).
@@ -1224,11 +1232,13 @@ class QueueReplenishService:
         no jingle in the library nothing is queued. None inside Shabbos / Yom Tov."""
         from app.models.asset import not_placeholder
         from app.services.spot_schedule_service import load_blackouts
+        from app.services.station_blocks import blocked_asset_ids
         from app.services.weather_spot_service import station_announcement_zone
 
         jingles = list((await self.db.execute(
             select(Asset)
-            .where(Asset.asset_type == "jingle", func.lower(Asset.category) == "hourly_id", not_placeholder())
+            .where(Asset.asset_type == "jingle", func.lower(Asset.category) == category.lower(), not_placeholder(),
+                   Asset.id.notin_(blocked_asset_ids(self.station_id)))
             .order_by(Asset.title)
         )).scalars().all())
         if not jingles:
@@ -1262,11 +1272,15 @@ class QueueReplenishService:
         for mark in local_hour_marks(now, zone, 48):
             if mark in have or any(b.covers(mark) for b in blackouts):
                 continue
+            if ids is not None and not ids.in_hours(mark.astimezone(zone).hour):
+                continue
             self.max_pos += 1
             self.db.add(QueueEntry(
                 id=uuid.uuid4(),
                 station_id=self.station_id,
-                asset_id=for_hour(mark.astimezone(zone).hour).id,
+                # the hourly_id jingles name their hour; station IDs take turns by the hour
+                asset_id=(for_hour(mark.astimezone(zone).hour) if category == "hourly_id"
+                          else jingles[int(mark.timestamp() // 3600) % len(jingles)]).id,
                 position=self.max_pos,
                 status="pending",
                 preempt_at=mark,

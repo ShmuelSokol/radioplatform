@@ -17,7 +17,7 @@ from app.services.playlist_generator_service import (
 )
 from tests.test_playlist_generation import MONDAY_7AM, _setup
 
-IDS = {"enabled": True, "min_minutes": 12, "max_minutes": 20}
+IDS = {"enabled": True, "placement": "between_songs", "min_minutes": 12, "max_minutes": 20}
 
 
 def _jingle(n: int, category: str = "station_id") -> Asset:
@@ -37,9 +37,9 @@ async def _station_with_ids(db: AsyncSession, ids: dict | None, jingles: int = 6
 
 def test_settings_defaults_and_limits():
     assert id_settings_for(None).enabled is False
-    s = id_settings_for({"station_ids": {"enabled": True, "min_minutes": 30, "max_minutes": 10}})
+    s = id_settings_for({"station_ids": {"enabled": True, "placement": "between_songs", "min_minutes": 30, "max_minutes": 10}})
     assert s.enabled and s.min_minutes == 30 and s.max_minutes == 30  # max never under min
-    s = id_settings_for({"station_ids": {"enabled": True, "min_minutes": "x", "category": "  "}})
+    s = id_settings_for({"station_ids": {"enabled": True, "placement": "between_songs", "min_minutes": "x", "category": "  "}})
     assert s.min_minutes == 12 and s.category == "station_id"
     assert id_settings_for({"station_ids": {"min_minutes": 0.5}}).min_minutes == 3
 
@@ -237,7 +237,7 @@ async def test_rule_filled_station_gets_ids_between_stories(db_session: AsyncSes
     from app.services.queue_replenish_service import QueueReplenishService
 
     random.seed(13)
-    station, jingle_ids = await _stories_with_ids(db_session, {"enabled": True, "min_minutes": 25, "max_minutes": 35})
+    station, jingle_ids = await _stories_with_ids(db_session, {"enabled": True, "placement": "between_songs", "min_minutes": 25, "max_minutes": 35})
     await QueueReplenishService(db_session, station.id).replenish()
     entries = await _pending(db_session, station.id)
     durations = dict((await db_session.execute(select(Asset.id, Asset.duration))).all())
@@ -258,7 +258,7 @@ async def test_rule_fill_off_by_default_and_hours_window(db_session: AsyncSessio
     await QueueReplenishService(db_session, station.id).replenish()
     assert not any(e.asset_id in jingle_ids for e in await _pending(db_session, station.id))
 
-    s = id_settings_for({"station_ids": {"enabled": True, "start_hour": 6, "end_hour": 22}})
+    s = id_settings_for({"station_ids": {"enabled": True, "placement": "between_songs", "start_hour": 6, "end_hour": 22}})
     assert s.in_hours(6) and s.in_hours(21) and not s.in_hours(22) and not s.in_hours(3)
     night = id_settings_for({"station_ids": {"start_hour": 22, "end_hour": 6}})
     assert night.in_hours(23) and night.in_hours(2) and not night.in_hours(12)
