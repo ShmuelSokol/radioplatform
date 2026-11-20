@@ -89,6 +89,7 @@ class EngineState:
     # Silences handed to the timed lane per blackout start (SILENCE_TIMED_MAX)
     silence_handed: dict[int, set[str]] = field(default_factory=dict)
     blackout_skip_at: float = 0.0
+    blackout_flushed: bool = False
     # A manual skip is in flight: the outgoing entry is logged as skipped
     skip_requested: bool = False
     # Soft-timed groups (by their time) whose hard_by limit already made us fade the song
@@ -2231,6 +2232,22 @@ async def _silence_on_air(db: AsyncSession, station_id) -> bool:
     return res.scalar_one_or_none() == "silence"
 
 
+async def _flush_at_blackout_start(db: AsyncSession, station_id, state: EngineState) -> None:
+    """Once a blackout has begun, drop the song the engine pre-loaded before it (once per
+    blackout). The timed silence takes over at candle lighting, but the music lane keeps
+    its pre-loaded song and plays it when the timed silences end (harness shabbos_silence
+    2026-11-20 on #482: a song at +120 s). The active refill's flush used to do this by
+    chance; it no longer runs while silence is queued."""
+    if not await _blacked_out(db, station_id):
+        state.blackout_flushed = False
+        return
+    if state.blackout_flushed:
+        return
+    if await engine_flush(station_id):
+        state.blackout_flushed = True
+        logger.info("Station %s: blackout began; dropped the engine's pre-loaded track", station_id)
+
+
 def _group_key(at: datetime) -> int:
     """A timed group's time as whole seconds (the same for naive and aware values)."""
     return round((at if at.tzinfo else at.replace(tzinfo=UTC)).timestamp())
@@ -2463,6 +2480,11 @@ async def tick(db: AsyncSession, station) -> None:
         await db.rollback()
         await db.refresh(station)
     await _hand_over_timed(db, station_id, state, now, horizon)
+    try:
+        await _flush_at_blackout_start(db, station_id, state)
+    except Exception:
+        logger.warning("Blackout start flush failed for station %s", station_id, exc_info=True)
+        await db.rollback()
     try:
         await _analyse_ahead(db, station_id, now)
     except Exception as e:

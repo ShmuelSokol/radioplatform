@@ -4409,7 +4409,12 @@ async def sc_shabbos_long_restart(h: Harness) -> None:
                 f"at most {SILENCE_TIMED_MAX} silences handed to the timed lane ({len(handed)})")
         nexts = [ln for ln in lines if "Engine next -> " in ln]
         h.check(name, len(nexts) >= 2, f"silence handed through /next ({len(nexts)}), also after the restart")
-        log(f"{name}: restart at +{restarted - start.timestamp():.0f} s, {len(handed)} timed, {len(nexts)} via /next")
+        refills = [ln for ln in lines if "Filled blackout queue" in ln and "active" in ln]
+        h.check(name, len(refills) <= 2, f"no refill loop inside the window ({len(refills)} active refills)")
+        skipped = [ln for ln in lines if "during a blackout; skipping it" in ln]
+        h.check(name, len(skipped) <= 3, f"no skip cycle on a song reported in the blackout ({len(skipped)})")
+        log(f"{name}: restart at +{restarted - start.timestamp():.0f} s, {len(handed)} timed, {len(nexts)} via /next, "
+            f"{len(refills)} refills, {len(skipped)} blackout skips")
     finally:
         async with async_session_factory() as db:
             await db.execute(delete(HolidayWindow).where(HolidayWindow.id == wid))

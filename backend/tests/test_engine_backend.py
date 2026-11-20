@@ -2385,3 +2385,14 @@ async def test_a_song_started_in_a_blackout_is_skipped_at_once(client, db_sessio
     assert r.status_code == 200 and r.json().get("skipped_in_blackout")
     assert engine.paths()[-1] == "/skip"
     assert (await _fresh(db_session, entries[0].id)).status == "played"
+
+
+@pytest.mark.asyncio
+async def test_the_track_preloaded_before_a_blackout_is_dropped_once(client, db_session, eng):
+    """Harness shabbos_silence 2026-11-20: the song the engine pre-loaded before candle
+    lighting aired when the timed silences ended. The tick drops it once per blackout."""
+    station, _, engine, _ = eng
+    await _blackout_with_silences(db_session, station, 3, started_ago=30)
+    for _ in range(3):
+        await playout_engine.tick(db_session, station)
+    assert engine.paths().count("/flush") == 1
