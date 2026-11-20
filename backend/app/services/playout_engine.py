@@ -41,6 +41,8 @@ TIMED_LEAD_SECONDS = 45.0
 # the timed lane, and airs at once, while it is at most this late. Later than that it no
 # longer cuts the item on air: it plays next in the music lane (pick_next step 1).
 MISSED_HAND_OVER_SECONDS = 300.0
+# A blackout's silences handed to the timed lane at its start; the rest go through /next
+SILENCE_TIMED_MAX = 2
 # Plays shorter than this are not logged (e.g. a song cut off as a timed item starts)
 MIN_LOGGED_PLAY_SECONDS = 1.0
 # A start report that carries its own time (a local FM box's kept report) is believed
@@ -84,6 +86,8 @@ class EngineState:
     operator_flush_at: float = 0.0
     # Hard-timed entries already handed to the engine's timed lane
     timed_sent: set[str] = field(default_factory=set)
+    # Silences handed to the timed lane per blackout start (SILENCE_TIMED_MAX)
+    silence_handed: dict[int, set[str]] = field(default_factory=dict)
     # A manual skip is in flight: the outgoing entry is logged as skipped
     skip_requested: bool = False
     # Soft-timed groups (by their time) whose hard_by limit already made us fade the song
@@ -1026,17 +1030,23 @@ async def handle_next(
             except Exception as e:
                 logger.warning("Replenish on empty queue failed: %s", e)
             if entry is None:
-                break
+                if await _blacked_out(db, station_id):
+                    # Backstop: in a blackout the music lane is never left empty, or the
+                    # engine plays its emergency music (KBR Jerusalem 2026-11-20 13:57Z)
+                    entry = await _blackout_silence(db, station_id)
+                if entry is None:
+                    break
         if (entry.asset is not None and entry.asset.asset_type != "silence"
                 and entry.source != SHABBOS_END_SOURCE and await _blacked_out(db, station_id)):
-            # In a blackout only its silence goes to the engine (normally all of it is in
-            # the timed lane already). A song handed now waited loaded through Shabbos
-            # and aired first after it (simulator, Jerusalem 2026-11-20). The engine asks
-            # again by itself, as during a live show; the blackout's end flushes and skips.
-            # The item at candle lighting (the shofar, first in the silence group) still
-            # goes: normally it is in the timed lane already, but not after an engine
-            # restart in that minute.
-            return None
+            # In a blackout only its silence goes to the engine. A song handed now waited
+            # loaded through Shabbos and aired first after it (simulator, Jerusalem
+            # 2026-11-20); the blackout's end flushes and skips. The item at candle
+            # lighting (the shofar, first in the silence group) still goes. A silence row
+            # goes instead, so the music lane is never empty (the emergency music).
+            silence = await _blackout_silence(db, station_id)
+            if silence is None:
+                return None
+            entry = silence
         if during_show and entry.preempt_at is not None and not is_soft_timed(entry) \
                 and (entry.preempt_at if entry.preempt_at.tzinfo else entry.preempt_at.replace(tzinfo=UTC)) \
                 <= datetime.now(UTC):
@@ -1093,6 +1103,34 @@ async def handle_next(
 
 
 SHABBOS_END_SOURCE = "shabbos_end"  # shabbos_ending.SOURCE
+
+
+async def _blackout_silence(db: AsyncSession, station_id) -> QueueEntry | None:
+    """A silence row for the music lane in a blackout when the queue offers none: queued
+    first and handed out like any other, so the engine never falls back to its emergency
+    music on Shabbos or Yom Tov (KBR Jerusalem 2026-11-20 13:57Z: every silence row was
+    with the timed lane, which never got ready, and the music lane had nothing)."""
+    from app.models.asset import Asset
+
+    try:
+        silence = (await db.execute(
+            select(Asset).where(Asset.asset_type == "silence").limit(1)
+        )).scalar_one_or_none()
+        if silence is None:
+            logger.error("Station %s: blackout but no silence asset to hand the engine", station_id)
+            return None
+        row = QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=silence.id, position=0,
+                         status="pending", source="auto")
+        db.add(row)
+        await db.commit()
+        logger.warning("Station %s: blackout with no silence for the music lane: queued one", station_id)
+        return (await db.execute(
+            select(QueueEntry).options(joinedload(QueueEntry.asset)).where(QueueEntry.id == row.id)
+        )).unique().scalar_one()
+    except Exception as e:
+        logger.error("Station %s: could not queue blackout silence: %s", station_id, e)
+        await db.rollback()
+        return None
 
 
 async def _blacked_out(db: AsyncSession, station_id) -> bool:
@@ -1560,17 +1598,39 @@ EMERGENCY_ALERT_AFTER = 5.0
 
 
 async def _emergency_alert(db, station_id, state: EngineState) -> None:
-    await _alert(
-        db,
-        station_id,
-        state,
-        force=True,
-        title=EMERGENCY_ALERT_TITLE,
-        message=(
-            "The engine could not get a track from the backend and is playing "
-            "its local emergency files."
-        ),
+    blacked_out = False
+    try:
+        blacked_out = await _blacked_out(db, station_id)
+    except Exception:
+        logger.warning("Blackout check for the emergency alert failed", exc_info=True)
+    message = (
+        "The engine could not get a track from the backend and is playing "
+        "its local emergency files."
     )
+    if blacked_out:
+        message += " The station is in Shabbos / Yom Tov: this is music on the air during it."
+    await _alert(db, station_id, state, force=True, title=EMERGENCY_ALERT_TITLE, message=message)
+    # The alert row alone reached nobody (KBR Jerusalem played its emergency files into
+    # Shabbos for two hours, 2026-11-20): push it as well
+    try:
+        from app.services.bug_report_service import send_ntfy
+
+        await send_ntfy(
+            message,
+            title=("Music during Shabbos" if blacked_out else "Emergency playlist on air"),
+            click="https://kbrlive.com/admin/alerts",
+            tags="rotating_light",
+            priority="urgent" if blacked_out else "high",
+        )
+    except Exception as e:
+        logger.warning("Emergency playlist push failed: %s", e)
+    if blacked_out:
+        # Off the emergency files: the engine asks /next again, which in a blackout
+        # always gives silence
+        try:
+            await engine_skip(station_id)
+        except Exception as e:
+            logger.warning("Skip off the emergency playlist failed: %s", e)
 
 
 async def _emergency_alert_later(station_id, spell: int) -> None:
@@ -2142,6 +2202,11 @@ async def _check_overrun(db: AsyncSession, station_id, state: EngineState, now) 
     return end
 
 
+def _group_key(at: datetime) -> int:
+    """A timed group's time as whole seconds (the same for naive and aware values)."""
+    return round((at if at.tzinfo else at.replace(tzinfo=UTC)).timestamp())
+
+
 async def _hand_over_timed(db: AsyncSession, station_id, state: EngineState, now, horizon) -> None:
     """Hand hard-timed items due by `horizon` to the engine's timed lane.
 
@@ -2171,10 +2236,23 @@ async def _hand_over_timed(db: AsyncSession, station_id, state: EngineState, now
         held.add(state.cued_entry_id)
     blacked_out: bool | None = None
     groups: dict[datetime, list[tuple[QueueEntry, str]]] = {}
+    chosen: dict[int, int] = {}
     for entry in res.unique().scalars().all():
         key = str(entry.id)
         if key in state.timed_sent or key in held:
             continue
+        if entry.asset is not None and (entry.asset.asset_type or "") == "silence":
+            # Only the first few: the rest go one by one through the music lane (/next
+            # hands silence in a blackout). All of Shabbos's silences as one timed group
+            # (107 five-minute items) starved KBR Jerusalem's engine at candle lighting,
+            # the group never got ready and its emergency music played for hours
+            # (2026-11-20 13:57Z).
+            # Counted when the engine takes one, so a refused hand-over is tried again
+            group_at = _group_key(entry.preempt_at)
+            taken = len(state.silence_handed.get(group_at, ())) + chosen.get(group_at, 0)
+            if taken >= SILENCE_TIMED_MAX:
+                continue
+            chosen[group_at] = chosen.get(group_at, 0) + 1
         at = entry.preempt_at if entry.preempt_at.tzinfo else entry.preempt_at.replace(tzinfo=UTC)
         if at <= now and (entry.asset is None or entry.asset.asset_type != "silence"):
             # A missed item does not go on air during Shabbos / Yom Tov
@@ -2216,6 +2294,8 @@ async def _hand_over_timed(db: AsyncSession, station_id, state: EngineState, now
             key = str(entry.id)
             if ok:
                 state.timed_sent.add(key)
+                if entry.asset is not None and entry.asset.asset_type == "silence":
+                    state.silence_handed.setdefault(_group_key(entry.preempt_at), set()).add(key)
                 _note_handed(state, entry)
                 handed.append((key, str(entry.asset_id)))
                 logger.info("Handed timed entry %s to the engine for %s", key, at.isoformat())
@@ -2242,6 +2322,11 @@ async def _hand_over_timed(db: AsyncSession, station_id, state: EngineState, now
                 "is running."
             ),
         )
+    if state.silence_handed:
+        # Groups past the hand-over window are never handed again
+        oldest = round(now.timestamp()) - MISSED_HAND_OVER_SECONDS - 60
+        for g in [g for g in state.silence_handed if g < oldest]:
+            del state.silence_handed[g]
     if len(state.timed_alerted) > 5000:
         # Forget half, not all: clearing it made every missed item alert again
         state.timed_alerted = set(list(state.timed_alerted)[2500:])

@@ -563,7 +563,8 @@ async def test_blackout_end_leaves_no_silence_in_the_timed_lane(client, db_sessi
     await db_session.commit()
     await playout_engine.tick(db_session, station)
     timed_lane = [c["id"] for c in engine.timed()]
-    assert timed_lane == [str(s.id) for s in silences]  # all of them handed at once
+    # Only the first SILENCE_TIMED_MAX go to the timed lane; the rest wait for /next
+    assert timed_lane == [str(s.id) for s in silences[:playout_engine.SILENCE_TIMED_MAX]]
 
     # The engine starts the first silence; then the (shortened) blackout is over
     await _on_air(client, station, silences[0].id, lane="timed")
@@ -578,8 +579,13 @@ async def test_blackout_end_leaves_no_silence_in_the_timed_lane(client, db_sessi
     assert on_air_next is None, "engine goes on with silence after the blackout ended"
     # Dropped before the skip, so the skip cannot start one of them; closed here as well
     assert engine.paths().index("/timed_drop") < engine.paths().index("/skip")
-    for s in silences[1:]:
+    handed = silences[1:playout_engine.SILENCE_TIMED_MAX]
+    for s in handed:
         assert (await _fresh(db_session, s.id)).status == "played"
+    # A silence never handed to the engine (over the cap) never reaches its timed lane
+    sent_ids = {c["id"] for c in engine.timed()}
+    for s in silences[playout_engine.SILENCE_TIMED_MAX:]:
+        assert str(s.id) not in sent_ids
 
 
 @pytest.mark.asyncio
@@ -1109,7 +1115,8 @@ async def test_many_timed_items_missing_the_engine_raise_one_alert(client, db_se
     for _ in range(3):
         await playout_engine.tick(db_session, st)
     assert len(calls) == 1
-    assert "and 29 more" in calls[0]
+    # Only the first SILENCE_TIMED_MAX of a group are offered to the timed lane at all
+    assert f"and {playout_engine.SILENCE_TIMED_MAX - 1} more" in calls[0]
 
 
 # ── Restart (B-JOB-95/96/97, B-MODE-16) ──────────────────────────────────────
@@ -2170,3 +2177,97 @@ async def test_a_held_station_id_is_taken_back_when_a_break_comes_due(client, db
     nxt = (await _next(client, station, given=f"{entries[1].id},{the_id.id},{entries[0].id}")).json()
     assert nxt["entry_id"] not in (str(the_id.id), None)
     assert (await _fresh(db_session, the_id.id)).status == "pending"
+
+
+async def _blackout_with_silences(db_session, station, n, started_ago=10):
+    """A blackout that started `started_ago` s ago with n hard-timed silence rows at its start,
+    as fill_blackout_queue leaves an upcoming one (Shabbos: ~300 rows of 5 minutes)."""
+    silence = Asset(id=uuid.uuid4(), title="Silence", duration=300.0, asset_type="silence",
+                    file_path="https://cdn.example.com/audio/silence.mp3")
+    db_session.add(silence)
+    now = datetime.now(UTC)
+    start = now - timedelta(seconds=started_ago)
+    db_session.add(HolidayWindow(id=uuid.uuid4(), name="Shabbos", is_blackout=True,
+                                 start_datetime=start, end_datetime=start + timedelta(hours=25)))
+    rows = [QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=silence.id, position=i + 1,
+                       status="pending", source="auto", preempt_at=start) for i in range(n)]
+    db_session.add_all(rows)
+    await db_session.commit()
+    return silence, rows
+
+
+@pytest.mark.asyncio
+async def test_a_blackout_hands_only_a_few_silences_to_the_timed_lane(client, db_session, eng):
+    """KBR Jerusalem 2026-11-20 13:57Z: ~300 silence rows share the blackout's start, all went
+    to the timed lane in one go, the engine choked on the group (catch-up, request leak) and,
+    with every silence held back from /next and songs refused in a blackout, the music lane
+    ran dry: the emergency playlist played into Shabbos. Now only SILENCE_TIMED_MAX go to
+    the timed lane and /next hands the rest, one at a time."""
+    station, _, engine, _ = eng
+    _, rows = await _blackout_with_silences(db_session, station, 300)
+    await playout_engine.tick(db_session, station)
+    timed = [c["id"] for c in engine.timed()]
+    assert len(timed) == playout_engine.SILENCE_TIMED_MAX
+    # Another tick does not hand more of the same group
+    await playout_engine.tick(db_session, station)
+    assert len(engine.timed()) == playout_engine.SILENCE_TIMED_MAX
+    # The music lane gets silence, never a song, and never one already in the timed lane
+    given = []
+    for _ in range(3):
+        r = await _next(client, station, ",".join(given))
+        assert r.status_code == 200
+        body = r.json()
+        assert body["entry_id"] in {str(x.id) for x in rows}
+        assert body["entry_id"] not in timed
+        given.append(body["entry_id"])
+
+
+@pytest.mark.asyncio
+async def test_a_blackout_with_no_silence_left_still_gives_silence(client, db_session, eng):
+    """Backstop: in a blackout /next never leaves the music lane empty (the engine would fall
+    to its emergency playlist). With no silence row to hand, one is made from the silence item."""
+    station, entries, _, _ = eng
+    silence, rows = await _blackout_with_silences(db_session, station, 1)
+    await db_session.delete(rows[0])
+    await db_session.commit()
+    r = await _next(client, station)
+    assert r.status_code == 200
+    made = await _fresh(db_session, uuid.UUID(r.json()["entry_id"]))
+    assert made is not None and made.asset_id == silence.id
+    assert r.json()["entry_id"] not in {str(e.id) for e in entries}
+
+
+@pytest.mark.asyncio
+async def test_silences_the_engine_refused_are_offered_again(client, db_session, eng):
+    """The cap counts only silences the engine took: a refused hand-over is retried."""
+    station, _, engine, _ = eng
+    _, rows = await _blackout_with_silences(db_session, station, 10)
+    engine.ok = False
+    await playout_engine.tick(db_session, station)
+    engine.ok = True
+    await playout_engine.tick(db_session, station)
+    taken = playout_engine.get_state(station.id).silence_handed
+    assert sum(len(v) for v in taken.values()) == playout_engine.SILENCE_TIMED_MAX
+
+
+@pytest.mark.asyncio
+async def test_emergency_music_in_a_blackout_pushes_and_moves_the_engine_off(client, db_session, eng, monkeypatch):
+    """KBR Jerusalem 2026-11-20: its emergency files played into Shabbos for two hours and
+    the alert row reached nobody. In a blackout the alert is also pushed (urgent) and the
+    engine is skipped off the emergency files, so it asks /next, which gives silence."""
+    from app.services import bug_report_service
+
+    station, _, engine, _ = eng
+    pushes = []
+
+    async def fake_push(message, title, **kw):
+        pushes.append((title, kw.get("priority")))
+        return True
+
+    monkeypatch.setattr(bug_report_service, "send_ntfy", fake_push)
+    silence, _ = await _blackout_with_silences(db_session, station, 3)
+    await _on_air(client, station, "", lane="emergency")
+    assert pushes == [("Music during Shabbos", "urgent")]
+    assert "/skip" in engine.paths()
+    r = await _next(client, station)
+    assert (await _fresh(db_session, uuid.UUID(r.json()["entry_id"]))).asset_id == silence.id
