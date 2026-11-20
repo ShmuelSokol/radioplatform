@@ -1939,11 +1939,11 @@
   "start_utc": "2026-11-20T17:59:59Z",
   "start_et": "2026-11-20 12:59:59",
   "hour_et": "2026-11-20 12:00",
-  "spots": 1,
-  "total_seconds": null,
-  "spot_seconds": "?",
+  "spots": 2,
+  "total_seconds": 226,
+  "spot_seconds": "127 99",
   "block_names": "Weather Schedule Sponsors",
-  "items": "Weather Schedule Sponsors",
-  "next_item": ""
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "Rabbi Leff Fund - 518 323 0376    ID 64848"
  }
 ]
