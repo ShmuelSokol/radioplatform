@@ -119,8 +119,8 @@ async def soft_items_wait_for_show(db: AsyncSession, station_id, now: datetime) 
       show took the air instead, and a hard item that comes due under the host is
       closed when the show ends (Jerusalem 2026-11-18: a contracted sponsorship due at
       19:15:00 turned hard at 19:14, the show took over at 19:14:49, and it never aired);
-    - a sponsorship that is hard by the station's timing choice, once its time has
-      come during the show.
+    - a sponsorship that is hard by the station's timing choice, or sits in a program
+      block's sponsor places, once its time has come during the show.
 
     Not an item the show itself is about to air over the delay (live_inserts). Returns
     the ids changed; on an engine station the caller takes them out of the timed lane."""
@@ -141,6 +141,23 @@ async def soft_items_wait_for_show(db: AsyncSession, station_id, now: datetime) 
             ),
         )
     )).scalars().all()
+    # A sponsorship in a program block's sponsor places (the 8 PM break) is a contracted
+    # play like any other: under a show it was closed with the block's weather and
+    # programme and never aired (station simulator, 2026-11-20)
+    from app.models.asset import Asset
+    from app.services.sponsor_item import is_sponsorship_clause
+
+    rows = list(rows) + list((await db.execute(
+        select(QueueEntry).join(Asset, Asset.id == QueueEntry.asset_id).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.source == "block",
+            QueueEntry.preempt_at.isnot(None),
+            QueueEntry.preempt_at <= now,
+            QueueEntry.timing_mode == "hard",
+            is_sponsorship_clause(),
+        )
+    )).scalars().all())
     changed = []
     for entry in rows:
         if str(entry.id) in live_inserts._preparing:
@@ -184,9 +201,12 @@ async def _pause_automation(db: AsyncSession, station_id, now: datetime) -> None
                        start_utc=aired_from(current), end_utc=now, source="scheduler"))
     at = long_items.resume_point(current, now)
     current.status = "played"
-    if current.preempt_at is not None:
+    if current.preempt_at is not None and not long_items.is_long_form(current.asset):
         # A time check or other timed item: half of it after the show would be a stale
-        # time (the engine harness heard it come back after End, 2026-11-18)
+        # time (the engine harness heard it come back after End, 2026-11-18).
+        # Not a shiur or story that a program block started at its time (the 8 PM Daf
+        # Yomi): it carries on after the show like any other, it used to be dropped
+        # with 38 of its 56 minutes unheard (station simulator, 2026-11-20)
         await _air_cut_item_over_the_delay(db, station_id, current, now)
         return
     # An earlier plan to carry this item on is void: a timed group was about to pause
@@ -312,6 +332,27 @@ async def other_live_show(db: AsyncSession, show: LiveShow, now: datetime | None
     return None
 
 
+# A show stops this long before Shabbos or Yom Tov begins on its station
+BEFORE_BLACKOUT = timedelta(seconds=30)
+
+
+async def blackout_for_show(db: AsyncSession, station_id, start: datetime, end: datetime):
+    """The first stretch the station is off the air (Shabbos, Yom Tov) that touches
+    [start, end), or None."""
+    from app.services.spot_schedule_service import load_blackouts
+
+    found = await load_blackouts(db, station_id, start, end)
+    return found[0] if found else None
+
+
+async def off_air_now(db: AsyncSession, station_id, now: datetime | None = None) -> str | None:
+    """The name of the Shabbos or Yom Tov the station is off the air for now (or will
+    be within BEFORE_BLACKOUT), else None. No show starts then."""
+    now = now or datetime.now(timezone.utc)
+    blackout = await blackout_for_show(db, station_id, now, now + BEFORE_BLACKOUT)
+    return (blackout.name or "Shabbos") if blackout is not None else None
+
+
 async def start_show(
     db: AsyncSession,
     show_id: UUID | str,
@@ -338,6 +379,14 @@ async def start_show(
         show.scheduled_end = now + planned
     if host_user_id:
         show.host_user_id = host_user_id
+    # A show never runs into Shabbos or Yom Tov: its end moves to just before the
+    # station goes off the air, so the countdown shows it, the delay winds down in
+    # time and the hard stop takes the host off. A show planned 4:00 to 4:40 PM on a
+    # Friday stayed on the air through candle lighting at 4:18 (station simulator,
+    # 2026-11-20).
+    blackout = await blackout_for_show(db, show.station_id, now, _aware(show.scheduled_end))
+    if blackout is not None:
+        show.scheduled_end = max(now, blackout.start - BEFORE_BLACKOUT)
 
     # The station is NOT taken over here. Its automation pauses when listeners really
     # hear the host: the host's sound has arrived and, with a broadcast delay, the
@@ -381,9 +430,12 @@ async def take_over_station(db: AsyncSession, station: Station, show: LiveShow, 
 
 EARLY_START = 8.0   # how early a hard timed item may start (queue.TIMED_EARLY_START_SECONDS)
 HOLD_LIMIT = 45.0   # the longest a show waits for timed items before it is heard anyway
+ITEM_LIMIT = 75.0   # ... and how much longer for the one item on air then to finish
 
 
-async def timed_item_ends(db: AsyncSession, station_id, now: datetime, within: float) -> datetime | None:
+async def timed_item_ends(
+    db: AsyncSession, station_id, now: datetime, within: float, on_air_only: bool = False,
+) -> datetime | None:
     """When the timed item on air (or a hard one due in the next `within` seconds) ends.
     None when there is none. A show whose delay fills meanwhile waits for that moment:
     taking the station over cut a time check after 3.4 of its 6 s (reviewer, 2026-11-18)."""
@@ -405,6 +457,12 @@ async def timed_item_ends(db: AsyncSession, station_id, now: datetime, within: f
     for entry in rows:
         if entry.status == "playing":
             end = _airs_until(entry)
+            if on_air_only and entry.asset is not None:
+                from app.services import long_items
+                if long_items.is_long_form(entry.asset):
+                    continue   # a shiur is paused by the show and carries on after it
+        elif on_air_only:
+            continue
         else:
             hard = entry.timing_mode == "hard" or (entry.timing_mode is None and entry.source != "ad_slot")
             due = entry.preempt_at if entry.preempt_at.tzinfo else entry.preempt_at.replace(tzinfo=timezone.utc)
@@ -416,34 +474,46 @@ async def timed_item_ends(db: AsyncSession, station_id, now: datetime, within: f
     return max(ends) if ends else None
 
 
+async def look_for_timed_items(station_id: str, air, started: float) -> None:
+    """One look: is a timed item on air or about to be? Then the show waits for its end."""
+    from app.db.session import get_async_session
+
+    async for db in get_async_session():
+        now = datetime.now(timezone.utc)
+        # Also an item due up to EARLY_START after that: when the song before
+        # it ends early the player starts the item early, and a take-over in
+        # that moment left 0.8 s of the time check on the stream, with the
+        # whole check again over the delay 8 s later (harness, 2026-11-18)
+        within = max(0.0, air.target - air.buffered) + 2.0 + EARLY_START
+        end = await timed_item_ends(db, uuid.UUID(str(station_id)), now, within)
+        on_air = await timed_item_ends(db, uuid.UUID(str(station_id)), now, within, on_air_only=True)
+        await db.rollback()
+        if end is not None and not air.told_soon:
+            # (Not once the stream server was told to go quiet: holding the
+            # show longer then would leave the stream silent over the item)
+            # The stream server is told to go quiet SOON before the show is
+            # heard, so that word leaves as the item ends, not during it
+            from app.services.live_air import SOON
+            until = air.clock() + (end - now).total_seconds() + SOON
+            limit = started + air.target + HOLD_LIMIT
+            if on_air is not None:
+                # A long run of timed items (the 8 PM break) is not waited out, but the
+                # one on air at the limit is: a sponsorship was cut in mid sentence, 11 s
+                # in, and did not air again (station simulator, 2026-11-20)
+                limit = max(limit, min(air.clock() + (on_air - now).total_seconds() + SOON, limit + ITEM_LIMIT))
+            air.hold_until = min(until, limit)
+        break
+
+
 async def hold_for_timed_items(station_id: str, air) -> None:
     """While the show's delay fills, keep it from going to listeners in the middle of a
     timed item. Looks once a second; the host's words wait in the delay meanwhile."""
     import asyncio
 
-    from app.db.session import get_async_session
-
     started = air.clock()
     while not (air.listening or air.closed or air.finishing):
         try:
-            async for db in get_async_session():
-                now = datetime.now(timezone.utc)
-                # Also an item due up to EARLY_START after that: when the song before
-                # it ends early the player starts the item early, and a take-over in
-                # that moment left 0.8 s of the time check on the stream, with the
-                # whole check again over the delay 8 s later (harness, 2026-11-18)
-                within = max(0.0, air.target - air.buffered) + 2.0 + EARLY_START
-                end = await timed_item_ends(db, uuid.UUID(str(station_id)), now, within)
-                await db.rollback()
-                if end is not None and not air.told_soon:
-                    # (Not once the stream server was told to go quiet: holding the
-                    # show longer then would leave the stream silent over the item)
-                    # The stream server is told to go quiet SOON before the show is
-                    # heard, so that word leaves as the item ends, not during it
-                    from app.services.live_air import SOON
-                    until = air.clock() + (end - now).total_seconds() + SOON
-                    air.hold_until = min(until, started + air.target + HOLD_LIMIT)
-                break
+            await look_for_timed_items(station_id, air, started)
         except Exception:
             logger.warning("Could not look for timed items before live show on %s", station_id, exc_info=True)
         await asyncio.sleep(1.0)
@@ -518,6 +588,8 @@ async def start_if_scheduled(
         return False
     if await other_live_show(db, show) is not None:
         return False   # the station has a show on air: the caller refuses this host
+    if await off_air_now(db, show.station_id) is not None:
+        return False   # Shabbos or Yom Tov: the caller refuses this host
     await start_show(db, show.id, host_user_id=host_user_id)
     return True
 

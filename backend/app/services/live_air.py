@@ -571,6 +571,21 @@ class LiveAir:
         if self.task is None:
             self.task = asyncio.ensure_future(self._run())
 
+    async def step(self, due: int) -> bool:
+        """`due` samples of air time have passed: play them out. False when the show
+        is over (nothing more to play). The pump below calls it every TICK; the station
+        simulator calls it on its own clock (tests/sim/live.py)."""
+        if self.drained() or (self.finishing and not self.listening):
+            return False
+        out = self.produce(due)
+        if out is not None and len(out):
+            try:
+                await self.send(out.astype("<i2").tobytes())
+            except Exception as e:
+                logger.debug("Live air %s: send failed: %s", self.station_id, e)
+        await self._maybe_status()
+        return True
+
     async def _run(self) -> None:
         loop = asyncio.get_running_loop()
         t0 = loop.time()
@@ -587,13 +602,8 @@ class LiveAir:
                     t0 = loop.time() - sent / RATE - TICK
                     due = int(RATE * TICK)
                 sent += due
-                out = self.produce(due)
-                if out is not None and len(out):
-                    try:
-                        await self.send(out.astype("<i2").tobytes())
-                    except Exception as e:
-                        logger.debug("Live air %s: send failed: %s", self.station_id, e)
-                await self._maybe_status()
+                if not await self.step(due):
+                    break
         except asyncio.CancelledError:
             raise
         except Exception:

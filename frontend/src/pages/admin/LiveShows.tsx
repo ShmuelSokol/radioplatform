@@ -19,10 +19,12 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: 'bg-yellow-800 text-yellow-300',
 };
 
-const TABS = ['all', 'scheduled', 'live', 'ended'] as const;
+// "Coming up" first: the shows still to do, the one on air at the top. Ended shows
+// (dozens after a few weeks) are on their own tab, not in the way.
+const TABS = ['coming up', 'ended', 'all'] as const;
 
 export default function LiveShows() {
-  const [activeTab, setActiveTab] = useState<string>('all');
+  const [activeTab, setActiveTab] = useState<string>('coming up');
   // Deleting a show is admin only on the server; others were offered a button that always failed
   const isAdmin = useAuthStore(s => s.user?.role) === 'admin';
   const [showModal, setShowModal] = useState(false);
@@ -41,9 +43,13 @@ export default function LiveShows() {
   const stations = stationsData?.stations ?? [];
   const zoneOf = (id?: string | null) => stations.find(s => s.id === id)?.timezone;
 
-  const statusFilter = activeTab === 'all' ? undefined : activeTab;
+  const statusFilter = activeTab === 'ended' ? 'ended' : undefined;
   const { data, isLoading } = useLiveShows({ status: statusFilter });
-  const shows = data?.shows ?? [];
+  const startOf = (s: LiveShow) => (s.scheduled_start ? Date.parse(s.scheduled_start) : Infinity);
+  const shows = activeTab === 'coming up'
+    ? (data?.shows ?? []).filter((s: LiveShow) => s.status === 'scheduled' || s.status === 'live')
+        .sort((a: LiveShow, b: LiveShow) => Number(b.status === 'live') - Number(a.status === 'live') || startOf(a) - startOf(b))
+    : (data?.shows ?? []);
 
   const createMut = useCreateLiveShow();
   const updateMut = useUpdateLiveShow();
@@ -147,21 +153,22 @@ export default function LiveShows() {
       {isLoading ? (
         <p className="text-gray-500 text-center py-10">Loading...</p>
       ) : shows.length === 0 ? (
-        <p className="text-gray-500 text-center py-10">No shows found</p>
+        <p className="text-gray-500 text-center py-10">
+          {activeTab === 'coming up' ? 'No show is planned. Press "+ New Show" to plan one.' : 'No shows found'}
+        </p>
       ) : (
-        <div className="grid gap-3">
+        <div className="flex flex-col gap-3">
           {shows.map((show: LiveShow) => (
             <div
               key={show.id}
-              className="bg-[#12123a] border border-[#2a2a5e] rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              className="min-w-0 bg-[#12123a] border border-[#2a2a5e] rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
             >
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-2 mb-1">
-                  <span className="text-white font-medium truncate">{show.title}</span>
+                  <span className="text-white font-medium break-words min-w-0">{show.title}</span>
                   <span className={`text-[10px] px-2 py-0.5 rounded-full uppercase font-bold ${STATUS_COLORS[show.status]}`}>
                     {show.status}
                   </span>
-                  <span className="text-[10px] text-gray-500 uppercase">{show.broadcast_mode}</span>
                 </div>
                 <div className="text-[11px] text-gray-500">
                   {fmt(show.scheduled_start, show.station_id)} &mdash; {fmt(show.scheduled_end, show.station_id)}

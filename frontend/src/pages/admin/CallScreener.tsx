@@ -86,10 +86,10 @@ export default function CallScreener() {
   return (
     <div className="w-full">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
+      <div className="flex items-center justify-between gap-3 mb-6">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold text-purple-300">Call Screener</h1>
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex flex-wrap items-center gap-2 mt-1">
             <span className="text-sm text-gray-400">{currentShow?.title}</span>
             <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-500'}`} />
             {currentShow?.status === 'live' && (
@@ -100,8 +100,8 @@ export default function CallScreener() {
           </div>
         </div>
         {secondsRemaining !== null && (
-          <div className="text-right">
-            <div className="text-[11px] text-gray-500 uppercase">Time Left</div>
+          <div className="text-right flex-shrink-0">
+            <div className="text-[11px] text-gray-500 uppercase whitespace-nowrap">Time Left</div>
             <div className={`text-xl font-mono font-bold ${secondsRemaining < 300 ? 'text-red-400' : 'text-white'}`}>
               {Math.floor(secondsRemaining / 60)}:{(Math.floor(secondsRemaining) % 60).toString().padStart(2, '0')}
             </div>
@@ -178,7 +178,7 @@ export default function CallScreener() {
                       </div>
                     </div>
                     <span className="text-[10px] bg-amber-800 text-white px-2 py-0.5 rounded-full">
-                      Hold
+                      Waiting
                     </span>
                   </div>
 

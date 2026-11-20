@@ -10,6 +10,11 @@ What it copies from radio.liq, because the backend's decisions depend on it:
   cut and does not come back (the backend re-queues a paused shiur itself). After the
   group the music lane carries on with its pre-loaded item.
 - /skip ends the item on air now (music or timed); /timed_drop forgets waiting timed items; /hello on start.
+- live lane: /live {"on": true} asks for the stream; the music plays on until the show's
+  audio is there (the backend's delay is heard), the song on air is about to end, or 5 s
+  have passed. Then the item on air is cut and the lane "live" has the stream; the lanes
+  below stand still (an item for after the show is still pre-loaded, a timed group that
+  comes due waits). /live {"on": false}: the lanes below carry on at once.
 - With nothing to play the real engine plays its emergency music: logged here as
   `emergency`, which the checks count as dead air.
 
@@ -80,6 +85,10 @@ class FakeEngine:
     group: list = field(default_factory=list)  # timed items of the group on air, after the current
     ask_next_at: float | None = None
     commands: list = field(default_factory=list)
+    live_on: bool = False             # the live lane has the stream
+    live_asked: float | None = None   # /live on came; the music plays on until the show is heard
+    live_release: float = 0.0
+    last_main: str | None = None      # last entry of the music lane that went on air
     # None: the engine talks to the backend itself (the stream server). Else a local FM
     # box's relay stands between them (tests/sim/offline.py): .next(given), .started(...)
     backend: object = None
@@ -97,6 +106,8 @@ class FakeEngine:
             # radio.liq forgets the dropped entry was handed to it (it will not air), unless
             # it is the one on air; otherwise the backend takes it for aired unreported
             on_air = self.on_air.entry_id if self.on_air is not None and self.on_air.lane == "main" else None
+            if self.live_on:
+                on_air = self.last_main   # the song the show cut was on air: it stays handed out
             if self.given and self.given[0] != on_air:
                 self.given.pop(0)
             self.cued = None
@@ -104,7 +115,7 @@ class FakeEngine:
         elif path == "/skip":
             # radio.liq's skip_on_air ends whatever is on air, a timed item too (the
             # silence still playing when a blackout ends)
-            if self.on_air is not None:
+            if self.on_air is not None and not self.live_on:
                 self.sim.schedule(now + 0.2, self.sid, "skip")
         elif path == "/timed":
             eid = str(payload.get("id") or "")
@@ -119,8 +130,42 @@ class FakeEngine:
             ids = {str(i) for i in payload.get("ids") or []}
             self.timed = [w for w in self.timed if w.entry_id not in ids]
             self.group = [w for w in self.group if w.entry_id not in ids]
-        # /live, /overlay, /alert_stop: nothing the simulated stations use yet
+        elif path == "/live":
+            on = bool(payload.get("on"))
+            if on and not self.live_wanted:
+                self.live_asked = now
+                self.sim.schedule(now, self.sid, "live")
+            elif not on and self.live_asked is not None:
+                self.live_asked = None   # over before the stream ever went quiet for it
+            elif not on and self.live_on:
+                # (a moment later, as the real engine acts after it has answered: the
+                # backend's own work around the command is done by then)
+                self.sim.schedule(now + 0.05, self.sid, "live_off")
+        # /overlay, /alert_stop: nothing the simulated stations use yet
         return True
+
+    @property
+    def live_wanted(self) -> bool:
+        return self.live_on or self.live_asked is not None
+
+    async def _live_wait(self):
+        """radio.liq's wait() in /live: quiet when the show's audio is ready, the song on
+        air is about to end, or after 5 s whatever is there."""
+        now = self.sim.t
+        if self.live_asked is None:
+            return
+        ready = bool(getattr(self.sim, "live_ready", lambda _sid: False)(self.sid))
+        seg = self.on_air
+        ending = seg is not None and seg.lane == "main" and seg.end is not None and 0 <= seg.end - now < 2.0
+        if not (ready or ending or now - self.live_asked > 5.0):
+            self.sim.schedule(now + 0.05, self.sid, "live")
+            return
+        self.live_asked = None
+        if seg is not None:
+            self._close(now, cut=True)   # music is cut and does not come back; a timed item is dropped
+        self.live_on = True
+        self.on_air = Segment(self.sid, None, "live", now, None, "live show", "live")
+        self.sim.log.append(self.on_air)
 
     def status(self) -> dict:
         seg = self.on_air
@@ -144,6 +189,15 @@ class FakeEngine:
                 await self._play_after(now)
         elif kind == "timed":
             await self._maybe_take_over()
+        elif kind == "live":
+            await self._live_wait()
+        elif kind == "live_off":
+            if self.live_on:
+                self.live_on = False
+                self.live_release = now + 12.0
+                if self.on_air is not None and self.on_air.lane == "live":
+                    self._close(now, cut=False)
+                await self._play_after(now)
         elif kind == "ask":
             if self.ask_next_at is not None and self.ask_next_at <= now + 1e-6:
                 self.ask_next_at = None
@@ -174,6 +228,11 @@ class FakeEngine:
         at = min(w.at for w in due)
         group = sorted([w for w in self.timed if w.at == at], key=lambda w: w.seq)
         self.timed = [w for w in self.timed if w.at != at]
+        if self.live_on:
+            # Under the live lane the timed lane stands still: the group waits in it and
+            # plays when the show is over (unless the backend takes it back meanwhile)
+            self.group = self.group + group
+            return
         # radio.liq timed_take_over(): music on air is cut; an earlier timed item on air
         # (a block's shiur) is cut too unless it has only just started or is about to
         # end; items still queued in the timed lane play first (it is one queue).
@@ -230,7 +289,7 @@ class FakeEngine:
         else:
             async with self.sim.session() as db:
                 got = await playout_engine.handle_next(db, self.station_id, list(self.given[:5]),
-                                                       proto=PROTO, engine_live_on=False)
+                                                       proto=PROTO, engine_live_on=self.live_wanted)
         if got is None:
             # Deep inside a Shabbos or Yom Tov window the answer stays "nothing" for
             # hours; the real engine keeps asking every few seconds, here once a minute
@@ -238,6 +297,8 @@ class FakeEngine:
             self.ask_next_at = now + (60.0 if deep and deep(self.sid, now) else NEXT_RETRY)
             if self.on_air is None and any(w.at - now <= HOLD_SECONDS for w in self.timed):
                 pass  # radio.liq's hold lane: quiet for up to 8 s before a loaded timed item
+            elif self.on_air is None and now < self.live_release:
+                pass  # radio.liq: quiet for up to 12 s after a show while the next item loads
             elif self.on_air is None:
                 # nothing on air and nothing to play: the emergency music
                 self.on_air = Segment(self.sid, None, "emergency", now, None, "emergency music")
@@ -265,6 +326,8 @@ class FakeEngine:
         seg = Segment(self.sid, item.entry_id, item.lane, now, now + max(item.length, 0.5),
                       item.fields.get("title", ""), item.fields.get("kbr_kind", ""), cue_in)
         self.on_air, self.on_air_item = seg, item
+        if item.lane == "main":
+            self.last_main = item.entry_id
         self.sim.log.append(seg)
         self.sim.schedule(seg.end, self.sid, "end")
         if self.backend is not None:

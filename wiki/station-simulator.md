@@ -74,6 +74,39 @@ Omer count: the 49 clips are seeded with the time clips, and the check "Omer cou
 
 Holiday lists: `simulate(..., holiday_items=[{holiday, asset_id, station_id}])` (with the items' assets in `extra_assets`); `regenerate_windows=True` makes Shabbos and Yom Tov windows. Scenarios in `tests/test_holiday_sim.py`, see [holiday-music](holiday-music.md).
 
+## Live shows
+
+`tests/sim/live.py` puts a host, the broadcast delay, Dump and callers into the simulator;
+scenarios in `backend/tests/test_live_show_sim.py` (one runs in CI, the rest with SIM_LONG=1,
+20 to 45 s each). What runs is the real code: the host's audio socket handler with a stand-in
+socket, the station relay and its caller mixing, `LiveAir`, the timed inserts,
+`live_show_service`, the scheduler's live checks. Replaced: the delay's pump (`LiveAir.step`
+is called on the virtual clock, 20 times a virtual second), ffmpeg (a time check over the
+delay is a clip of its asset's length), the engine's live lane (`FakeEngine` copies radio.liq:
+`/live` on, the wait for the feed, a song ending within 2 s or 5 s at most, lanes standing
+still, 12 s of allowed quiet after `/live` off).
+
+The host "speaks numbers": each 50 ms frame is one value naming the frame, with half a second
+of silence every five. A caller's frame is a value no host frame has. What comes out of the
+delay is read back, so a check says which words aired, which a Dump cut and how late each
+was heard. Six checks run on every simulation that has a show (`live.checks`): music stops
+when the host is first heard, no silence while the show has the air, a Dump cuts those words
+and only those, never early, the last words air and the station carries on at once, nothing
+of the host after the show.
+
+In a scenario: `show = Show(minutes=20)`, events `show.start(planned)`, `show.dump`, `show.end`,
+`show.leave`; a caller is `live.SimCaller(show.host)` with `call`, `approve`, `on_air`, `hold`,
+`hang_up`. `sim.restart_backend()` in mid show drops the socket and the host's page comes back
+3 s later, as `useHostAudio` does.
+
+Scenarios: across the hour with a Dump, going live seconds before a time check, no delay,
+the hard stop, a host who disappears and comes back, backend restart, engine restart, a show
+that runs into Shabbos, a show during a shiur, two stations, a caller. Not simulated: the
+stream server's lag, real audio, listener sockets, phone callers, video.
+
+Found on the first run (2026-11-20), fixed in the same PR: see [live-shows](live-shows.md),
+"What the simulator found".
+
 ## Every Yom Tov of the year as broadcast days
 
 `uv run python -m tests.sim.yomtov --list` prints, per station, the stretches of the next

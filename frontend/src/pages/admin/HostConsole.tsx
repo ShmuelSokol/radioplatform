@@ -106,6 +106,9 @@ export default function HostConsole() {
   // Where the host stands, in one word, for the banner
   const preroll = isRecording && air?.mode === 'pre-roll';
   const heard = isRecording && !!air?.on_air;
+  // The show is heard from another page or device (a host with a phone beside the
+  // computer): this page said "NOT ON AIR, the station is playing its programme"
+  const elsewhere = !isRecording && currentShow?.status === 'live' && !!air?.on_air;
   const airState: 'off' | 'ready' | 'connecting' | 'soon' | 'on' =
     !micReady ? 'off' : !isRecording ? 'ready' : heard ? 'on' : preroll ? 'soon' : 'connecting';
   const soonIn = preroll && air
@@ -207,15 +210,23 @@ export default function HostConsole() {
         {airState === 'on' && (muted ? 'ON AIR: your microphone is muted' : 'ON AIR: listeners hear you')}
         {airState === 'soon' && `GOING ON AIR: listeners hear you in ${soonIn} s. Start talking now.`}
         {airState === 'connecting' && 'GOING ON AIR…'}
-        {airState === 'ready' && 'NOT ON AIR: nobody hears you. The station is playing its programme.'}
-        {airState === 'off' && 'NOT ON AIR: your microphone is off. The station is playing its programme.'}
+        {airState === 'ready' && (elsewhere
+          ? 'This show is ON AIR from another device. Nobody hears this microphone.'
+          : 'NOT ON AIR: nobody hears you. The station is playing its programme.')}
+        {airState === 'off' && (elsewhere
+          ? 'This show is ON AIR from another device. This page is not sending sound.'
+          : 'NOT ON AIR: your microphone is off. The station is playing its programme.')}
         <div className="text-xs sm:text-sm font-normal mt-1">
           {airState === 'on' && (air && air.delay > 0.5
             ? `What you say goes out ${air.delay.toFixed(0)} s later (the broadcast delay). End Show takes you off.`
             : 'End Show takes you off.')}
           {airState === 'soon' && 'The music plays until then. Nothing you say is lost.'}
-          {airState === 'ready' && 'Check your level below. When you are ready, press GO LIVE: that press puts you on air.'}
-          {airState === 'off' && 'Step 1: turn on your microphone. Nothing goes out yet.'}
+          {airState === 'ready' && (elsewhere
+            ? 'GO LIVE here takes the show over from the other device.'
+            : 'Check your level below. When you are ready, press GO LIVE: that press puts you on air.')}
+          {airState === 'off' && (elsewhere
+            ? 'You can work the callers, the chat and Dump from here. Going on air from this page would take the show over from the other device.'
+            : 'Step 1: turn on your microphone. Nothing goes out yet.')}
         </div>
       </div>
 

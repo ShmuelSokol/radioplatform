@@ -521,9 +521,14 @@ class SchedulerEngine:
         end = show.scheduled_end
         if end is not None and end.tzinfo is None:
             end = end.replace(tzinfo=timezone.utc)  # SQLite returns naive datetimes
-        if not (end and end <= now) and await self._host_gone(db, station, show, now):
+        # Shabbos or Yom Tov has begun (or is seconds away) on this station: the show
+        # stops whatever its planned end says. Its end is moved when it starts
+        # (live_show_service.start_show); this catches a window added or changed since.
+        from app.services.live_show_service import off_air_now
+        shabbos = await off_air_now(db, station.id, now)
+        if not (end and end <= now) and not shabbos and await self._host_gone(db, station, show, now):
             return
-        if end and end <= now:
+        if (end and end <= now) or shabbos:
             # Hard stop
             from app.services.live_show_service import hard_stop_show
             await hard_stop_show(db, show_uuid)

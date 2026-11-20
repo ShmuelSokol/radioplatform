@@ -773,6 +773,7 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
     record = False
     filler_id = None
     busy = False
+    off_air = None
     try:
         async for db in get_async_session():
             from app.models.station import Station
@@ -791,6 +792,9 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
                 from app.services.live_show_service import other_live_show
                 if show.status == _St.SCHEDULED and await other_live_show(db, show) is not None:
                     busy = True
+                if show.status == _St.SCHEDULED and not busy:
+                    from app.services.live_show_service import off_air_now
+                    off_air = await off_air_now(db, show.station_id)
                 station_row = await db.get(Station, show.station_id)
                 if station_row is not None:
                     await db.refresh(station_row)
@@ -820,6 +824,10 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
     if busy:
         # Another show is live on the station: this host does not go on air beside it
         await websocket.close(code=4010)
+        return
+    if off_air:
+        # Shabbos or Yom Tov on this station: no show goes on air (4012)
+        await websocket.close(code=4012)
         return
     if started:
         await broadcast_show_event(show_id, "show_started", {"show_id": show_id})

@@ -126,6 +126,9 @@ async def start_show(
         other = await live_show_service.other_live_show(db, asked)
         if other is not None:
             raise ConflictError(f'"{other.title}" is live on this station. End it before starting another show.')
+        off = await live_show_service.off_air_now(db, asked.station_id)
+        if off is not None:
+            raise ConflictError(f"The station is off the air for {off}. A show cannot start now.")
     show = await live_show_service.start_show(db, show_id, host_user_id=user.id)
     if not show:
         raise NotFoundError("Live show not found")
