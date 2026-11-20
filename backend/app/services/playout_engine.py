@@ -88,6 +88,7 @@ class EngineState:
     timed_sent: set[str] = field(default_factory=set)
     # Silences handed to the timed lane per blackout start (SILENCE_TIMED_MAX)
     silence_handed: dict[int, set[str]] = field(default_factory=dict)
+    blackout_skip_at: float = 0.0
     # A manual skip is in flight: the outgoing entry is logged as skipped
     skip_requested: bool = False
     # Soft-timed groups (by their time) whose hard_by limit already made us fade the song
@@ -1524,6 +1525,24 @@ async def _handle_started(
                 _background.add(task)
                 task.add_done_callback(_background.discard)
         return {"ok": True, "known": False}
+
+    if (entry.asset is not None and entry.asset.asset_type != "silence"
+            and entry.source != SHABBOS_END_SOURCE and await _blacked_out(db, station_id)):
+        # Something other than silence reports a start in Shabbos / Yom Tov: take it off
+        # the air at once (at most every 5 s). KBR Jerusalem 2026-11-20: a song row kept
+        # coming back as started during the blackout; only a refill's skip took it off.
+        mono = time.monotonic()
+        if mono - state.blackout_skip_at > 5.0:
+            state.blackout_skip_at = mono
+            logger.warning("Engine started %s (%s) during a blackout; skipping it",
+                           entry.id, entry.asset.title)
+            entry.status = "played"
+            await db.commit()
+            try:
+                await engine_skip(station_id)
+            except Exception as e:
+                logger.warning("Skip during the blackout failed: %s", e)
+            return {"ok": True, "known": True, "skipped_in_blackout": True}
 
     if state.on_emergency or not state.emergency_cleared:
         # Back on the station's own queue: the emergency alert has served its purpose.

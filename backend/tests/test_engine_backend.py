@@ -351,8 +351,10 @@ async def test_started_broadcasts_and_tops_up(client, db_session, eng):
                                  start_datetime=now - timedelta(minutes=1),
                                  end_datetime=now + timedelta(hours=1)))
     await db_session.commit()
-    await _on_air(client, station, entries[1].id)
-    assert calls["broadcast"] == [str(entries[0].id), str(entries[1].id)]
+    # In the blackout the engine starts its silence (a song there is skipped at once)
+    silence = await _add(db_session, station, title="Silence", duration=300.0, kind="silence", position=0)
+    await _on_air(client, station, silence.id)
+    assert calls["broadcast"] == [str(entries[0].id), str(silence.id)]
     await topped_up()
     assert calls["replenish"] == 1  # not during the blackout
     logs = (await db_session.execute(select(PlayLog).where(PlayLog.station_id == station.id))).scalars().all()
@@ -2370,3 +2372,16 @@ async def test_a_song_reported_again_in_a_blackout_does_not_refill_every_pass(cl
         await _on_air(client, station, entries[0].id)  # the song "started" again
         assert await queue_module.fill_blackout_queue(db_session, station.id) == 0
     assert engine.paths().count("/skip") == skips
+
+
+@pytest.mark.asyncio
+async def test_a_song_started_in_a_blackout_is_skipped_at_once(client, db_session, eng):
+    """KBR Jerusalem 2026-11-20 19:03Z: a song row kept coming back as started during the
+    blackout. A start report of anything but silence in a blackout skips it at once."""
+    station, entries, engine, _ = eng
+    await _blackout_with_silences(db_session, station, 3, started_ago=600)
+    r = await client.post(f"/api/v1/playout/{station.id}/started", headers=HEADERS,
+                          json={"entry_id": str(entries[0].id), "lane": "main"})
+    assert r.status_code == 200 and r.json().get("skipped_in_blackout")
+    assert engine.paths()[-1] == "/skip"
+    assert (await _fresh(db_session, entries[0].id)).status == "played"
