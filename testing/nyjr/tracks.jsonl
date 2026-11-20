@@ -983,3 +983,4 @@
 {"start_utc": "2026-11-20T17:46:12Z", "start_epoch": 1795196772, "playlist_time": null, "artist": "12:46\tCamp Tzelem", "title": "Menucha V'Simacha", "raw": "Mah Tov\tMenucha V'Simacha", "logged_utc": "2026-11-20T17:47:06Z"}
 {"start_utc": "2026-11-20T17:53:24Z", "start_epoch": 1795197204, "playlist_time": "12:53", "artist": "Friedman  Yesh Tikvah", "title": "Maaleh Ani", "raw": "12:53\tFriedman  Yesh Tikvah\tMaaleh Ani", "logged_utc": "2026-11-20T17:54:07Z"}
 {"start_utc": "2026-11-20T17:57:13Z", "start_epoch": 1795197433, "playlist_time": "12:57", "artist": "Hasc 26", "title": "Rak Tefillah", "raw": "12:57\tHasc 26\tRak Tefillah", "logged_utc": "2026-11-20T17:58:06Z"}
+{"start_utc": "2026-11-20T17:59:59Z", "start_epoch": 1795197599, "playlist_time": "13:00", "artist": "", "title": "Weather Schedule Sponsors", "raw": "13:00\tWeather Schedule Sponsors", "logged_utc": "2026-11-20T18:00:07Z"}
