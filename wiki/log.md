@@ -496,3 +496,4 @@ INGEST 2026-11-19 local-fm-box.md control room on the box (infra/local/kbr_panel
 UPDATE 2026-11-19 playlist-generation.md songs after Shabbos/Yom Tov are drawn again 15 min before it ends (redraw_before_blackout_end), so Motzei Shabbos starts on time
 UPDATE 2026-11-19 playlist-generation.md pull_late_id also takes out an ID waiting far too close after the one before; station ID decisions log their reason
 UPDATE 2026-11-20 playlist-generation.md a station ID already past max_minutes keeps only 1 min from breaks (id_margin)
+UPDATE 2026-11-20 playlist-generation.md program-blocks.md station IDs go in the breaks (placement hourly default / every_block), between songs only by choice

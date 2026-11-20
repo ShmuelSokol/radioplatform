@@ -583,6 +583,61 @@ class _SponsorGuard:
         self.near.setdefault(str(asset_id), []).append(as_utc(at))
 
 
+# A block holding a recording longer than this is a programme (a shiur): no ID after it
+_PROGRAMME_SECONDS = 300.0
+
+
+async def _id_blocks(db: AsyncSession, station, occurrences, earliest: datetime) -> list:
+    """The breaks that get the station ID and the ID each gets, for those that have
+    none yet: per automation_config.station_ids (on, placement "hourly" = the break at
+    hh:00, "every_block" = every break; "between_songs" = none here).
+    One per clock time; never after a programme; the rotation is the block's own
+    (longest rested first)."""
+    from app.services.playlist_generator_service import id_settings_for
+
+    ids = id_settings_for(station.automation_config)
+    if not ids.on or ids.placement not in ("hourly", "every_block"):
+        return []
+    have = {
+        as_utc(at).replace(second=0, microsecond=0)
+        for (at,) in (await db.execute(
+            select(QueueEntry.preempt_at).join(Asset, QueueEntry.asset_id == Asset.id).where(
+                QueueEntry.station_id == station.id, QueueEntry.status.in_(["pending", "playing", "played"]),
+                QueueEntry.source == SOURCE, QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at > earliest - timedelta(hours=1),
+                func.lower(Asset.category).like("station_id%"),
+            )
+        )).all()
+    }
+    def programme(occurrence) -> bool:
+        return any(i.kind in ("asset", "category") and (i.duration or 0) > _PROGRAMME_SECONDS
+                   for i in occurrence.items)
+
+    # an ID queued last at a time a programme starts would follow the whole shiur
+    programme_at = {o.at.replace(second=0, microsecond=0) for o in occurrences if programme(o)}
+    resolver = _Resolver(db, station, False, {}, prepare=False)
+    chosen: list = []
+    for occurrence in occurrences:
+        at = occurrence.at.replace(second=0, microsecond=0)
+        if at <= earliest or at in have or at in programme_at:
+            continue
+        if ids.placement == "hourly" and occurrence.local.minute != 0:
+            continue
+        if not ids.in_hours(occurrence.local.hour):
+            continue
+        if not any(i.asset_id is not None for i in occurrence.items):
+            continue  # an empty break: no ID on its own
+        row = await resolver._rotate("jingle", ids.category, occurrence.at)
+        if row is None:
+            return chosen
+        asset = await db.get(Asset, row.id)
+        if asset is None:
+            continue
+        have.add(at)
+        chosen.append((occurrence, asset))
+    return chosen
+
+
 async def _reconcile_blocks(
     db: AsyncSession, station, station_id, blocks, pending, rebuild, now, earliest, removed, queued_at
 ) -> dict | None:
@@ -629,9 +684,9 @@ async def _reconcile_blocks(
     added = 0
     skipped: list[str] = []
     guard = await _SponsorGuard.load(db, station, now)
-    for occurrence in await plan_blocks(
-        db, station, now=now, dry_run=False, blocks=blocks
-    ):
+    occurrences = await plan_blocks(db, station, now=now, dry_run=False, blocks=blocks)
+    id_blocks = await _id_blocks(db, station, occurrences, earliest)
+    for occurrence in occurrences:
         at = occurrence.at.replace(second=0, microsecond=0)
         if at <= earliest or at in queued_at:
             continue
@@ -658,6 +713,16 @@ async def _reconcile_blocks(
             added += 1
             if item.kind == "sponsor":
                 guard.took(item.asset_id, at)
+    # The station ID closes its break (Shmuel 2026-11-19: "part of the ad blocks. Or
+    # once an hour"), also in breaks queued before the setting changed
+    for occurrence, asset in id_blocks:
+        max_pos += 1
+        db.add(QueueEntry(
+            id=uuid.uuid4(), station_id=station_id, asset_id=asset.id, position=max_pos,
+            status="pending", source=SOURCE, preempt_at=occurrence.at.replace(second=0, microsecond=0),
+            timing_mode=occurrence.block.timing_mode, hard_by=hard_by(occurrence.block, occurrence.at),
+        ))
+        added += 1
     await db.flush()
     if added or removed:
         logger.info("Program blocks for station %s: +%d -%d", station_id, added, removed)

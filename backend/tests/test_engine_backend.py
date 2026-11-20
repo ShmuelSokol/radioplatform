@@ -2130,7 +2130,7 @@ async def test_a_held_station_id_is_taken_back_when_a_break_comes_due(client, db
     sponsorships came due during that song and the ID aired right before them. The tick
     now takes back an ID the engine holds once the guard would refuse it."""
     station, entries, engine, _ = eng
-    station.automation_config = {**(station.automation_config or {}), "station_ids": {"enabled": True}}
+    station.automation_config = {**(station.automation_config or {}), "station_ids": {"enabled": True, "placement": "between_songs"}}
     jingle = Asset(id=uuid.uuid4(), title="Station ID - Short - 03", duration=1.88, asset_type="jingle",
                    category="station_id", file_path="https://cdn.example.com/audio/id.mp3")
     db_session.add(jingle)

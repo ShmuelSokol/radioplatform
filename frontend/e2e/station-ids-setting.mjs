@@ -1,5 +1,5 @@
 /**
- * Stations page: "Station IDs between songs" (2026-11-18). Against a fake backend:
+ * Stations page: "Station IDs" (2026-11-18; where they play added 2026-11-20). Against a fake backend:
  * the section shows the saved setting (on, minutes, category, hours), the fields
  * are disabled while it is off, and Save sends station_ids with the hours and keeps
  * other settings. Desktop and iPhone sizes, a screenshot of each when SHOTS=<dir>.
@@ -38,17 +38,24 @@ for (const [view, opts] of [['desktop', { viewport: { width: 1440, height: 900 }
   check(`${view}: shows it on`, await on.isChecked());
   check(`${view}: shows the minutes`, (await page.getByTestId('station-ids-min').inputValue()) === '15'
     && (await page.getByTestId('station-ids-max').inputValue()) === '25');
+  check(`${view}: once an hour by default, minutes only for between songs`,
+    (await page.getByTestId('station-ids-where').inputValue()) === 'hourly'
+    && await page.getByTestId('station-ids-min').isDisabled());
   check(`${view}: shows the hours`, (await page.getByTestId('station-ids-from').inputValue()) === '6'
     && (await page.getByTestId('station-ids-to').inputValue()) === '22');
   await page.getByTestId('station-ids-on').scrollIntoViewIfNeeded();
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/${view}-station-ids.png` });
+  await page.getByTestId('station-ids-where').selectOption('every_block');
+  check(`${view}: every break keeps the minutes off`, await page.getByTestId('station-ids-max').isDisabled());
+  await page.getByTestId('station-ids-where').selectOption('between_songs');
   await page.getByTestId('station-ids-max').fill('30');
   await page.getByTestId('station-ids-from').selectOption('7');
   await page.getByRole('button', { name: 'Save Automation Config' }).click();
   await page.waitForTimeout(600);
   const body = saved.at(-1)?.automation_config;
   check(`${view}: saves the new setting`, body?.station_ids?.max_minutes === 30 && body?.station_ids?.start_hour === 7
-    && body?.station_ids?.end_hour === 22 && body?.station_ids?.enabled === true && body?.station_ids?.clear_minutes === 3, JSON.stringify(body?.station_ids));
+    && body?.station_ids?.end_hour === 22 && body?.station_ids?.enabled === true && body?.station_ids?.clear_minutes === 3
+    && body?.station_ids?.placement === 'between_songs', JSON.stringify(body?.station_ids));
   check(`${view}: keeps other settings`, body?.weather_region === 'lakewood');
   await on.uncheck();
   check(`${view}: fields off while it is off`, await page.getByTestId('station-ids-min').isDisabled());

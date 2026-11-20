@@ -206,7 +206,7 @@ radioplatform/
 | sponsor_item.py | What the control room's Sponsor panel shows for one spot on one station: sponsor, contracts, today's and coming plays, missed plays |
 | spot_schedule_service.py | Plans sponsor spots into clock slots or block places, levelling each time slot so the emptiest break gets the next play, and keeps pending `ad_slot` queue entries in step; when blocks are over-booked it shares the room fairly, rolls plays to a later block and warns (see `wiki/spot-schedules.md`, `wiki/program-blocks.md`) |
 | spot_voice_service.py | Makes spot audio from a script; Shprach call is a stub, placeholder tones until wired (see `wiki/spot-recordings.md`) |
-| program_block_service.py | Expands program blocks into timed queue entries (`source="block"`) and replaces the built-in hourly time and weather (see `wiki/program-blocks.md`) |
+| program_block_service.py | Expands program blocks into timed queue entries (`source="block"`) and replaces the built-in hourly time and weather; adds the station ID last in the hh:00 break or every break (`station_ids.placement`) (see `wiki/program-blocks.md`) |
 | tts_service.py | ElevenLabs TTS generation |
 | weather_service.py | OpenWeatherMap API (current + 3-day forecast) |
 | weather_spot_service.py | Weather/time announcement generation + caching; stores uploaded daily weather spots per region (station `automation_config.weather_region`, default lakewood; ElevenLabs is the fallback for the default region only) |
@@ -236,7 +236,7 @@ radioplatform/
 | activity_log.py | Activity log: middleware that records every signed-in change, before/after capture from SQLAlchemy flushes, batched background writer (see `wiki/activity-log.md`) |
 | bug_report_service.py | Copies bug reports to the private GitHub repo and sends ntfy pushes: "received" at once, then "fix ready" or "needs you" (see `wiki/bug-reports.md`) |
 | air_watch.py | On-air self-check every 5 s: hard timed items late or not started, no time check at hh:00, dead air, item shown past its end, engine vs site drift, skipped time/weather/sponsorship, a local FM box's clock, disk and missing audio; alerts + ntfy (see `wiki/air-watch.md`) |
-| station_id_guard.py | Last check on an automatic station ID as it would go on air: passed over after a break or spoken item, or near a break (both pick paths); an ID that may not air yet moves one song later (`postpone`); after each top-up `drop_misplaced` moves waiting IDs the queue timeline puts beside a break and `pull_late_id` brings the next one forward when it would air more than max_minutes after the last; an ID already that late keeps 1 min from breaks instead of clear_minutes (see `wiki/playlist-generation.md`) |
+| station_id_guard.py | Only for `station_ids.placement` `between_songs` (IDs normally air in the breaks, see program_block_service). Last check on an automatic station ID as it would go on air: passed over after a break or spoken item, or near a break (both pick paths); an ID that may not air yet moves one song later (`postpone`); after each top-up `drop_misplaced` moves waiting IDs the queue timeline puts beside a break and `pull_late_id` brings the next one forward when it would air more than max_minutes after the last; an ID already that late keeps 1 min from breaks instead of clear_minutes (see `wiki/playlist-generation.md`) |
 | station_modes.py | HS (hard start) and Spots mode switches: softens hard timed items while HS is off and restores them; Spots off plans no sponsorships (see `wiki/station-modes.md`) |
 | queue_positions.py | Renumbers a station's playing and pending queue entries from 1 in one statement (browser player's song change, blackout fill); `put_playing_first` moves only the item on air before the first waiting one (engine start report) |
 | playout_tunnel.py | Commands to an engine with no inbound line (a local FM box): its relay long-polls for them; used by playout_engine only while a relay is polling. Also keeps the box's health report and names its problems for air watch (see `wiki/local-fm-box.md`) |
@@ -261,7 +261,7 @@ radioplatform/
 ### Pages
 **Admin** (`frontend/src/pages/admin/`):
 - Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, not on this station, do not play on any station, details), queue and library columns the operator drags or double-clicks to fit, a "Playing from" column with a Why panel (playlist, block and step a song was drawn for, or what else queued it), Sponsors tab (today's sponsorships on the station; rows carry a SPONSOR tag) and a Sponsor panel instead for a sponsorship spot (sponsor, contracts, today's and coming plays with Skip, missed plays, Pause contract, links). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
-- Stations.tsx — Station management (incl. "Omer count on the hour")
+- Stations.tsx — Station management (incl. "Omer count on the hour", "Station IDs" with where they play)
 - Assets.tsx — Audio asset management
 - AssetUpload.tsx — File upload
 - Schedules.tsx — Schedule management (create/edit/delete)
@@ -570,7 +570,7 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/queue-columns.mjs
 # The control room's Song panel (category, not on this station, do not play, details) on desktop and phone sizes
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs
 
-# Stations page: "Station IDs between songs" (on, minutes, category, hours; saves and keeps other settings), desktop and iPhone
+# Stations page: "Station IDs" (on, where, minutes, category, hours; saves and keeps other settings), desktop and iPhone
 cd frontend && BASE_URL=http://localhost:4313 node e2e/station-ids-setting.mjs
 
 # The control room's Sponsor panel (tapping a sponsorship spot) on three stations, roles, desktop and phone sizes

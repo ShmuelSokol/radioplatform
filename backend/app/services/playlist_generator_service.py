@@ -66,9 +66,21 @@ IDS_KEY = "station_ids"
 IDS_CATEGORY = "station_id"
 
 
+# Where a station's IDs air (automation_config.station_ids.placement). Shmuel 2026-11-19
+# 8:09 PM ET: "Station IDs should be part of the ad blocks. Or once an hour. Not randomly
+# between songs." "hourly": first in the hh:00 break; "every_block": first in every
+# break with sponsorships; "between_songs": the old 12-20 min sprinkle (kept, not default).
+PLACEMENTS = ("hourly", "every_block", "between_songs")
+DEFAULT_PLACEMENT = "hourly"
+
+
 @dataclass
 class IdSettings:
+    # Between songs (the sprinkle, its air-time guard and tidy): on only with
+    # placement "between_songs". `on` is the station's switch for IDs at all.
     enabled: bool = False
+    on: bool = False
+    placement: str = DEFAULT_PLACEMENT
     category: str = IDS_CATEGORY
     min_minutes: float = 12.0
     max_minutes: float = 20.0
@@ -100,8 +112,14 @@ def id_settings_for(automation_config: dict | None) -> IdSettings:
 
     low = num("min_minutes", 12.0, 3.0, 240.0)
     high = max(low, num("max_minutes", 20.0, 3.0, 240.0))
+    on = bool(raw.get("enabled", False))
+    placement = raw.get("placement")
+    if placement not in PLACEMENTS:
+        placement = DEFAULT_PLACEMENT
     return IdSettings(
-        enabled=bool(raw.get("enabled", False)),
+        enabled=on and placement == "between_songs",
+        on=on,
+        placement=placement,
         category=str(raw.get("category") or IDS_CATEGORY).strip() or IDS_CATEGORY,
         min_minutes=low,
         max_minutes=high,

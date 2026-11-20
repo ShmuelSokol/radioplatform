@@ -147,3 +147,7 @@ then rotates category `kids_car_summer` / `kids_car_year` (both in
 A seasonal block still counts as "the station has blocks" when out of season, so the
 script sets `blocks_keep_hourly` on a station that had no other active block.
 Tests: `tests/test_block_seasons.py`, `frontend/e2e/program-block-season.mjs`.
+
+## Station IDs in the breaks (2026-11-20)
+
+Shmuel 2026-11-19 8:09 PM ET: "Station IDs should be part of the ad blocks. Or once an hour. Not randomly between songs." With `automation_config.station_ids` on, `reconcile_block_entries` adds one station ID (rotating, longest rested first, from `station_ids.category`) as the last entry of a break: `placement` `hourly` (default) = the break at hh:00 only, `every_block` = every break. Also into breaks queued before the setting changed (it goes last by position). Never at a time a block starts a programme (a recording over 5 min, the Daf): queued last, the ID would follow the whole shiur. Never in an empty break (no ID on its own), never in a blackout (occurrences skip them), only inside `start_hour`..`end_hour`. A station with no program blocks gets the ID in its hh:00 group after the time check and weather instead (`QueueReplenishService._schedule_hourly_station_ids` with the station's category). Tests: `tests/test_station_id_in_blocks.py`.
