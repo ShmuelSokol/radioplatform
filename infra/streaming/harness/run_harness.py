@@ -4429,6 +4429,53 @@ async def sc_shabbos_alert(h: Harness, restart: bool = False) -> None:
             await db.commit()
 
 
+async def sc_shabbos_extended_while_on(h: Harness) -> None:
+    """Shabbos's end moved later while it is on (KBR Jerusalem 2026-11-21: its return
+    corrected from 17:48 to 17:53 Jerusalem time, sunset from the city's height), past
+    what the queued silences cover. The station stays silent to the new end: no music,
+    no emergency files when the first silences run out, and music after it."""
+    from sqlalchemy import delete, update
+
+    from app.db.engine import async_session_factory
+    from app.models.holiday_window import HolidayWindow
+
+    name = "shabbos_extended_while_on"
+    await wait_music(h)
+    cur = await h.on_air()
+    await h.clear_pending()
+    await h.queue([(n, {}) for n in ("song1", "song2", "song3", "song4", "song5", "song6")
+                   if not cur or h.assets[n] != cur.asset_id][:4])
+    wid = uuid.uuid4()
+    start = at(15)
+    end = start + timedelta(seconds=150)       # three 60 s silences, cover 180 s
+    new_end = start + timedelta(seconds=270)   # 90 s past what they cover
+    async with async_session_factory() as db:
+        db.add(HolidayWindow(id=wid, name="Harness Shabbos", start_datetime=start, end_datetime=end,
+                             is_blackout=True, affected_stations={"station_ids": [str(STATION_ID)]}))
+        await db.commit()
+    try:
+        await asyncio.sleep(max(0, start.timestamp() + 90 - time.time()))
+        async with async_session_factory() as db:
+            await db.execute(update(HolidayWindow).where(HolidayWindow.id == wid).values(end_datetime=new_end))
+            await db.commit()
+        await asyncio.sleep(max(0, new_end.timestamp() - time.time()) + 15)
+        heard = h.heard(start.timestamp() + 3, new_end.timestamp() - 2)
+        h.print_timeline(heard, start.timestamp())
+        loud = [(round(t - start.timestamp(), 1), round(db)) for t, db, _ in heard if db > -45]
+        h.check(name, not loud, f"silent to the new end ({len(loud)} loud windows: {loud[:5]})")
+        span = (new_end.timestamp() - 2) - (start.timestamp() + 3)
+        h.check(name, len(heard) >= 0.95 * span / WINDOW,
+                f"the engine sent sound all through ({len(heard)} windows for {span:.0f} s)")
+        after = [(round(t - new_end.timestamp(), 1), n) for t, n in timeline(h.heard(new_end.timestamp() - 2, time.time() - 1))
+                 if n != "silence"]
+        h.check(name, bool(after) and after[0][1].startswith("song") and after[0][0] <= 6.0,
+                f"music after the new end: {after[:3]}")
+    finally:
+        async with async_session_factory() as db:
+            await db.execute(delete(HolidayWindow).where(HolidayWindow.id == wid))
+            await db.commit()
+
+
 async def sc_blackout_ended_early(h: Harness) -> None:
     """H-10 / B-JOB: a blackout (Shabbos, Yom Tov) puts silence on air; when it is ended
     early (its end moved to now) the silence is dropped and station music is back within a
@@ -4950,6 +4997,7 @@ SCENARIOS = {
     "blackout_ended_early": sc_blackout_ended_early,
     "shabbos_silence": sc_shabbos_silence,
     "shabbos_alert": sc_shabbos_alert,
+    "shabbos_extended_while_on": sc_shabbos_extended_while_on,
     "shabbos_alert_engine_restart": lambda h: sc_shabbos_alert(h, restart=True),
     "output_limiter": sc_output_limiter,
     "fit_before_hour": sc_fit_before_hour,
