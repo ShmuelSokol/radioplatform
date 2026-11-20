@@ -2202,6 +2202,16 @@ async def _check_overrun(db: AsyncSession, station_id, state: EngineState, now) 
     return end
 
 
+async def _silence_on_air(db: AsyncSession, station_id) -> bool:
+    res = await db.execute(
+        select(Asset.asset_type)
+        .join(QueueEntry, QueueEntry.asset_id == Asset.id)
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .limit(1)
+    )
+    return res.scalar_one_or_none() == "silence"
+
+
 def _group_key(at: datetime) -> int:
     """A timed group's time as whole seconds (the same for naive and aware values)."""
     return round((at if at.tzinfo else at.replace(tzinfo=UTC)).timestamp())
@@ -2237,11 +2247,20 @@ async def _hand_over_timed(db: AsyncSession, station_id, state: EngineState, now
     blacked_out: bool | None = None
     groups: dict[datetime, list[tuple[QueueEntry, str]]] = {}
     chosen: dict[int, int] = {}
+    silence_on_air: bool | None = None
     for entry in res.unique().scalars().all():
         key = str(entry.id)
         if key in state.timed_sent or key in held:
             continue
         if entry.asset is not None and (entry.asset.asset_type or "") == "silence":
+            if (entry.preempt_at if entry.preempt_at.tzinfo else entry.preempt_at.replace(tzinfo=UTC)) <= now:
+                # A blackout already running (a backend restart forgot what it handed):
+                # when silence is on air here, /next goes on with it; nothing more for
+                # the timed lane, or each restart would add to it
+                if silence_on_air is None:
+                    silence_on_air = await _silence_on_air(db, station_id)
+                if silence_on_air:
+                    continue
             # Only the first few: the rest go one by one through the music lane (/next
             # hands silence in a blackout). All of Shabbos's silences as one timed group
             # (107 five-minute items) starved KBR Jerusalem's engine at candle lighting,
