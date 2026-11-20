@@ -91,6 +91,7 @@ async def eng(db_session, monkeypatch):
 
     engine = Engine()
     monkeypatch.setattr(playout_engine, "_command", engine.command)
+    monkeypatch.setattr(queue_module, "_active_refill_at", {})
 
     calls = {"replenish": 0, "broadcast": []}
 
@@ -2346,3 +2347,26 @@ async def test_an_active_blackout_short_of_silence_is_not_refilled_on_the_engine
     assert "/skip" not in engine.paths()[sent:] and "/flush" not in engine.paths()[sent:]
     for r in rows:
         assert (await _fresh(db_session, r.id)).status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_a_song_reported_again_in_a_blackout_does_not_refill_every_pass(client, db_session, eng):
+    """KBR Jerusalem 2026-11-20 19:03Z: a song row (Rebbe Mendele Vorka) kept being reported
+    started during the blackout while the stream was silent; each report would set off
+    another refill + flush + skip. The first one runs; the next is at least 10 min later."""
+    station, entries, engine, _ = eng
+    await _on_air(client, station, entries[0].id)
+    silence = Asset(id=uuid.uuid4(), title="Silence", duration=300.0, asset_type="silence",
+                    file_path="https://cdn.example.com/audio/silence.mp3")
+    db_session.add(silence)
+    now = datetime.now(UTC)
+    db_session.add(HolidayWindow(id=uuid.uuid4(), name="Shabbos", is_blackout=True,
+                                 start_datetime=now - timedelta(seconds=5),
+                                 end_datetime=now + timedelta(minutes=20)))
+    await db_session.commit()
+    assert await queue_module.fill_blackout_queue(db_session, station.id) >= 4
+    skips = engine.paths().count("/skip")
+    for _ in range(3):
+        await _on_air(client, station, entries[0].id)  # the song "started" again
+        assert await queue_module.fill_blackout_queue(db_session, station.id) == 0
+    assert engine.paths().count("/skip") == skips

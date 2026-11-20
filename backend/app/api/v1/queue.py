@@ -325,6 +325,11 @@ async def _drop_timed_inside(db: AsyncSession, station_id, silence_id, start, en
     return len(ids)
 
 
+# An active blackout's refill on an engine station: when it last ran (monotonic), per station
+ACTIVE_REFILL_EVERY = 600.0
+_active_refill_at: dict[str, float] = {}
+
+
 async def _fill_single_blackout(db: AsyncSession, station_id, window: "HolidayWindow"):
     """Fill queue with silence for a single blackout window."""
     import math
@@ -419,6 +424,14 @@ async def _fill_single_blackout(db: AsyncSession, station_id, window: "HolidayWi
         )
         if loud.first() is None:
             return 0
+    if is_active_now and settings.engine_drives(station_id):
+        # At most one refill (with its flush + skip) per station every 10 minutes. KBR
+        # Jerusalem 2026-11-20: a song row kept being reported started again during the
+        # blackout (the stream silent), and each report set off another refill + skip.
+        last = _active_refill_at.get(str(station_id))
+        if last is not None and time.monotonic() - last < ACTIVE_REFILL_EVERY:
+            return 0
+        _active_refill_at[str(station_id)] = time.monotonic()
 
     if is_active_now:
         # Stop current music immediately
