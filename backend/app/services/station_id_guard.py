@@ -256,6 +256,37 @@ async def _last_aired_id(db: AsyncSession, station_id, now: datetime) -> datetim
     return _aware(last) if last is not None else None
 
 
+async def clear_between_songs(db: AsyncSession, station_id) -> int:
+    """Take out waiting between-songs IDs (untimed, automatic) when the station's IDs no
+    longer go between songs: placement hourly / every_block (they air in the breaks,
+    program_block_service) or IDs off. Left over from the 12-20 min rule (Shmuel
+    2026-11-19: "Not randomly between songs"). The one the engine already holds stays.
+    Marks them skipped; does not commit."""
+    from app.models.station import Station
+    from app.services.playlist_generator_service import id_settings_for
+    from app.services.playout_engine import held_entry_ids
+
+    station = await db.get(Station, station_id)
+    if station is None or id_settings_for(station.automation_config).enabled:
+        return 0
+    rows = (await db.execute(
+        select(QueueEntry).options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending",
+               QueueEntry.preempt_at.is_(None))
+    )).unique().scalars().all()
+    held = {str(x) for x in held_entry_ids(station_id)}
+    dropped = 0
+    for entry in rows:
+        if is_auto_station_id(entry) and str(entry.id) not in held:
+            entry.status = "skipped"
+            dropped += 1
+    if dropped:
+        logger.info("Station %s: %d waiting between-songs station IDs taken out (IDs go in the breaks)",
+                    station_id, dropped)
+        await db.flush()
+    return dropped
+
+
 async def drop_misplaced(db: AsyncSession, station_id, now: datetime | None = None) -> int:
     """Move later waiting automatic IDs that the queue's own timeline now
     puts where they would be passed over at air time: right after a break, sponsorship or other spoken

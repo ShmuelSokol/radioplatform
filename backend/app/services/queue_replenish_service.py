@@ -97,7 +97,10 @@ class QueueReplenishService:
         from app.services.station_id_guard import drop_misplaced, pull_late_id
 
         try:
-            changed = await drop_misplaced(self.db, self.station_id)
+            from app.services.station_id_guard import clear_between_songs
+
+            changed = await clear_between_songs(self.db, self.station_id)
+            changed += await drop_misplaced(self.db, self.station_id)
             # and the next ID forward when moves and pass-overs left it late (12-20 min apart)
             from app.services.playlist_generator_service import id_settings_for
 
