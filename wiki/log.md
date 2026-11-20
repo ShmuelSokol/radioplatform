@@ -498,3 +498,4 @@ INGEST 2026-11-19 station-simulator.md test_nothing_from_erev_shabbos_airs_on_mo
 UPDATE 2026-11-19 playlist-generation.md pull_late_id also takes out an ID waiting far too close after the one before; station ID decisions log their reason
 UPDATE 2026-11-20 playlist-generation.md a station ID already past max_minutes keeps only 1 min from breaks (id_margin)
 UPDATE 2026-11-20 playlist-generation.md program-blocks.md station IDs go in the breaks (placement hourly default / every_block), between songs only by choice
+UPDATE 2026-11-20 program-blocks.md leftover between-songs IDs cleared at top-up when placement is not between_songs (drop_misplaced)
