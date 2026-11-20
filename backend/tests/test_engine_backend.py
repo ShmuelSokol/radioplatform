@@ -2328,3 +2328,21 @@ async def test_two_silence_items_do_not_make_the_refill_run_every_pass(client, d
     for _ in range(3):
         assert await queue_module.fill_blackout_queue(db_session, station.id) == 0
     assert engine.paths().count("/skip") == skips
+
+
+@pytest.mark.asyncio
+async def test_an_active_blackout_short_of_silence_is_not_refilled_on_the_engine(client, db_session, eng):
+    """KBR Jerusalem 2026-11-20 18:46Z (after #480): each refill marked the engine's silence
+    played, so the next pass found no silence playing and refilled + skipped again every
+    ~9 s. With silence still queued and nothing else on air, an engine station is left
+    alone however short the count."""
+    station, entries, engine, _ = eng
+    for e in entries:
+        e.status = "played"
+    silence, rows = await _blackout_with_silences(db_session, station, 3, started_ago=600)
+    sent = len(engine.paths())
+    for _ in range(3):
+        assert await queue_module.fill_blackout_queue(db_session, station.id) == 0
+    assert "/skip" not in engine.paths()[sent:] and "/flush" not in engine.paths()[sent:]
+    for r in rows:
+        assert (await _fresh(db_session, r.id)).status == "pending"

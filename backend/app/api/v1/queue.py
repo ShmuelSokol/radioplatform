@@ -404,6 +404,21 @@ async def _fill_single_blackout(db: AsyncSession, station_id, window: "HolidayWi
     existing_count = existing_silence.scalar() or 0
     if existing_count >= num_silence:
         return 0  # Already filled
+    if is_active_now and existing_count > 0 and settings.engine_drives(station_id):
+        # On an engine station, silence still queued is enough: /next hands only silence
+        # in a blackout and makes a row when none is left. Refilled only when something
+        # other than silence is on air (the blackout began or moved under a song).
+        # KBR Jerusalem 2026-11-20 18:46Z: a refill marks the engine's silence played, so
+        # the next pass found no silence playing and refilled again every ~9 s.
+        loud = await db.execute(
+            select(QueueEntry.id).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "playing",
+                QueueEntry.asset_id.not_in(any_silence),
+            ).limit(1)
+        )
+        if loud.first() is None:
+            return 0
 
     if is_active_now:
         # Stop current music immediately
