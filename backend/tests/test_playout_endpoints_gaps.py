@@ -138,7 +138,8 @@ async def test_start_report_does_not_refill_during_a_blackout(client, engine_sta
     r = await client.post(f"/api/v1/playout/{station.id}/started", headers=HEADERS,
                           json={"entry_id": str(entries[0].id), "lane": "main"})
     assert r.status_code == 200
-    assert seen["broadcast"] == [str(entries[0].id)]
+    # A song starting in a blackout is taken off at once (#482), never topped up after
+    assert r.json().get("skipped_in_blackout")
     assert seen["replenish"] == 0
 
 

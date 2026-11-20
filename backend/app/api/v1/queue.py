@@ -325,6 +325,11 @@ async def _drop_timed_inside(db: AsyncSession, station_id, silence_id, start, en
     return len(ids)
 
 
+# An active blackout's refill on an engine station: when it last ran (monotonic), per station
+ACTIVE_REFILL_EVERY = 600.0
+_active_refill_at: dict[str, float] = {}
+
+
 async def _fill_single_blackout(db: AsyncSession, station_id, window: "HolidayWindow"):
     """Fill queue with silence for a single blackout window."""
     import math
@@ -404,6 +409,29 @@ async def _fill_single_blackout(db: AsyncSession, station_id, window: "HolidayWi
     existing_count = existing_silence.scalar() or 0
     if existing_count >= num_silence:
         return 0  # Already filled
+    if is_active_now and existing_count > 0 and settings.engine_drives(station_id):
+        # On an engine station, silence still queued is enough: /next hands only silence
+        # in a blackout and makes a row when none is left. Refilled only when something
+        # other than silence is on air (the blackout began or moved under a song).
+        # KBR Jerusalem 2026-11-20 18:46Z: a refill marks the engine's silence played, so
+        # the next pass found no silence playing and refilled again every ~9 s.
+        loud = await db.execute(
+            select(QueueEntry.id).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "playing",
+                QueueEntry.asset_id.not_in(any_silence),
+            ).limit(1)
+        )
+        if loud.first() is None:
+            return 0
+    if is_active_now and settings.engine_drives(station_id):
+        # At most one refill (with its flush + skip) per station every 10 minutes. KBR
+        # Jerusalem 2026-11-20: a song row kept being reported started again during the
+        # blackout (the stream silent), and each report set off another refill + skip.
+        last = _active_refill_at.get(str(station_id))
+        if last is not None and time.monotonic() - last < ACTIVE_REFILL_EVERY:
+            return 0
+        _active_refill_at[str(station_id)] = time.monotonic()
 
     if is_active_now:
         # Stop current music immediately

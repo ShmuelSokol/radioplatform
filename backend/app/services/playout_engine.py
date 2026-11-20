@@ -88,6 +88,8 @@ class EngineState:
     timed_sent: set[str] = field(default_factory=set)
     # Silences handed to the timed lane per blackout start (SILENCE_TIMED_MAX)
     silence_handed: dict[int, set[str]] = field(default_factory=dict)
+    blackout_skip_at: float = 0.0
+    blackout_flushed: bool = False
     # A manual skip is in flight: the outgoing entry is logged as skipped
     skip_requested: bool = False
     # Soft-timed groups (by their time) whose hard_by limit already made us fade the song
@@ -1525,6 +1527,24 @@ async def _handle_started(
                 task.add_done_callback(_background.discard)
         return {"ok": True, "known": False}
 
+    if (entry.asset is not None and entry.asset.asset_type != "silence"
+            and entry.source != SHABBOS_END_SOURCE and await _blacked_out(db, station_id)):
+        # Something other than silence reports a start in Shabbos / Yom Tov: take it off
+        # the air at once (at most every 5 s). KBR Jerusalem 2026-11-20: a song row kept
+        # coming back as started during the blackout; only a refill's skip took it off.
+        mono = time.monotonic()
+        if mono - state.blackout_skip_at > 5.0:
+            state.blackout_skip_at = mono
+            logger.warning("Engine started %s (%s) during a blackout; skipping it",
+                           entry.id, entry.asset.title)
+            entry.status = "played"
+            await db.commit()
+            try:
+                await engine_skip(station_id)
+            except Exception as e:
+                logger.warning("Skip during the blackout failed: %s", e)
+            return {"ok": True, "known": True, "skipped_in_blackout": True}
+
     if state.on_emergency or not state.emergency_cleared:
         # Back on the station's own queue: the emergency alert has served its purpose.
         # Also checked once per process, since a backend restart forgets on_emergency.
@@ -2212,6 +2232,22 @@ async def _silence_on_air(db: AsyncSession, station_id) -> bool:
     return res.scalar_one_or_none() == "silence"
 
 
+async def _flush_at_blackout_start(db: AsyncSession, station_id, state: EngineState) -> None:
+    """Once a blackout has begun, drop the song the engine pre-loaded before it (once per
+    blackout). The timed silence takes over at candle lighting, but the music lane keeps
+    its pre-loaded song and plays it when the timed silences end (harness shabbos_silence
+    2026-11-20 on #482: a song at +120 s). The active refill's flush used to do this by
+    chance; it no longer runs while silence is queued."""
+    if not await _blacked_out(db, station_id):
+        state.blackout_flushed = False
+        return
+    if state.blackout_flushed:
+        return
+    if await engine_flush(station_id):
+        state.blackout_flushed = True
+        logger.info("Station %s: blackout began; dropped the engine's pre-loaded track", station_id)
+
+
 def _group_key(at: datetime) -> int:
     """A timed group's time as whole seconds (the same for naive and aware values)."""
     return round((at if at.tzinfo else at.replace(tzinfo=UTC)).timestamp())
@@ -2444,6 +2480,11 @@ async def tick(db: AsyncSession, station) -> None:
         await db.rollback()
         await db.refresh(station)
     await _hand_over_timed(db, station_id, state, now, horizon)
+    try:
+        await _flush_at_blackout_start(db, station_id, state)
+    except Exception:
+        logger.warning("Blackout start flush failed for station %s", station_id, exc_info=True)
+        await db.rollback()
     try:
         await _analyse_ahead(db, station_id, now)
     except Exception as e:

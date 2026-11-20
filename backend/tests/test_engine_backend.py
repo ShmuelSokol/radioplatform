@@ -91,6 +91,7 @@ async def eng(db_session, monkeypatch):
 
     engine = Engine()
     monkeypatch.setattr(playout_engine, "_command", engine.command)
+    monkeypatch.setattr(queue_module, "_active_refill_at", {})
 
     calls = {"replenish": 0, "broadcast": []}
 
@@ -350,8 +351,10 @@ async def test_started_broadcasts_and_tops_up(client, db_session, eng):
                                  start_datetime=now - timedelta(minutes=1),
                                  end_datetime=now + timedelta(hours=1)))
     await db_session.commit()
-    await _on_air(client, station, entries[1].id)
-    assert calls["broadcast"] == [str(entries[0].id), str(entries[1].id)]
+    # In the blackout the engine starts its silence (a song there is skipped at once)
+    silence = await _add(db_session, station, title="Silence", duration=300.0, kind="silence", position=0)
+    await _on_air(client, station, silence.id)
+    assert calls["broadcast"] == [str(entries[0].id), str(silence.id)]
     await topped_up()
     assert calls["replenish"] == 1  # not during the blackout
     logs = (await db_session.execute(select(PlayLog).where(PlayLog.station_id == station.id))).scalars().all()
@@ -2328,3 +2331,68 @@ async def test_two_silence_items_do_not_make_the_refill_run_every_pass(client, d
     for _ in range(3):
         assert await queue_module.fill_blackout_queue(db_session, station.id) == 0
     assert engine.paths().count("/skip") == skips
+
+
+@pytest.mark.asyncio
+async def test_an_active_blackout_short_of_silence_is_not_refilled_on_the_engine(client, db_session, eng):
+    """KBR Jerusalem 2026-11-20 18:46Z (after #480): each refill marked the engine's silence
+    played, so the next pass found no silence playing and refilled + skipped again every
+    ~9 s. With silence still queued and nothing else on air, an engine station is left
+    alone however short the count."""
+    station, entries, engine, _ = eng
+    for e in entries:
+        e.status = "played"
+    silence, rows = await _blackout_with_silences(db_session, station, 3, started_ago=600)
+    sent = len(engine.paths())
+    for _ in range(3):
+        assert await queue_module.fill_blackout_queue(db_session, station.id) == 0
+    assert "/skip" not in engine.paths()[sent:] and "/flush" not in engine.paths()[sent:]
+    for r in rows:
+        assert (await _fresh(db_session, r.id)).status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_a_song_reported_again_in_a_blackout_does_not_refill_every_pass(client, db_session, eng):
+    """KBR Jerusalem 2026-11-20 19:03Z: a song row (Rebbe Mendele Vorka) kept being reported
+    started during the blackout while the stream was silent; each report would set off
+    another refill + flush + skip. The first one runs; the next is at least 10 min later."""
+    station, entries, engine, _ = eng
+    await _on_air(client, station, entries[0].id)
+    silence = Asset(id=uuid.uuid4(), title="Silence", duration=300.0, asset_type="silence",
+                    file_path="https://cdn.example.com/audio/silence.mp3")
+    db_session.add(silence)
+    now = datetime.now(UTC)
+    db_session.add(HolidayWindow(id=uuid.uuid4(), name="Shabbos", is_blackout=True,
+                                 start_datetime=now - timedelta(seconds=5),
+                                 end_datetime=now + timedelta(minutes=20)))
+    await db_session.commit()
+    assert await queue_module.fill_blackout_queue(db_session, station.id) >= 4
+    skips = engine.paths().count("/skip")
+    for _ in range(3):
+        await _on_air(client, station, entries[0].id)  # the song "started" again
+        assert await queue_module.fill_blackout_queue(db_session, station.id) == 0
+    assert engine.paths().count("/skip") == skips
+
+
+@pytest.mark.asyncio
+async def test_a_song_started_in_a_blackout_is_skipped_at_once(client, db_session, eng):
+    """KBR Jerusalem 2026-11-20 19:03Z: a song row kept coming back as started during the
+    blackout. A start report of anything but silence in a blackout skips it at once."""
+    station, entries, engine, _ = eng
+    await _blackout_with_silences(db_session, station, 3, started_ago=600)
+    r = await client.post(f"/api/v1/playout/{station.id}/started", headers=HEADERS,
+                          json={"entry_id": str(entries[0].id), "lane": "main"})
+    assert r.status_code == 200 and r.json().get("skipped_in_blackout")
+    assert engine.paths()[-1] == "/skip"
+    assert (await _fresh(db_session, entries[0].id)).status == "played"
+
+
+@pytest.mark.asyncio
+async def test_the_track_preloaded_before_a_blackout_is_dropped_once(client, db_session, eng):
+    """Harness shabbos_silence 2026-11-20: the song the engine pre-loaded before candle
+    lighting aired when the timed silences ended. The tick drops it once per blackout."""
+    station, _, engine, _ = eng
+    await _blackout_with_silences(db_session, station, 3, started_ago=30)
+    for _ in range(3):
+        await playout_engine.tick(db_session, station)
+    assert engine.paths().count("/flush") == 1
