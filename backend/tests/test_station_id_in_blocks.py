@@ -116,7 +116,7 @@ async def test_a_station_without_blocks_gets_the_id_in_its_top_of_hour_group(db_
 @pytest.mark.asyncio
 async def test_left_over_between_songs_ids_are_taken_out(db_session: AsyncSession):
     """IDs the 12-20 min rule queued between songs go when the station's IDs move to the breaks."""
-    from app.services.station_id_guard import clear_between_songs
+    from app.services.station_id_guard import drop_misplaced
 
     station, jingles = await _station(db_session, {"enabled": True})
     song = Asset(id=uuid.uuid4(), title="Song", file_path="s.mp3", asset_type="music", category="lively",
@@ -128,11 +128,11 @@ async def test_left_over_between_songs_ids_are_taken_out(db_session: AsyncSessio
                                                                 (song.id, "auto"), (jingle, "manual")], 1)]
     db_session.add_all(rows)
     await db_session.commit()
-    assert await clear_between_songs(db_session, station.id) == 1
+    assert await drop_misplaced(db_session, station.id) == 1
     await db_session.commit()
     assert [r.status for r in rows] == ["pending", "skipped", "pending", "pending"]  # one put in by hand stays
     # with the between-songs rule chosen, they stay
     station.automation_config = {"station_ids": {"enabled": True, "placement": "between_songs"}}
     rows[1].status = "pending"
     await db_session.commit()
-    assert await clear_between_songs(db_session, station.id) == 0
+    assert await drop_misplaced(db_session, station.id) == 0
