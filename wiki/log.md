@@ -503,3 +503,4 @@ UPDATE 2026-11-19 playlist-generation.md pull_late_id also takes out an ID waiti
 UPDATE 2026-11-20 playlist-generation.md a station ID already past max_minutes keeps only 1 min from breaks (id_margin)
 UPDATE 2026-11-20 playlist-generation.md program-blocks.md station IDs go in the breaks (placement hourly default / every_block), between songs only by choice
 UPDATE 2026-11-20 program-blocks.md leftover between-songs IDs cleared at top-up when placement is not between_songs (drop_misplaced)
+INGEST 2026-11-20 station-simulator.md the stand-in engine now chokes like radio.liq on a timed group over 40 items (TIMED_GROUP_CHOKES; production 2026-11-20: 107 silences of 311 never got ready, emergency music 1 h 49 min); check "every timed group small enough for the engine"; test_a_full_length_shabbos_* runs the export's real-length windows (311 silences), fails on main before PR 476, passes with it

@@ -34,6 +34,13 @@ _FIELD = re.compile(r'(\w+)="((?:[^"\\]|\\.)*)"')
 NEXT_RETRY = 2.0  # radio.liq retries an empty /next after a moment
 PROTO = 5
 HOLD_SECONDS = 8.0
+# radio.liq resolves every request handed to its timed lane before the group can air.
+# KBR Jerusalem 2026-11-20 13:57Z: a group of 107 silences (of 311) never became ready
+# ("We must catchup", request leak); /next kept back what it had already sent to the timed
+# lane and refused songs in the blackout, so the emergency playlist aired for 1 h 49 min.
+# The stand-in does the same with any group larger than this (ordinary breaks are under
+# 15 items): it never airs, and the music lane is left to /next.
+TIMED_GROUP_CHOKES = 40
 
 
 def parse_uri(uri: str) -> dict:
@@ -89,6 +96,8 @@ class FakeEngine:
     live_asked: float | None = None   # /live on came; the music plays on until the show is heard
     live_release: float = 0.0
     last_main: str | None = None      # last entry of the music lane that went on air
+    most_timed: int = 0               # largest timed group that came due
+    choked: list = field(default_factory=list)  # (time, size) of groups too big to air
     # None: the engine talks to the backend itself (the stream server). Else a local FM
     # box's relay stands between them (tests/sim/offline.py): .next(given), .started(...)
     backend: object = None
@@ -228,6 +237,13 @@ class FakeEngine:
         at = min(w.at for w in due)
         group = sorted([w for w in self.timed if w.at == at], key=lambda w: w.seq)
         self.timed = [w for w in self.timed if w.at != at]
+        self.most_timed = max(self.most_timed, len(group))
+        if len(group) > TIMED_GROUP_CHOKES:
+            # the real engine never gets this group ready (see TIMED_GROUP_CHOKES)
+            self.choked.append((now, len(group)))
+            if self.on_air is None:
+                await self.ask_next(start_if_idle=True)
+            return
         if self.live_on:
             # Under the live lane the timed lane stands still: the group waits in it and
             # plays when the show is over (unless the backend takes it back meanwhile)

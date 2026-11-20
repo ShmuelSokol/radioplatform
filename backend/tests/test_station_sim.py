@@ -284,3 +284,78 @@ async def test_nothing_from_erev_shabbos_airs_on_motzei_shabbos(tmp_path, statio
     for check in ("Shabbos/Yom Tov: silence from candle lighting to 72 min after shekia", SPOKEN_CUT):
         assert result.checks_run[check] >= 1, check
         assert not result.failed(check), _failing(result, check)
+
+
+
+
+def _shabbos_window(station: str):
+    import json
+
+    data = json.loads(EXPORT.read_text())
+    for w in data["holiday_windows"]:
+        if SHABBOS_IDS[station] in ((w.get("affected_stations") or {}).get("station_ids") or []):
+            return datetime.fromisoformat(w["start_datetime"]), datetime.fromisoformat(w["end_datetime"])
+    raise AssertionError(f"no Shabbos window for {station}")
+
+
+async def _full_shabbos(tmp_path, station, start, hours):
+    """A real-length Shabbos (the export's window, 25 to 26 hours: 300+ silence rows of
+    5 minutes, as production queues them). KBR Jerusalem 2026-11-20 13:57Z: 107 of its
+    311 silences went to the engine's timed lane as one group, the engine never got them
+    ready and its emergency playlist aired for 1 h 49 min. Earlier tests used windows of
+    3 or 4 silences, where nothing of the kind can happen."""
+    from datetime import timedelta
+
+    from sqlalchemy import func, select
+
+    from app.models.asset import Asset
+    from app.models.queue_entry import QueueEntry
+
+    ws, we = _shabbos_window(station)
+    sid = SHABBOS_IDS[station]
+    queued: list[int] = []
+
+    async def count(sim):
+        async with sim.Session() as db:
+            silence = (await db.execute(select(Asset.id).where(Asset.asset_type == "silence").limit(1))).scalar()
+            queued.append((await db.execute(select(func.count(QueueEntry.id)).where(
+                QueueEntry.station_id == sid, QueueEntry.status == "pending",
+                QueueEntry.asset_id == silence))).scalar())
+
+    _, result = await simulate(EXPORT, start, hours, [station], tmp_path,
+                               events=[(ws - timedelta(minutes=1), count)])
+    print(result.report())
+    expected = int((we - ws).total_seconds() // 300)
+    assert queued and queued[0] >= expected, f"{queued} silence rows queued a minute before candle lighting, {expected} expected"
+    for check in ("Shabbos/Yom Tov: silence from candle lighting to 72 min after shekia",
+                  "every timed group small enough for the engine", "no dead air or emergency music"):
+        assert result.checks_run[check] >= 1, check
+        assert not result.failed(check), _failing(result, check)
+    return result, ws, we
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("station", ["main", "jerusalem", "stories"])
+async def test_a_full_length_shabbos_starts_with_silence_not_emergency_music(tmp_path, station):
+    """The first 40 minutes of a real-length Shabbos (all 300+ silences queued): silence
+    from candle lighting, no emergency music, no timed group too big for the engine."""
+    from datetime import timedelta
+
+    ws, _ = _shabbos_window(station)
+    await _full_shabbos(tmp_path, station, ws - timedelta(minutes=10), 50 / 60)
+
+
+@pytest.mark.skipif(not LONG, reason="a whole Shabbos per station: SIM_LONG=1")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("station", ["main", "jerusalem", "stories"])
+async def test_a_full_length_shabbos_silent_to_the_end(tmp_path, station):
+    """The whole real-length Shabbos and half an hour after: only silence from candle
+    lighting to shekia + 72, then programming within 5 s."""
+    from datetime import timedelta
+
+    ws, we = _shabbos_window(station)
+    start = ws - timedelta(minutes=10)
+    result, ws, we = await _full_shabbos(tmp_path, station, start, (we - start).total_seconds() / 3600 + 0.5)
+    rows = [r for r in result.rows if r.station == SHABBOS_IDS[station]]
+    back = next((r for r in rows if r.kind != "silence" and r.lane != "emergency" and r.start > we.timestamp() - 1), None)
+    assert back is not None and back.start - we.timestamp() <= 5, back.label() if back else "nothing after Shabbos"
