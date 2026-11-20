@@ -544,9 +544,13 @@ def build_uri(entry: QueueEntry, lane: str) -> str | None:
     url = audio_url(asset)
     if not url:
         return None
-    analysis = (
-        stored_analysis(asset.metadata_extra)
-    )
+    # Never a silence's analysis: on a silent file the level analysis finds "silence from
+    # 0 to the end" and puts the start cue at the end, so every silence ended the moment
+    # it started. The timed silences were "not ready" at candle lighting, the hold ran
+    # out and emergency music played (Main 21:19:49Z, Jerusalem 13:57Z 2026-11-20), and
+    # the music lane asked for a new silence every 1-2 s all Shabbos.
+    is_silence = (asset.asset_type or "").lower() == "silence"
+    analysis = {} if is_silence else stored_analysis(asset.metadata_extra)
     fields = {
         "kbr_entry": str(entry.id),
         "kbr_lane": lane,
@@ -567,7 +571,7 @@ def build_uri(entry: QueueEntry, lane: str) -> str | None:
     }
     cue_in = analysis.get("cue_in_seconds")
     # A shiur paused by a timed item carries on where it stopped
-    if resume_offset(entry) > 0:
+    if resume_offset(entry) > 0 and not is_silence:
         cue_in = max(float(cue_in or 0.0), resume_offset(entry))
     cue_out = analysis.get("cue_out_seconds")
     if isinstance(cue_in, (int, float)) and cue_in > 0:
