@@ -1983,11 +1983,11 @@
   "start_utc": "2026-11-20T19:01:28Z",
   "start_et": "2026-11-20 14:01:28",
   "hour_et": "2026-11-20 14:00",
-  "spots": 4,
+  "spots": 5,
   "total_seconds": null,
-  "spot_seconds": "88 6 116 ?",
+  "spot_seconds": "88 6 116 16 ?",
   "block_names": "Weather Schedule Sponsors",
-  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": ""
  }
 ]
