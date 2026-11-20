@@ -503,3 +503,7 @@ UPDATE 2026-11-19 playlist-generation.md pull_late_id also takes out an ID waiti
 UPDATE 2026-11-20 playlist-generation.md a station ID already past max_minutes keeps only 1 min from breaks (id_margin)
 UPDATE 2026-11-20 playlist-generation.md program-blocks.md station IDs go in the breaks (placement hourly default / every_block), between songs only by choice
 UPDATE 2026-11-20 program-blocks.md leftover between-songs IDs cleared at top-up when placement is not between_songs (drop_misplaced)
+INGEST 2026-11-20 station-simulator.md the stand-in engine now chokes like radio.liq on a timed group over 40 items (TIMED_GROUP_CHOKES; production 2026-11-20: 107 silences of 311 never got ready, emergency music 1 h 49 min); check "every timed group small enough for the engine"; test_a_full_length_shabbos_* runs the export's real-length windows (311 silences), fails on main before PR 476, passes with it
+INGEST 2026-11-20 engine-harness.md shabbos_full_count (320 silences, restarts, whole window measured, 13 s not 5 s: radio.liq fetches ahead under 12 s) and big_break (12 items: OPEN, aired out of order, the group was queued in two parts)
+UPDATE 2026-11-20 station-simulator.md full-length Shabbos tests and what the stand-in engine cannot show; docs/test-checklist.md section Z lists the tests still run at toy size
+INGEST 2026-11-20 station-simulator.md a Shabbos moved later while on, with two silence items (PR 480's refill loop); SQLite stores naive datetimes, so the old clearing step fails there instead of looping: the test catches both

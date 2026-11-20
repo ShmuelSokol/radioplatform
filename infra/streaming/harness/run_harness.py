@@ -157,6 +157,16 @@ class Stack:
                  "anullsrc=r=44100:cl=stereo", "-t", "60", "-b:a", "128k", str(silent)],
                 check=True,
             )
+        # The same silence 13 s long: shabbos_full_count plays a real Shabbos's 320 rows in
+        # 69 min. Not shorter: radio.liq fetches the item after anything under short_item
+        # (12 s) in advance, so a chain of 5 s silences was fetched ~20 a second, all Shabbos
+        short = self.audio / "silence13.mp3"
+        if not short.exists():
+            subprocess.run(
+                ["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                 "anullsrc=r=44100:cl=stereo", "-t", "13", "-b:a", "128k", str(short)],
+                check=True,
+            )
         # A master hotter than anything in the library: full-scale noise and square wave
         loud = self.audio / "loud.mp3"
         if not loud.exists():
@@ -2769,6 +2779,46 @@ async def sc_three_item_group(h: Harness) -> None:
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
 
 
+async def sc_big_break(h: Harness) -> None:
+    """A break as large as a real one gets, not three items: every timed item due at one
+    second (time, weather, announcement, station ID, three times over = 12 items, 66 s).
+    KBR Jerusalem 2026-11-20 showed that radio.liq's timed lane can choke on a large group
+    (107 silences: never got ready, emergency music for 1 h 49 min). Every item airs once,
+    in order, the first on its second, no gap over 1 s, no emergency start, music after."""
+    name = "big_break"
+    order = ["time", "weather", "announce", "id2"] * 3
+    await wait_music(h)
+    cut = await h.on_air()
+    await h.clear_pending()
+    await h.queue([(n, {}) for n in ("song1", "song2", "song3", "song4", "song5", "song6")
+                   if not cut or h.assets[n] != cut.asset_id][:4])
+    log_path = h.stack.dir / "backend.log"
+    offset = log_path.stat().st_size
+    t1 = at(25)
+    await h.queue([(n, {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}) for n in order])
+    total = sum(TONES[n][1] for n in order)
+    await asyncio.sleep(max(0, t1.timestamp() - time.time()) + total + 15)
+    starts = {n: await h.started_times(n, t1.timestamp() - 5) for n in set(order)}
+    first = min((s[0][0] for s in starts.values() if s), default=None)
+    late = first - t1.timestamp() if first else None
+    h.check(name, late is not None and -1 <= late <= 2.0,
+            f"break due {_fmt(t1.timestamp())}, first item {'never' if late is None else f'{late:+.1f} s'}")
+    counts = {n: len(starts[n]) for n in sorted(starts)}
+    h.check(name, all(counts[n] == order.count(n) for n in counts), f"all {len(order)} items aired once each: {counts}")
+    every = sorted(t for s in starts.values() for t, *_ in s)
+    names = [n for t in every for n in starts if any(x[0] == t for x in starts[n])]
+    h.check(name, names == order, f"in order: {names}")
+    with open(log_path, errors="replace") as f:
+        f.seek(offset)
+        emerg = [ln for ln in f.read().splitlines() if "lane=emergency" in ln]
+    h.check(name, not emerg, f"no emergency start report: {emerg[:3]}")
+    heard = h.heard(t1.timestamp() - 3, t1.timestamp() + total + 8)
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+    cur = await h.on_air()
+    h.check(name, bool(cur) and cur.asset.asset_type == "music", f"music back on air ({cur.asset.title if cur else None})")
+
+
 async def sc_no_false_emergency_report(h: Harness) -> None:
     """Main 10:30:37Z 2026-11-19: right after the first song following a timed group
     started, the engine also reported "emergency" (its emergency playlist reloading as a
@@ -4419,6 +4469,95 @@ async def sc_shabbos_long_restart(h: Harness) -> None:
     h.check(name, bool(tail) and all(n.startswith("song") for n in tail), f"station music after the window: {tail}")
 
 
+async def sc_shabbos_full_count(h: Harness) -> None:
+    """A real Shabbos's number of silence rows (320) played to the end, not a sample of
+    it: KBR Jerusalem 2026-11-20 queued 311 and the engine choked on them; the harness's
+    other blackouts were 3 or 4 silences, or 300 of which only the first minutes were
+    heard. The silence asset is made 13 s long for this scenario (the count, not the
+    length, is what loads the engine; under 12 s radio.liq fetches ahead), so all 320 go
+    through the engine in 69 minutes,
+    with a backend restart a third of the way and an engine restart two thirds of the way.
+    The whole window is measured: nothing loud, no emergency start, the engine's timed
+    lane never holds a large group, music back right after."""
+    from sqlalchemy import delete, update
+
+    from app.db.engine import async_session_factory
+    from app.models.asset import Asset
+    from app.models.holiday_window import HolidayWindow
+
+    name = "shabbos_full_count"
+    count, secs = 320, 13.0
+    await wait_music(h)
+    cur = await h.on_air()
+    await h.clear_pending()
+    await h.queue([(n, {}) for n in ("song1", "song2", "song3", "song4", "song5", "song6")
+                   if not cur or h.assets[n] != cur.asset_id][:4])
+    silence_id = h.assets["silence"]
+    async with async_session_factory() as db:
+        await db.execute(update(Asset).where(Asset.id == silence_id).values(
+            duration=secs, file_path=f"http://127.0.0.1:{AUDIO_PORT}/silence13.mp3"))
+        await db.commit()
+    log_path = h.stack.dir / "backend.log"
+    offset = log_path.stat().st_size
+    wid = uuid.uuid4()
+    start = at(60)
+    end = start + timedelta(seconds=count * secs)
+    async with async_session_factory() as db:
+        db.add(HolidayWindow(id=wid, name="Harness full-count Shabbos", start_datetime=start, end_datetime=end,
+                             is_blackout=True, affected_stations={"station_ids": [str(STATION_ID)]}))
+        await db.commit()
+    try:
+        await asyncio.sleep(max(0, start.timestamp() - time.time()) - 5)
+        queued = [e for e in await h.rows() if str(e.asset_id) == str(silence_id) and e.status == "pending"]
+        h.check(name, len(queued) >= count, f"{count} silence rows queued before the start ({len(queued)})")
+        third = (end - start).total_seconds() / 3
+        await asyncio.sleep(max(0, start.timestamp() + third - time.time()))
+        h.stack.restart_backend()
+        await asyncio.sleep(max(0, start.timestamp() + 2 * third - time.time()))
+        # An engine restart starts a new recording: measure the first two thirds now
+        before = h.heard(start.timestamp() + 3, time.time() - 1)
+        restarted = time.time()
+        h.stack.restart_engine()
+        await asyncio.sleep(max(0, end.timestamp() - 2 - time.time()))
+        after = h.heard(h.stack.wav_t0, end.timestamp() - 2)
+        heard = before + after
+        span = end.timestamp() - start.timestamp() - 5
+        loud = [(round(t - start.timestamp(), 1), round(db)) for t, db, _ in heard if db > -45]
+        h.check(name, not loud, f"nothing heard in the whole {span / 60:.0f}-minute window ({len(loud)} loud: {loud[:5]})")
+
+        def _span(w):
+            return (max(t for t, _, _ in w) - min(t for t, _, _ in w)) if w else 0
+        covered = _span(before) + _span(after)
+        down = h.stack.wav_t0 - restarted
+        h.check(name, covered >= span - down - 30,
+                f"the stream was measured the whole window ({covered:.0f} of {span:.0f} s; engine down {down:.0f} s for its restart)")
+        with open(log_path, errors="replace") as f:
+            f.seek(offset)
+            lines = f.read().splitlines()
+        emerg = [ln for ln in lines if "lane=emergency" in ln]
+        h.check(name, not emerg, f"no emergency start report: {emerg[:3]}")
+        handed = [ln for ln in lines if "Handed timed entry" in ln]
+        h.check(name, len(handed) <= 10, f"the timed lane never got a large group ({len(handed)} handed in all)")
+        starts = [ln for ln in lines if "Engine started -> " in ln]
+        h.check(name, count * 0.8 <= len(starts) <= count * 1.2,
+                f"the silences went on air one after another ({len(starts)} starts for {count} rows)")
+        asks = [ln for ln in lines if "Engine next -> " in ln]
+        h.check(name, len(asks) <= count * 1.5,
+                f"the engine was handed about one silence per silence aired ({len(asks)} handed)")
+        extra = [ln for ln in lines if "no silence for the music lane" in ln]
+        h.check(name, len(extra) <= 5, f"the queued silences lasted the window ({len(extra)} queued as a backstop)")
+        log(f"{name}: {len(handed)} timed, {len(starts)} starts, {len(heard)} windows measured")
+    finally:
+        async with async_session_factory() as db:
+            await db.execute(delete(HolidayWindow).where(HolidayWindow.id == wid))
+            await db.execute(update(Asset).where(Asset.id == silence_id).values(
+                duration=60.0, file_path=f"http://127.0.0.1:{AUDIO_PORT}/silence.mp3"))
+            await db.commit()
+    await asyncio.sleep(20)
+    tail = [n for _, n in timeline(h.heard(time.time() - 8, time.time() - 1))]
+    h.check(name, bool(tail) and all(n.startswith("song") for n in tail), f"station music after the window: {tail}")
+
+
 async def sc_shabbos_alert(h: Harness, restart: bool = False) -> None:
     """An emergency alert from the EAS box during Shabbos (Shmuel 2026-11-20: radios are
     left on over Shabbos so that an emergency announcement is heard). The station keeps
@@ -4981,6 +5120,7 @@ SCENARIOS = {
     "slow_backend_no_gap": sc_slow_backend_no_gap,
     "next_while_held": sc_next_while_held,
     "three_item_timed_group": sc_three_item_group,
+    "big_break": sc_big_break,
     "no_false_emergency_report": sc_no_false_emergency_report,
     "two_groups_0.3s_apart": lambda h: sc_two_groups(h, 0.3),
     "two_groups_1s_apart": lambda h: sc_two_groups(h, 1.0),
@@ -5013,6 +5153,7 @@ SCENARIOS = {
     "shabbos_silence": sc_shabbos_silence,
     "shabbos_alert": sc_shabbos_alert,
     "shabbos_long_restart": sc_shabbos_long_restart,
+    "shabbos_full_count": sc_shabbos_full_count,
     "shabbos_alert_engine_restart": lambda h: sc_shabbos_alert(h, restart=True),
     "output_limiter": sc_output_limiter,
     "fit_before_hour": sc_fit_before_hour,

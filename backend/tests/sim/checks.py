@@ -865,6 +865,22 @@ def live_shows(res: Result, ctx: Context):
     live.checks(res, ctx)
 
 
+def timed_groups_fit_the_engine(res: Result, ctx: Context):
+    """No timed group is too big for the engine to get ready (tests/sim/engine.py
+    TIMED_GROUP_CHOKES): KBR Jerusalem 2026-11-20, 107 silences handed as one group choked
+    radio.liq and its emergency playlist aired into Shabbos for 1 h 49 min."""
+    check = "every timed group small enough for the engine"
+    res.checks_run.setdefault(check, 0)
+    for sid, eng in getattr(ctx.sim, "engines", {}).items():
+        if sid not in ctx.stations:
+            continue
+        _count(res, check)
+        tz = ZoneInfo(ctx.stations[sid].timezone)
+        for t, n in eng.choked[:3]:
+            at = datetime.fromtimestamp(t, UTC).astimezone(tz).strftime("%a %H:%M:%S")
+            _add(res, check, sid, at, f"a timed group of {n} items came due at once; the engine never gets it ready")
+
+
 ALL_CHECKS = [live_shows, estimates_hold, site_log_matches_air, one_resume_per_pause, shabbos_silence, shabbos_ending, hard_items_on_time, time_checks_on_the_hour, no_dead_air, nothing_inside_a_shiur,
               sponsor_spacing, station_ids, station_isolation, time_check_says_the_hour, weather_is_todays,
-              soft_items_wait_for_the_song, nothing_twice, omer_count]
+              soft_items_wait_for_the_song, nothing_twice, omer_count, timed_groups_fit_the_engine]
