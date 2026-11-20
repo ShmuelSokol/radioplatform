@@ -112,7 +112,7 @@ async def test_a_spot_the_silence_would_cut_is_not_started(db_session):
     station = Station(id=uuid.uuid4(), name="Kol B'ramah Main", timezone="America/New_York")
     db_session.add(station)
     _asset(db_session, "Silence (5 min)", "silence", 300)
-    long_song = _asset(db_session, "Toda", "music", 590)
+    long_song = _asset(db_session, "Toda", "music", 580)
     jingle = _asset(db_session, "Station ID", "jingle", 5)
     spot = _asset(db_session, "TEST SPONSOR 29", "spot", 29)
     song = _asset(db_session, "Sameach", "music", 200)
@@ -121,8 +121,8 @@ async def test_a_spot_the_silence_would_cut_is_not_started(db_session):
     start, end = now + timedelta(minutes=10), now + timedelta(hours=25)
     db_session.add(HolidayWindow(id=uuid.uuid4(), name="Shabbos", start_datetime=start,
                                  end_datetime=end, is_blackout=True, affected_stations=None))
-    on_air = _row(station, long_song, 1, status="playing", started_at=now)  # ends 10 s before
-    fits = _row(station, jingle, 2)  # 5 s: ends 5 s before the window
+    on_air = _row(station, long_song, 1, status="playing", started_at=now)  # ends 20 s before
+    fits = _row(station, jingle, 2)  # 5 s: ends 15 s before the window
     cut = _row(station, spot, 3)  # would run 24 s into the silence
     music = _row(station, song, 4)  # a song just fades, as at the hour
     db_session.add_all([on_air, fits, cut, music])
@@ -134,6 +134,51 @@ async def test_a_spot_the_silence_would_cut_is_not_started(db_session):
     assert status[fits.id] == "pending"
     assert status[cut.id] == "skipped"
     assert status[music.id] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_a_spot_that_seems_to_fit_by_a_second_is_not_started_and_leaves_the_engine(
+        db_session, monkeypatch):
+    """Review simulator run 2026-11-19: Main's TEST SPONSOR 29 (22 s) seemed to end under
+    a second before the silence, started 4 s later than the queue estimated and was cut at
+    19 s. It was already pre-loaded in the engine, so taking it off the queue alone would
+    not have kept it off the air."""
+    from app.config import settings
+    from app.services import playout_engine
+
+    station = Station(id=uuid.uuid4(), name="Kol B'ramah Main", timezone="America/New_York")
+    db_session.add(station)
+    _asset(db_session, "Silence (5 min)", "silence", 300)
+    song = _asset(db_session, "Toda", "music", 577)
+    spot = _asset(db_session, "TEST SPONSOR 29", "spot", 22)
+    await db_session.flush()
+    now = datetime.now(UTC)
+    start, end = now + timedelta(minutes=10), now + timedelta(hours=25)
+    db_session.add(HolidayWindow(id=uuid.uuid4(), name="Shabbos", start_datetime=start,
+                                 end_datetime=end, is_blackout=True, affected_stations=None))
+    on_air = _row(station, song, 1, status="playing", started_at=now)  # ends 23 s before
+    near = _row(station, spot, 2)  # estimated to end 1 s before the window
+    db_session.add_all([on_air, near])
+    await db_session.commit()
+
+    monkeypatch.setattr(type(settings), "engine_drives", lambda self, sid: str(sid) == str(station.id))
+    flushed = []
+
+    async def flush(sid):
+        flushed.append(str(sid))
+        return True
+
+    monkeypatch.setattr(playout_engine, "engine_flush", flush)
+    state = playout_engine.get_state(station.id)
+    state.cued_entry_id = str(near.id)
+    try:
+        await queue_module.fill_blackout_queue(db_session, station.id)
+    finally:
+        state.cued_entry_id = None
+
+    status = await _status(db_session, station)
+    assert status[near.id] == "skipped"
+    assert flushed == [str(station.id)]
 
 
 @pytest.mark.asyncio

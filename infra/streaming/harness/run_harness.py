@@ -4357,6 +4357,78 @@ async def sc_shabbos_silence(h: Harness) -> None:
             await db.commit()
 
 
+async def sc_shabbos_alert(h: Harness, restart: bool = False) -> None:
+    """An emergency alert from the EAS box during Shabbos (Shmuel 2026-11-20: radios are
+    left on over Shabbos so that an emergency announcement is heard). The station keeps
+    sending silence the whole time, the alert airs whole over it at once, and silence (not
+    music, not the emergency files) comes back after it. With restart=True the engine is
+    restarted inside the window more than MISSED_HAND_OVER_SECONDS after its start, as on
+    a real Shabbos, where the silences are no longer handed to its timed lane but come
+    through the music lane."""
+    from sqlalchemy import delete
+
+    from app.db.engine import async_session_factory
+    from app.models.holiday_window import HolidayWindow
+
+    name = "shabbos_alert" + ("_engine_restart" if restart else "")
+    await wait_music(h)
+    cur = await h.on_air()
+    await h.clear_pending()
+    await h.queue([(n, {}) for n in ("song1", "song2", "song3", "song4", "song5", "song6")
+                   if not cur or h.assets[n] != cur.asset_id][:4])
+    wid = uuid.uuid4()
+    start = at(20)
+    alert_at = start + timedelta(seconds=380 if restart else 90)
+    end = alert_at + timedelta(seconds=100)
+    async with async_session_factory() as db:
+        db.add(HolidayWindow(id=wid, name="Harness Shabbos", start_datetime=start, end_datetime=end,
+                             is_blackout=True, affected_stations={"station_ids": [str(STATION_ID)]}))
+        await db.commit()
+    try:
+        quiet_from = start.timestamp() + 3
+        if restart:
+            await asyncio.sleep(max(0, start.timestamp() + 320 - time.time()))
+            await asyncio.to_thread(h.stack.restart_engine)
+            quiet_from = h.stack.wav_t0
+            await asyncio.sleep(10)
+            heard = h.heard(quiet_from, time.time() - 1)
+            first = next((t for t, _, _ in heard), None)
+            h.check(name, first is not None and first - quiet_from <= 6.0,
+                    f"the restarted engine sends sound (silence) "
+                    f"{'never' if first is None else f'{first - quiet_from:.1f} s'} after it started")
+        await asyncio.sleep(max(0, alert_at.timestamp() - time.time()))
+        sent = time.time()
+        code, body = send_alert(h, h.stack.dir / "alert8.mp3", device=True, title="Alert on Shabbos")
+        h.check(name, code == 201 and body.get("sent") == 1, f"the EAS box's alert accepted ({code} {body.get('error', '')})")
+        await asyncio.sleep(max(0, end.timestamp() - time.time()) - 5)
+        heard = h.heard(quiet_from, end.timestamp() - 4)
+        h.print_timeline(heard, sent)
+        alert = runs_of(heard, "ALERT")
+        h.check(name, len(alert) == 1 and alert[0][0] - sent <= 2.0 and abs((alert[0][1] - alert[0][0]) - 8.0) <= 0.6,
+                f"the alert aired at once and whole: {[(round(a - sent, 1), round(b - a, 1)) for a, b in alert]}")
+        others = [(round(t - sent, 1), n) for t, n in timeline(heard) if n not in ("silence", "ALERT")]
+        h.check(name, not others, f"nothing but silence and the alert inside the window: {others[:6]}")
+        if alert:
+            after = h.heard(alert[0][1] + 0.5, end.timestamp() - 4)
+            h.check(name, bool(after) and all(db < -45 for _, db, _ in after),
+                    f"silence again after the alert ({len(after)} windows, loud: "
+                    f"{sum(1 for _, db, _ in after if db >= -45)})")
+        # the recording runs on with no hole: one window per WINDOW seconds of wall time
+        span = (end.timestamp() - 4) - quiet_from
+        h.check(name, len(heard) >= 0.95 * span / WINDOW,
+                f"the engine sent sound all through the window ({len(heard)} windows for {span:.0f} s)")
+        row = await alert_row(body["alerts"][0]["id"]) if code == 201 else None
+        h.check(name, row is not None and row.status == "done",
+                f"the alert is logged as done: {row.status if row else None}")
+        await asyncio.sleep(max(0, end.timestamp() - time.time()) + 15)
+        tail = [n for _, n in timeline(h.heard(time.time() - 8, time.time() - 1))]
+        h.check(name, bool(tail) and all(n.startswith("song") for n in tail), f"station music after Shabbos: {tail}")
+    finally:
+        async with async_session_factory() as db:
+            await db.execute(delete(HolidayWindow).where(HolidayWindow.id == wid))
+            await db.commit()
+
+
 async def sc_blackout_ended_early(h: Harness) -> None:
     """H-10 / B-JOB: a blackout (Shabbos, Yom Tov) puts silence on air; when it is ended
     early (its end moved to now) the silence is dropped and station music is back within a
@@ -4877,6 +4949,8 @@ SCENARIOS = {
     "block_with_very_slow_shiur": lambda h: sc_block_with_slow_shiur(h, 45.0),
     "blackout_ended_early": sc_blackout_ended_early,
     "shabbos_silence": sc_shabbos_silence,
+    "shabbos_alert": sc_shabbos_alert,
+    "shabbos_alert_engine_restart": lambda h: sc_shabbos_alert(h, restart=True),
     "output_limiter": sc_output_limiter,
     "fit_before_hour": sc_fit_before_hour,
     "fit_preloaded_before_hour": sc_fit_preloaded_before_hour,

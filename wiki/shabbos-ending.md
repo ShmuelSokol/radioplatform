@@ -45,7 +45,10 @@ silence (candle lighting to shekia + 72).
   `shabbos_end` kept.
 - **Last 20 minutes before**: a spoken item (spot, jingle, ID, time, weather...) whose estimated
   run on the queue's own timeline crosses the window's start is skipped (`_drop_spots_cut_by`):
-  the silence would cut it mid-sentence. Songs still just fade.
+  the silence would cut it mid-sentence. Songs still just fade. It must end `SPOT_CUT_MARGIN`
+  (8 s) before the start, as the timeline runs a few seconds early (Main's TEST SPONSOR 29
+  seemed to fit by under a second and was cut at 19 of 22 s, review simulator 2026-11-19); one
+  already pre-loaded in the engine is flushed out of it.
 - **Once it has begun**: every waiting row other than silence that sits before the window's
   first waiting silence, and every waiting row timed before the window, is skipped
   (`_drop_leftovers`), and so is the song the engine holds pre-loaded (it sits after the
@@ -65,3 +68,18 @@ silence (candle lighting to shekia + 72).
 - Tests: `tests/test_blackout_drops_timed.py`, `tests/test_blackout_leftovers.py`.
 
 Related: [station-simulator](station-simulator.md), [hourly-slots](hourly-slots.md), [streaming-architecture](streaming-architecture.md).
+
+## The silence is sound, and an alert airs over it
+
+Shmuel 2026-11-20: listeners leave their radios on over Shabbos so they hear an emergency
+announcement; if the station stopped sending, neighbouring stations would take the frequency.
+The engine never stops sending: the blackout's silence is a real (silent) audio file in the timed
+lane, and its whole output is infallible (`mksafe` emergency lane last), so the stream and the
+sound card carry continuous frames. After an engine restart more than 5 min into the window the
+silences are no longer handed to the timed lane (`MISSED_HAND_OVER_SECONDS`) but `/next` hands
+them out one by one (they are due timed rows). The emergency alert lane sits above everything in
+radio.liq and is sent straight to `/alert`, not through `/next`, so the blackout's "only silence"
+rule does not touch it. Harness: `shabbos_alert` and `shabbos_alert_engine_restart` (EAS box
+alert mid-window: airs at once and whole, silence before and after, no hole in the output). A
+local FM box offline plays its own one-minute silence file in a blackout (`kbr_relay.py`), and
+its alert line is in the engine itself, so it needs no internet.
