@@ -83,3 +83,7 @@ rule does not touch it. Harness: `shabbos_alert` and `shabbos_alert_engine_resta
 alert mid-window: airs at once and whole, silence before and after, no hole in the output). A
 local FM box offline plays its own one-minute silence file in a blackout (`kbr_relay.py`), and
 its alert line is in the engine itself, so it needs no internet.
+
+## Silence goes through the music lane, not one huge timed group
+
+A Shabbos window has ~300 five-minute silence rows, all hard-timed at candle lighting. Handing them all to the engine's timed lane at once (2026-11-20, KBR Jerusalem) made Liquidsoap fall behind ("We must catchup", request leak); the group never became ready, every silence was held back from `/next`, songs are refused in a blackout, so the music lane ran dry and the engine's emergency playlist played into Shabbos for hours. Now `_hand_over_timed` gives the timed lane only the first `SILENCE_TIMED_MAX` (2) silences of a group (counted when the engine takes them, so a refused one is offered again), the rest go one at a time through `/next`, and `/next` in a blackout never returns nothing: with no silence row left it makes one (`_blackout_silence`). A backend restart mid-blackout hands nothing to the timed lane once the start is more than 5 min past; `/next` keeps handing silence.
