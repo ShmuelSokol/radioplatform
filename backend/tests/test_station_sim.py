@@ -10,6 +10,7 @@ takes about a minute, so only short windows run here; whole days and weeks run w
 
 or here with SIM_LONG=1. Every check is listed in tests/sim/checks.py.
 """
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -359,3 +360,105 @@ async def test_a_full_length_shabbos_silent_to_the_end(tmp_path, station):
     rows = [r for r in result.rows if r.station == SHABBOS_IDS[station]]
     back = next((r for r in rows if r.kind != "silence" and r.lane != "emergency" and r.start > we.timestamp() - 1), None)
     assert back is not None and back.start - we.timestamp() <= 5, back.label() if back else "nothing after Shabbos"
+
+
+SECOND_SILENCE = {"id": "5e1e0ce0-0000-4000-8000-000000000002", "title": "Silence (older copy)",
+                  "asset_type": "silence", "duration": 300.0}
+
+
+async def _shabbos_extended(tmp_path, caplog, station, hours_after_start, extend):
+    """A Shabbos whose end is moved later while it is on (a window edited or remade mid-
+    blackout), with a second silence item in the library and waiting rows of both, as
+    production had. KBR Jerusalem
+    2026-11-20 ~17:30Z: the refill during the window counted the rows of one silence item
+    only, came up short on every pass, marked the silences played, queued them again and
+    flushed and skipped the engine every few seconds (PR 480). The engine must be left
+    alone: no flush or skip inside the window, each silence plays its whole length."""
+    from datetime import timedelta
+
+    from sqlalchemy import select, update
+
+    import uuid
+    from datetime import UTC
+
+    from app.models.asset import Asset
+    from app.models.holiday_window import HolidayWindow
+    from app.models.queue_entry import QueueEntry
+
+    ws, we = _shabbos_window(station)
+    sid = SHABBOS_IDS[station]
+    moved: list = []
+    swapped: list = []
+
+    async def extend_window(sim):
+        async with sim.Session() as db:
+            # Production queued rows of both silence items (which one a query took
+            # without an order was up to Postgres): every other waiting silence row
+            # becomes the second item
+            waiting = (await db.execute(select(QueueEntry.id).join(Asset, Asset.id == QueueEntry.asset_id).where(
+                QueueEntry.station_id == sid, QueueEntry.status == "pending",
+                Asset.asset_type == "silence").order_by(QueueEntry.position))).scalars().all()
+            await db.execute(update(QueueEntry).where(QueueEntry.id.in_(waiting[1::2]))
+                             .values(asset_id=uuid.UUID(SECOND_SILENCE["id"])))
+            swapped.append(len(waiting[1::2]))
+            rows = (await db.execute(select(HolidayWindow))).scalars().all()
+            for w in rows:
+                if sid in ((w.affected_stations or {}).get("station_ids") or []):
+                    end = w.end_datetime if w.end_datetime.tzinfo else w.end_datetime.replace(tzinfo=UTC)
+                    await db.execute(update(HolidayWindow).where(HolidayWindow.id == w.id)
+                                     .values(end_datetime=end + extend))
+                    moved.append(w.id)
+            await db.commit()
+
+    start = ws - timedelta(minutes=10)
+    caplog.set_level(logging.INFO, logger="app")
+    sim, result = await simulate(EXPORT, start, hours_after_start, [station], tmp_path,
+                                 extra_assets=[SECOND_SILENCE],
+                                 events=[(ws + timedelta(minutes=20), extend_window)])
+    print(result.report())
+    assert moved, "no Shabbos window to extend"
+    assert swapped and swapped[0] >= 100, f"waiting silence rows moved to the second item: {swapped}"
+    # The refill clearing and requeueing the window's silences while one is on air (the
+    # loop of 2026-11-20; in SQLite its clearing step fails outright instead of looping)
+    refills = [r.getMessage()[:160] for r in caplog.records
+               if ("Filled blackout queue" in r.getMessage() and ", active," in r.getMessage())
+               or "fill_blackout_queue failed" in r.getMessage()]
+    assert not refills, f"the window's silences were refilled while one was on air: {refills[:3]} ({len(refills)})"
+    eng = sim.engines[sid]
+    inside = [(round(t - ws.timestamp()), p) for t, p, _ in eng.commands
+              if p in ("/flush", "/skip") and ws.timestamp() + 60 < t < (we + extend).timestamp() - 60]
+    assert not inside, f"the engine was flushed or skipped inside the window: {inside[:10]} ({len(inside)})"
+    rows = [r for r in result.rows if r.station == sid and r.kind == "silence" and r.lane != "emergency"
+            and r.start > ws.timestamp() + 120 and r.end < sim.t - 1 and r.end < (we + extend).timestamp() - 60]
+    short = [(r.local_start, round(r.seconds)) for r in rows if r.seconds < 290]
+    assert not short, f"silences cut short inside the window: {short[:10]} ({len(short)} of {len(rows)})"
+    for check in ("Shabbos/Yom Tov: silence from candle lighting to 72 min after shekia",
+                  "every timed group small enough for the engine", "no dead air or emergency music"):
+        assert result.checks_run[check] >= 1, check
+        assert not result.failed(check), _failing(result, check)
+    return result, ws, we + extend
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("station", ["main", "jerusalem"])
+async def test_shabbos_extended_while_on_leaves_the_engine_alone(tmp_path, caplog, station):
+    """The window's end moved an hour later 20 minutes into Shabbos: 50 minutes after
+    candle lighting, no flush or skip, every silence whole."""
+    from datetime import timedelta
+
+    await _shabbos_extended(tmp_path, caplog, station, 1.0, timedelta(hours=1))
+
+
+@pytest.mark.skipif(not LONG, reason="a whole Shabbos: SIM_LONG=1")
+@pytest.mark.asyncio
+async def test_shabbos_extended_while_on_silent_to_the_new_end(tmp_path, caplog):
+    """Jerusalem's Shabbos moved an hour later while on: silence to the new end, then
+    programming within 5 s."""
+    from datetime import timedelta
+
+    ws, we = _shabbos_window("jerusalem")
+    hours = (we + timedelta(hours=1) - ws).total_seconds() / 3600 + 0.6
+    result, ws, end = await _shabbos_extended(tmp_path, caplog, "jerusalem", hours, timedelta(hours=1))
+    rows = [r for r in result.rows if r.station == SHABBOS_IDS["jerusalem"]]
+    back = next((r for r in rows if r.kind != "silence" and r.lane != "emergency" and r.start > end.timestamp() - 1), None)
+    assert back is not None and back.start - end.timestamp() <= 5, back.label() if back else "nothing after Shabbos"
