@@ -73,6 +73,42 @@ Checks: `tests/test_live_recording.py` (a dumped 1000 Hz "curse" must not be in 
 - Checks: `tests/test_live_caller_desk.py`, `e2e/live-delay.cjs` part F (`ONLY=callers`). The call-in limit (5 per address per 10 minutes) is kept in memory: several runs in a row need a backend restart.
 - Events are broadcast before the request's transaction commits, so a page can show the new state a moment before a fresh read does.
 
+## A show never runs into Shabbos or Yom Tov (2026-11-20)
+
+A show planned 4:00 to 4:40 PM on a Friday stayed on the air through candle lighting at
+4:18: the scheduler returns early for a station with `live_show_id`, so the blackout was
+never enforced. Now:
+
+- `start_show` moves the show's end to `BEFORE_BLACKOUT` (30 s) before the first blackout
+  that begins before its planned end. The countdown, the delay's wind down and the hard
+  stop follow that end as usual, and the last song before Shabbos and the silence come
+  after it.
+- No show starts while the station is off the air (or within those 30 s): `POST /start`
+  answers 409, `start_if_scheduled` leaves the show scheduled and the host's audio socket
+  closes with 4012 (the Host Console says why).
+- The scheduler's live check hard-stops a show when `off_air_now` is true, for a window
+  added or changed after the show began.
+
+## What the simulator found (2026-11-20)
+
+First runs of live shows in the station simulator ([station-simulator](station-simulator.md)):
+
+- Sponsorships of a hard program block (the 8 PM break) that came due under a show were
+  closed as played and never aired. `soft_items_wait_for_show` now puts them back to soft
+  too, so they air first after the show.
+- The 8 PM weather, hard and past due, was pre-loaded during the show as "the item after
+  the show" and aired 8 minutes late. `handle_next` passes over a hard item whose time has
+  passed while a show is on.
+- A show that began during a block's Daf Yomi shiur (timed, `preempt_at` set) dropped the
+  rest of it: `_pause_automation` treated every timed item as a time check. A long-form
+  item now gets its second part queued like any other.
+- While the delay filled behind a run of timed items, the 45 s limit (`HOLD_LIMIT`) cut a
+  sponsorship 11 s in. The item on air at the limit is now waited out (`ITEM_LIMIT`, up to
+  75 s more).
+- Known and left: going live 10 s before :30 gives about 1 s of the next song between the
+  time check and the host's first words; a backend restart in mid show is 3.3 s of silence
+  and the words in the delay are lost; a show replaces a programme scheduled in its time.
+
 ## Gotchas
 - `useLiveShowWS` reconnected after the page was left (the cleanup's `close()` fired `onclose`): a second socket listed every caller twice on the Host Console. The cleanup now clears `onclose`, and `caller_queued` ignores a call it already has.
 - Each scheduler pass ends with a rollback. Anything `_check_station` changes must be committed there. The hard stop was undone this way and repeated every 3 s.

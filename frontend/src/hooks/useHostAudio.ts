@@ -282,7 +282,8 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
           // no sound came, 4001/4003 not signed in, 4004 no such show.
           // 4010: another show is live on this station
           // 4011: this show's microphone was opened on another page or device
-          const told = [4000, 4001, 4003, 4004, 4010, 4011].includes(e.code);
+          // 4012: the station is off the air for Shabbos or Yom Tov
+          const told = [4000, 4001, 4003, 4004, 4010, 4011, 4012].includes(e.code);
           if (!lostAt) lostAt = Date.now();
           if (everOpen && !told && Date.now() - lostAt < RECONNECT_FOR_MS) {
             setReconnecting(true);
@@ -292,6 +293,8 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
           stopRef.current();
           setError(e.code === 4010
             ? 'Another show is live on this station. You are not on air. End that show first, then press GO LIVE.'
+            : e.code === 4012
+            ? 'The station is off the air for Shabbos or Yom Tov. A show cannot go on air now.'
             : e.code === 4011
             ? 'This show went on air from another page or device. This page is off air now.'
             : everOpen

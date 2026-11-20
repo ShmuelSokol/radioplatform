@@ -194,6 +194,14 @@ class Context:
     def config(self, sid):
         return self.stations[sid].automation_config or {}
 
+    def shows(self, sid):
+        """When a live show had this station's stream: [(start, end)]."""
+        return [(seg.start, seg.end if seg.end is not None else self.sim.t)
+                for seg in self.sim.log if seg.station == sid and seg.lane == "live" and not seg.entry_id]
+
+    def in_show(self, sid, t, after: float = 0.0):
+        return any(a <= t <= b + after for a, b in self.shows(sid))
+
 
 def _per_station(rows):
     by = defaultdict(list)
@@ -243,6 +251,10 @@ def hard_items_on_time(res: Result, ctx: Context):
         # row; the row is set aside when the box is back
         box_off = getattr(ctx.sim, "box_offline", None)
         if box_off and e.status == "skipped" and box_off[0] <= at.timestamp() < box_off[1]:
+            continue
+        if ctx.in_show(str(e.station_id), at.timestamp(), after=2):
+            # Under a live show only what the station's rule airs over the delay is heard
+            # (the time check); the live checks look at that (tests/sim/live.py)
             continue
         if str(e.id) not in aired and e.status not in ("cancelled",):
             a = ctx.assets.get(str(e.asset_id))
@@ -296,9 +308,12 @@ def no_dead_air(res: Result, ctx: Context):
     res.checks_run.setdefault(check, 0)
     start, end = ctx.window()
     for sid, rows in _per_station(res.rows).items():
+        last_end = None
         for prev, cur in zip(rows, rows[1:]):
             _count(res, check)
-            gap = cur.start - prev.end
+            # (a time check aired inside a live show is a row inside the show's row)
+            last_end = prev.end if last_end is None else max(last_end, prev.end)
+            gap = cur.start - last_end
             hold_ok = (cur.timing_mode == "hard" and cur.preempt_at is not None
                        and abs(cur.start - cur.preempt_at.timestamp()) <= 1 and gap <= HOLD_SECONDS)
             # A few seconds of quiet before the Shabbos silence item sound the same as the
@@ -768,6 +783,9 @@ def estimates_hold(res: Result, ctx: Context):
                 continue
             if box_off and (box_off[0] <= r.start < box_off[1] or box_off[0] <= t < box_off[1]):
                 continue
+            # A live show that began after the page was read moves everything behind it
+            if any(a < r.start + 1 and b > t for a, b in ctx.shows(sid)):
+                continue
             _count(res, check)
             off = r.start - ts
             if abs(off) > ESTIMATE_OFF_SECONDS:
@@ -841,6 +859,12 @@ def omer_count(res: Result, ctx: Context):
                 _add(res, check, hit, hit.local_start, f"count {hit.start - mark.timestamp():.0f} s after the hour")
 
 
-ALL_CHECKS = [estimates_hold, site_log_matches_air, one_resume_per_pause, shabbos_silence, shabbos_ending, hard_items_on_time, time_checks_on_the_hour, no_dead_air, nothing_inside_a_shiur,
+def live_shows(res: Result, ctx: Context):
+    from tests.sim import live
+
+    live.checks(res, ctx)
+
+
+ALL_CHECKS = [live_shows, estimates_hold, site_log_matches_air, one_resume_per_pause, shabbos_silence, shabbos_ending, hard_items_on_time, time_checks_on_the_hour, no_dead_air, nothing_inside_a_shiur,
               sponsor_spacing, station_ids, station_isolation, time_check_says_the_hour, weather_is_todays,
               soft_items_wait_for_the_song, nothing_twice, omer_count]

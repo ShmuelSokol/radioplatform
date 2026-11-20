@@ -59,6 +59,7 @@ class Simulator:
         self.quiet_pass = quiet_pass
         self.log: list = []
         self.engines: dict[str, FakeEngine] = {}
+        self.hosts: list = []   # live show hosts (tests/sim/live.py), stepped on their own clock
         self._events: list = []
         self._seq = 0
         self._patched: list = []
@@ -224,10 +225,22 @@ class Simulator:
         clock moves on, as they would in a few real milliseconds."""
         me = asyncio.current_task()
         for _ in range(3):
-            pending = [t for t in asyncio.all_tasks() if t is not me and not t.done()]
+            keep = {h.task for h in self.hosts if h.task is not None}
+            pending = [t for t in asyncio.all_tasks() if t is not me and not t.done() and t not in keep]
             if not pending:
                 return
             await asyncio.wait(pending, timeout=0.5)
+
+    async def _settle_live(self):
+        """After a step of a live show: let what it started (a take-over, a time check
+        marked as aired, the station handed back) finish before the clock moves."""
+        me = asyncio.current_task()
+        keep = {h.task for h in self.hosts if h.task is not None}
+        for _ in range(50):
+            pending = [t for t in asyncio.all_tasks() if t is not me and not t.done() and t not in keep]
+            if not pending:
+                return
+            await asyncio.wait(pending, timeout=0.2)
 
     async def scheduler_pass(self):
         from app.services.scheduler_engine import SchedulerEngine
@@ -258,6 +271,9 @@ class Simulator:
         del self._scheduler
         self.last_action = self.t
         self.restarts.append((self.t, "backend"))
+        if getattr(self, "_live_installed", False):
+            from tests.sim import live
+            live.backend_restarted(self)
 
     async def restart_engine(self, sid: str):
         """The stream engine restarts (crash, setup.sh rerun): what was on air is cut, its
@@ -268,6 +284,7 @@ class Simulator:
         eng.cued, eng.timed, eng.group, eng.given = None, [], [], []
         eng.timed_held.clear()
         eng.ask_next_at = None
+        eng.live_on, eng.live_asked = False, None
         self.last_action = self.t
         self.restarts.append((self.t, f"engine {sid[:8]}"))
         await eng.start()
@@ -297,7 +314,7 @@ class Simulator:
                 continue
             if e.timed or e.group or (e.on_air is not None and e.on_air.lane != "main"):
                 return PASS_SECONDS
-        if t - getattr(self, "last_action", -1e9) < 60:
+        if t - getattr(self, "last_action", -1e9) < 60 or self.hosts:
             return PASS_SECONDS
         quiet = self.quiet_pass * 3 if silent == len(self.engines) else self.quiet_pass
         return max(PASS_SECONDS, min(quiet, to_mark - 60))
@@ -342,13 +359,17 @@ class Simulator:
             ev_t = self._events[0][0] if self._events else None
             eng_t = min((e.next_event_time() for e in self.engines.values()
                          if e.next_event_time() is not None), default=None)
-            nxt = min(x for x in (next_pass, ev_t, eng_t, end_t) if x is not None)
+            host_t = min((h.next for h in self.hosts if h.next is not None), default=None)
+            nxt = min(x for x in (next_pass, ev_t, eng_t, host_t, end_t) if x is not None)
             self._move(max(nxt, self.t))
             while self._events and self._events[0][0] <= self.t + 1e-6:
                 _, _, sid, kind = heapq.heappop(self._events)
                 eng = self.engines.get(sid)
                 if eng is not None:
                     await eng.on_event(kind)
+            for host in list(self.hosts):
+                if host.next is not None and host.next <= self.t + 1e-6:
+                    await host.step()
             for eng in self.engines.values():
                 await eng.tick()
             if self.t + 1e-6 >= next_pass:
@@ -360,6 +381,9 @@ class Simulator:
                 self._next_snapshot = self.t + SNAPSHOT_EVERY
             if on_step is not None:
                 await on_step(self)
+        on_air = {id(e.on_air) for e in self.engines.values() if e.on_air is not None}
         for seg in self.log:
-            if seg.end is None:
+            # (not what is still on air with no end of its own, a live show or the
+            # emergency music: closing it here ended it at every scenario event)
+            if seg.end is None and id(seg) not in on_air:
                 seg.end = self.t

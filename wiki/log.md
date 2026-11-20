@@ -435,6 +435,8 @@ UPDATE 2026-11-18 spot-schedules.md spread sponsorships skip soft breaks inside 
 UPDATE 2026-11-18 spot-schedules.md a break next to the same sponsor's play counts one fuller (no back-to-back sponsor; levelling may be off by one)
 INGEST 2026-11-18 live-shows.md End Show right after GO LIVE: take-over landed after End, stale-show check waited for ever on an open delay; it now stops it
 INGEST 2026-11-19 live-shows.md one station, one show: start answers 409 and the audio socket closes 4010 while another show is live there
+INGEST 2026-11-20 station-simulator.md live shows in the simulator (tests/sim/live.py, tests/test_live_show_sim.py): host speaks numbers through the real delay, Dump, callers, hard stop, restarts, Shabbos; six live checks on every run with a show
+INGEST 2026-11-20 live-shows.md a show never runs into Shabbos or Yom Tov: end moved to 30 s before candle lighting, no start while off the air (409, socket 4012), scheduler safety stop; simulator findings: block sponsorships lost under a show, stale weather after it, timed shiur not resumed, sponsorship cut while the delay fills
 INGEST 2026-11-19 live-shows.md second host socket takes the show over (4011); Next twice within 1 s is one Next; rating widget hidden in a live show
 INGEST 2026-11-18 deploys.md deploy gate: CI's last job on main waits while a live show is on air and around :00/:30; needs Railway Wait for CI; [deploy-now] skips it
 UPDATE 2026-11-19 spot-schedules.md a block rebuild reads talk windows before deleting the queued shiur (TALKS_BEFORE_REBUILD), so it no longer queues sponsorships inside it

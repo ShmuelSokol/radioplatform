@@ -170,7 +170,7 @@ radioplatform/
 | billing | billing.py | /billing |
 | ai_emails | ai_emails.py | /ai-emails |
 | alerts | alerts.py | /alerts (list pages with skip/limit; POST /alerts/resolve-all; repeats of an open alert fold into it) |
-| live_shows | live_shows.py | /live-shows (`POST /{id}/start` answers 409 while another show is live on the station; `GET /{id}/air`, `POST /{id}/dump`, `POST /{id}/delay`: the broadcast delay; `GET /{id}/dumps` and `/dumps/{dump_id}/audio`: the dump log; `GET` and `POST /{id}/chat`: the staff chat; `calls/{id}/on-air` answers 409 `delay_not_safe` unless `?force=true`; `calls/{id}/hold`, `calls/{id}/lock` and `calls/next`: the caller desk (up to four callers on air together); see `wiki/live-shows.md`) |
+| live_shows | live_shows.py | /live-shows (`POST /{id}/start` answers 409 while another show is live on the station or the station is off the air for Shabbos or Yom Tov; a show's end moves to 30 s before candle lighting; `GET /{id}/air`, `POST /{id}/dump`, `POST /{id}/delay`: the broadcast delay; `GET /{id}/dumps` and `/dumps/{dump_id}/audio`: the dump log; `GET` and `POST /{id}/chat`: the staff chat; `calls/{id}/on-air` answers 409 `delay_not_safe` unless `?force=true`; `calls/{id}/hold`, `calls/{id}/lock` and `calls/next`: the caller desk (up to four callers on air together); see `wiki/live-shows.md`) |
 | live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, `/ws/live/{show}/talk/{call}` (staff talk to a caller off the air), `/ws/live/phone/{call}` (a phone caller's Twilio media stream), `/ws/live/{show}/cohost` (a co-host joins from another place), `/ws/live/{show}/video` (the host's camera) and `/ws/live/station/{id}/watch` (pages watching it), and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
@@ -620,6 +620,9 @@ cd backend && KBR_ADMIN_EMAIL=... KBR_ADMIN_PASSWORD=... uv run python loadtests
 
 # Simulate whole broadcast days fast (virtual clock, fake engine, real scheduling code; see wiki/station-simulator.md)
 cd backend && uv run python -m tests.sim.run --export tests/sim/fixtures/stations-2026-11-19.json --start 2026-11-19T00:00 --hours 24 --stations main
+
+# Live shows in the simulator: host, delay, Dump, callers, hard stop, restarts, a show into Shabbos (see wiki/station-simulator.md)
+cd backend && SIM_LONG=1 uv run pytest tests/test_live_show_sim.py -q
 
 # Every Yom Tov of the coming year as broadcast days in the simulator (--list shows them; see wiki/station-simulator.md)
 cd backend && uv run python -m tests.sim.yomtov --station main --index 0 --out /tmp/yomtov

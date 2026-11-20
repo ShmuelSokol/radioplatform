@@ -1037,6 +1037,14 @@ async def handle_next(
             # goes: normally it is in the timed lane already, but not after an engine
             # restart in that minute.
             return None
+        if during_show and entry.preempt_at is not None and not is_soft_timed(entry) \
+                and (entry.preempt_at if entry.preempt_at.tzinfo else entry.preempt_at.replace(tzinfo=UTC)) \
+                <= datetime.now(UTC):
+            # A hard item whose time passed under the host (the 8 PM weather) is closed
+            # when the show ends. Loaded now as "the item after the show" it aired then,
+            # eight minutes late (station simulator, 2026-11-20)
+            exclude.add(str(entry.id))
+            continue
         await ensure_level(db, entry)
         if str(entry.id) in state.timed_sent:
             # A Next sent this very entry down the timed lane while we were choosing
