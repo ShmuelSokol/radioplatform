@@ -422,3 +422,39 @@ async def test_an_id_waiting_far_too_close_after_the_one_before_is_taken_out(db_
     assert changed == 1
     assert await _status(db_session, close_id) == "skipped"
     assert await _status(db_session, first_id) == "pending"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("last_aired_minutes_ago,waits", [(14.0, True), (25.0, False)])
+async def test_an_id_already_late_keeps_only_a_minute_from_breaks(
+        db_session: AsyncSession, last_aired_minutes_ago, waits):
+    """Main 2026-11-19 23:36Z: an ID due 2 min after a late sponsorship was passed over
+    song by song for 32 min. Within max_minutes it keeps clear_minutes (3) from breaks;
+    once later than that, only LATE_MARGIN (1)."""
+    now = datetime.now(UTC)
+    station = Station(id=uuid.uuid4(), name=f"S {uuid.uuid4().hex[:6]}", timezone="America/New_York",
+                      automation_config={"station_ids": {"enabled": True}})
+    db_session.add(station)
+    await db_session.flush()
+    song = Asset(id=uuid.uuid4(), title="s", file_path="s.mp3", asset_type="music", category="lively", duration=100.0)
+    spot = Asset(id=uuid.uuid4(), title="sp", file_path="sp.mp3", asset_type="spot", category="Spots", duration=26.0)
+    jingle = Asset(id=uuid.uuid4(), title="j", file_path="j.mp3", asset_type="jingle", category="station_id",
+                   duration=8.0)
+    db_session.add_all([song, spot, jingle])
+    await db_session.flush()
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=jingle.id, position=0,
+                              status="played", source="auto",
+                              started_at=now - timedelta(minutes=last_aired_minutes_ago)))
+    # a soft sponsorship aired 2 min ago, then a song that ends now
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=spot.id, position=1,
+                              status="played", source="block", preempt_at=now - timedelta(minutes=5),
+                              started_at=now - timedelta(minutes=2)))
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=song.id, position=2,
+                              status="playing", source="auto", started_at=now - timedelta(seconds=97)))
+    entry = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=jingle.id, position=3,
+                       status="pending", source="auto")
+    db_session.add(entry)
+    await db_session.commit()
+    await db_session.refresh(entry, ["asset"])
+
+    assert await station_id_guard.must_wait(db_session, station.id, entry, now) is waits
