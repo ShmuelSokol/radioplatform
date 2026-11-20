@@ -141,7 +141,10 @@ def test_shabbos_window_is_in_the_stations_own_zone(where):
     fri = get_sun_times(lat, lon, tz, friday)["sunset"]
     sat = get_sun_times(lat, lon, tz, friday + timedelta(days=1))["sunset"]
     candles = 40 if tz == "Asia/Jerusalem" else 18
-    assert start == fri - timedelta(minutes=candles) and end == sat + timedelta(minutes=72)
+    lit = fri - timedelta(minutes=candles)
+    if tz == "Asia/Jerusalem":  # on the whole minute, as the luach prints it
+        lit = lit.replace(second=0, microsecond=0)
+    assert start == lit and end == sat + timedelta(minutes=72)
     assert start.utcoffset() == datetime(2027, 1, 15, 12, tzinfo=zone).utcoffset()
     assert start.astimezone(zone).date() == friday and start.astimezone(zone).weekday() == 4
     assert end.astimezone(zone).date() == friday + timedelta(days=1)
@@ -162,8 +165,10 @@ def test_yom_tov_runs_from_erev_to_the_last_day():
                                            nissan15 + timedelta(days=3), ["s"])
         pesach = next(w for w in windows if w["name"].startswith("Pesach (First Days)"))
         erev, last = nissan15 - timedelta(days=1), nissan15 + timedelta(days=days - 1)
-        assert datetime.fromisoformat(pesach["start_datetime"]) == \
-            get_sun_times(lat, lon, tz, erev)["sunset"] - timedelta(minutes=40 if tz == "Asia/Jerusalem" else 18)
+        lit = get_sun_times(lat, lon, tz, erev)["sunset"] - timedelta(minutes=40 if tz == "Asia/Jerusalem" else 18)
+        if tz == "Asia/Jerusalem":  # on the whole minute, as the luach prints it
+            lit = lit.replace(second=0, microsecond=0)
+        assert datetime.fromisoformat(pesach["start_datetime"]) == lit
         assert datetime.fromisoformat(pesach["end_datetime"]) == \
             get_sun_times(lat, lon, tz, last)["sunset"] + timedelta(minutes=72)
 

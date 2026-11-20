@@ -55,6 +55,16 @@ def candle_lighting_minutes(tz: str | None) -> int:
     return CANDLE_LIGHTING_MINUTES_ISRAEL if is_israel_timezone(tz) else CANDLE_LIGHTING_MINUTES
 
 
+def candle_lighting(sunset: datetime, tz: str | None) -> datetime:
+    """Candle lighting before this sunset. In Israel on the whole minute, as the luach
+    prints it (sunset 16:42:08 -> 16:02, not 16:02:08: the silence is never after the
+    printed time)."""
+    t = sunset - timedelta(minutes=candle_lighting_minutes(tz))
+    if is_israel_timezone(tz):
+        t = t.replace(second=0, microsecond=0)
+    return t
+
+
 def _sunset_for(lat: float, lon: float, tz: str, d: date) -> datetime:
     """Get timezone-aware sunset datetime for a location and date."""
     times = get_sun_times(lat, lon, tz, d)
@@ -86,7 +96,7 @@ def generate_shabbos_windows(
             saturday = d + timedelta(days=1)
             saturday_sunset = _sunset_for(lat, lon, tz, saturday)
 
-            window_start = friday_sunset - timedelta(minutes=candle_lighting_minutes(tz))
+            window_start = candle_lighting(friday_sunset, tz)
             window_end = saturday_sunset + timedelta(minutes=AFTER_SHEKIA_MINUTES)
 
             windows.append({
@@ -160,7 +170,7 @@ def generate_yom_tov_windows(
                 erev_sunset = _sunset_for(lat, lon, tz, erev)
                 last_day_sunset = _sunset_for(lat, lon, tz, last_day)
 
-                window_start = erev_sunset - timedelta(minutes=candle_lighting_minutes(tz))
+                window_start = candle_lighting(erev_sunset, tz)
                 window_end = last_day_sunset + timedelta(minutes=AFTER_SHEKIA_MINUTES)
 
                 windows.append({
