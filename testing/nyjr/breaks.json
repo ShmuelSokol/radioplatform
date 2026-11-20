@@ -1956,5 +1956,38 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R. DANIEL - VAYEITZEI  BEN ISH CHAI  KISSED L RACHEL"
+ },
+ {
+  "start_utc": "2026-11-20T18:09:53Z",
+  "start_et": "2026-11-20 13:09:53",
+  "hour_et": "2026-11-20 13:00",
+  "spots": 1,
+  "total_seconds": 54,
+  "spot_seconds": "54",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Ungar Shmueli - Lekuvid Shabbos"
+ },
+ {
+  "start_utc": "2026-11-20T18:31:37Z",
+  "start_et": "2026-11-20 13:31:37",
+  "hour_et": "2026-11-20 13:00",
+  "spots": 4,
+  "total_seconds": 196,
+  "spot_seconds": "32 72 63 29",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "URI DAVIDI   ANI CHAI - Lehodos"
+ },
+ {
+  "start_utc": "2026-11-20T19:01:28Z",
+  "start_et": "2026-11-20 14:01:28",
+  "hour_et": "2026-11-20 14:00",
+  "spots": 4,
+  "total_seconds": null,
+  "spot_seconds": "88 6 116 ?",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": ""
  }
 ]
