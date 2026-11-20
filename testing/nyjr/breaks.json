@@ -2088,5 +2088,27 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R. DANIEL - VAYEITZEI  SAW MALACHIM  R MOSHE DONT HIDE"
+ },
+ {
+  "start_utc": "2026-11-20T21:06:53Z",
+  "start_et": "2026-11-20 16:06:53",
+  "hour_et": "2026-11-20 16:00",
+  "spots": 1,
+  "total_seconds": 55,
+  "spot_seconds": "55",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Glantz Yehuda - Aniim Zemirot"
+ },
+ {
+  "start_utc": "2026-11-20T21:12:59Z",
+  "start_et": "2026-11-20 16:12:59",
+  "hour_et": "2026-11-20 16:00",
+  "spots": 2,
+  "total_seconds": null,
+  "spot_seconds": "305 ?",
+  "block_names": "CANDLES AT 4:18",
+  "items": "CANDLES AT 4:18 | CANDLES AT 4:18",
+  "next_item": ""
  }
 ]
