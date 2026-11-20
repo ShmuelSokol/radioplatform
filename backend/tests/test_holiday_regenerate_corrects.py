@@ -61,7 +61,7 @@ async def test_a_changed_candle_lighting_rule_corrects_the_stored_windows(client
     # a window whose corrected start (22 minutes earlier) is still ahead can be moved; one
     # that has begun, or would have begun by the new rule, is left as it is
     future = [r for r in before if _aware(r.start_datetime) - timedelta(minutes=23) > now]
-    assert all(abs(_minutes_before_shekia(r) - 18) < 0.1 for r in future)
+    assert all(0 <= _minutes_before_shekia(r) - 18 < 1 for r in future)
     ends = {r.id: _aware(r.end_datetime) for r in before}
     past_starts = {r.id: _aware(r.start_datetime) for r in before if r not in future}
 
@@ -96,7 +96,7 @@ async def test_a_changed_candle_lighting_rule_corrects_the_stored_windows(client
         elif row.id in past_starts:
             assert start == past_starts[row.id], "a Shabbos that already began is not moved"
         else:
-            assert abs(_minutes_before_shekia(row) - 40) < 0.1
+            assert 0 <= _minutes_before_shekia(row) - 40 < 1
         assert _aware(row.end_datetime) == ends[row.id]  # shekia + 72 did not change
 
     # again with nothing changed: nothing made, nothing moved
@@ -111,4 +111,4 @@ async def test_a_changed_candle_lighting_rule_corrects_the_stored_windows(client
     await db_session.commit()
     assert made == 0
     moved = [r for r in await _rows(db_session) if r.id not in past_starts and r.id not in (by_hand, shared)]
-    assert moved and all(abs(_minutes_before_shekia(r) - 30) < 0.1 for r in moved)
+    assert moved and all(0 <= _minutes_before_shekia(r) - 30 < 1 for r in moved)

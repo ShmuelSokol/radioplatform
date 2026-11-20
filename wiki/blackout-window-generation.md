@@ -2,6 +2,21 @@
 
 `shabbos_service` computes the windows: candle lighting (18 minutes before shekia, 40 in an
 Israel time zone) to 72 minutes after shekia; Yom Tov next to Shabbos merges into one window.
+
+## Which sunset
+
+In an Israel time zone sunset (and sunrise) is as seen from Jerusalem's height, 786 m, the way
+Hebcal and the printed Jerusalem luach give it: about 5 minutes after sea-level sunset. Israel
+candle lighting is on the whole minute, as printed (`shabbos_service.candle_lighting`). Elsewhere
+sunset stays at sea level, as US calendars give it. One place does it for every user (Shabbos
+windows, sun-relative schedule blocks, the Omer count's day change): `sun_service.get_sun_times`.
+
+Why: on 2026-11-20 KBR Jerusalem went silent at 3:57 PM, 40 minutes before sea-level sunset
+(16:37); Shmuel: "Isn't 4:02 candle lighting in Jerusalem?" Hebcal (@hebcal/core with
+elevation) gives 16:02, 16:00, 15:59 for the next three Fridays; ours now does too
+(`tests/test_jerusalem_candle_lighting.py`). Lakewood: 4:18 PM, same as Hebcal at sea level.
+Motzei Shabbos in Jerusalem moves about 5 minutes later with it (72 min after the same sunset).
+The Jerusalem weather spot's spoken Friday zmanim are made on the PC, not here.
 `station_service.store_generated_windows` saves them, for both the Holidays page's
 `POST /holidays/auto-generate` and the automatic run when a station gets a location.
 

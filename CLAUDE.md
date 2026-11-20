@@ -210,7 +210,7 @@ radioplatform/
 | tts_service.py | ElevenLabs TTS generation |
 | weather_service.py | OpenWeatherMap API (current + 3-day forecast) |
 | weather_spot_service.py | Weather/time announcement generation + caching; stores uploaded daily weather spots per region (station `automation_config.weather_region`, default lakewood; ElevenLabs is the fallback for the default region only) |
-| sun_service.py | Sunrise/sunset calculations (astral) |
+| sun_service.py | Sunrise/sunset calculations (astral); in an Israel time zone as seen from Jerusalem's height (786 m), as Hebcal and the luach (see `wiki/blackout-window-generation.md`) |
 | email_service.py | Resend transactional email (campaign updates, invoices, payments) |
 | ai_email_service.py | Claude API-powered email drafting for manager outreach |
 | copy_review_service.py | Checks a sponsor's proposed wording against the sponsorship rules in force (Claude API, keyword fallback) |

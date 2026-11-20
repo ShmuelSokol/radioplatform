@@ -55,6 +55,8 @@ def test_every_shabbos_of_the_year_is_candle_lighting_to_72_minutes_after_shekia
         if day.weekday() == 4:
             fridays += 1
             lighting = get_sun_times(lat, lon, tz, day)["sunset"] - timedelta(minutes=candles)
+            if tz == "Asia/Jerusalem":  # on the whole minute, as the luach prints it
+                lighting = lighting.replace(second=0, microsecond=0)
             out = get_sun_times(lat, lon, tz, day + timedelta(days=1))["sunset"] + timedelta(minutes=72)
             cover = [(s, e) for s, e, _ in merged if s <= lighting + timedelta(seconds=1) and e >= out - timedelta(seconds=1)]
             assert cover, f"{place}: Shabbos of {day} is not covered from candle lighting to shekia + 72"
@@ -87,6 +89,8 @@ def test_every_yom_tov_of_the_year_is_silent_for_all_its_days(place):
     for name, hebrew in days.items():
         first, last = hebrew[0].to_pydate(), hebrew[-1].to_pydate()
         lighting = get_sun_times(lat, lon, tz, first - timedelta(days=1))["sunset"] - timedelta(minutes=candles)
+        if tz == "Asia/Jerusalem":
+            lighting = lighting.replace(second=0, microsecond=0)
         out = get_sun_times(lat, lon, tz, last)["sunset"] + timedelta(minutes=72)
         cover = [(s, e) for s, e, _ in merged if s <= lighting and e >= out]
         assert len(cover) == 1, f"{place}: {name} ({first} to {last}) is not one silent window"
