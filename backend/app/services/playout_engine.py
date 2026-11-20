@@ -1114,7 +1114,7 @@ async def _blackout_silence(db: AsyncSession, station_id) -> QueueEntry | None:
 
     try:
         silence = (await db.execute(
-            select(Asset).where(Asset.asset_type == "silence").limit(1)
+            select(Asset).where(Asset.asset_type == "silence").order_by(Asset.created_at, Asset.id).limit(1)
         )).scalar_one_or_none()
         if silence is None:
             logger.error("Station %s: blackout but no silence asset to hand the engine", station_id)

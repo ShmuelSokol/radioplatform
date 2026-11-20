@@ -95,7 +95,7 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
     now = datetime.now(timezone.utc)
 
     # Clean up stale silence entries from far-future blackouts (> 24h away)
-    silence_result = await db.execute(select(Asset).where(Asset.asset_type == "silence").limit(1))
+    silence_result = await db.execute(select(Asset).where(Asset.asset_type == "silence").order_by(Asset.created_at, Asset.id).limit(1))
     silence_asset = silence_result.scalar_one_or_none()
     if silence_asset:
         cleanup = await db.execute(
@@ -198,7 +198,7 @@ async def _drop_leftovers(db: AsyncSession, station_id, start, end) -> int:
     waiting silence, and every waiting row timed before the window. Rows after the
     silences (what was drawn for after the window) and rows timed for after it stay."""
     silence_id = (await db.execute(
-        select(Asset.id).where(Asset.asset_type == "silence").limit(1)
+        select(Asset.id).where(Asset.asset_type == "silence").order_by(Asset.created_at, Asset.id).limit(1)
     )).scalar_one_or_none()
     if silence_id is None:
         return 0
@@ -332,7 +332,7 @@ async def _fill_single_blackout(db: AsyncSession, station_id, window: "HolidayWi
     now = datetime.now(timezone.utc)
 
     # Get silence asset
-    silence_result = await db.execute(select(Asset).where(Asset.asset_type == "silence").limit(1))
+    silence_result = await db.execute(select(Asset).where(Asset.asset_type == "silence").order_by(Asset.created_at, Asset.id).limit(1))
     silence = silence_result.scalar_one_or_none()
     if not silence:
         logger.warning("No silence asset found for blackout queue fill")
@@ -360,13 +360,31 @@ async def _fill_single_blackout(db: AsyncSession, station_id, window: "HolidayWi
 
     await _drop_timed_inside(db, station_id, silence.id, blackout_start, blackout_end)
 
+    any_silence = select(Asset.id).where(Asset.asset_type == "silence")
+    if is_active_now and settings.engine_drives(station_id):
+        # Silence already on air on an engine station: never clear it and skip the engine.
+        # /next hands only silence in a blackout and makes a row when none is left.
+        # KBR Jerusalem 2026-11-20 ~17:30Z: this refill ran on every pass (its count came
+        # up short), each time marking the silences played and skipping the engine, which
+        # then raced through a silence every second or two.
+        on_air = await db.execute(
+            select(QueueEntry.id).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "playing",
+                QueueEntry.asset_id.in_(any_silence),
+            ).limit(1)
+        )
+        if on_air.first() is not None:
+            return 0
+
     # Count existing silence entries for THIS specific blackout
     if is_active_now:
         # Active blackout: count silence without preempt_at or with past preempt_at
+        # (of any silence item: with two in the library the count of one came up short)
         existing_silence = await db.execute(
             select(func.count(QueueEntry.id)).where(
                 QueueEntry.station_id == station_id,
-                QueueEntry.asset_id == silence.id,
+                QueueEntry.asset_id.in_(any_silence),
                 QueueEntry.status.in_(["pending", "playing"]),
                 or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now),
             )
@@ -3135,7 +3153,7 @@ async def start_playback(
     # During blackout, fill queue with silence entries
     if await _is_blacked_out(db, station_id):
         count = await fill_blackout_queue(db, station_id)
-        silence = await db.execute(select(Asset).where(Asset.asset_type == "silence").limit(1))
+        silence = await db.execute(select(Asset).where(Asset.asset_type == "silence").order_by(Asset.created_at, Asset.id).limit(1))
         silence_asset = silence.scalar_one_or_none()
         sid = str(silence_asset.id) if silence_asset else None
         return {"message": f"Blackout active — {count} silence entries queued", "now_playing": sid}
