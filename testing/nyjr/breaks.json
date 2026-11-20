@@ -1984,10 +1984,109 @@
   "start_et": "2026-11-20 14:01:28",
   "hour_et": "2026-11-20 14:00",
   "spots": 5,
-  "total_seconds": null,
-  "spot_seconds": "88 6 116 16 ?",
+  "total_seconds": 291,
+  "spot_seconds": "88 6 116 16 65",
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
-  "next_item": ""
+  "next_item": "GLATSTEIN R. DANIEL - VAYEITZEI  YAAKOV  VAIKATZ FROM LEARNING"
+ },
+ {
+  "start_utc": "2026-11-20T19:07:53Z",
+  "start_et": "2026-11-20 14:07:53",
+  "hour_et": "2026-11-20 14:00",
+  "spots": 2,
+  "total_seconds": 84,
+  "spot_seconds": "30 54",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "L'Chaim Tisch 4 - Kol Mekadesh"
+ },
+ {
+  "start_utc": "2026-11-20T19:19:59Z",
+  "start_et": "2026-11-20 14:19:59",
+  "hour_et": "2026-11-20 14:00",
+  "spots": 1,
+  "total_seconds": 87,
+  "spot_seconds": "87",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors",
+  "next_item": "Shulem Lemmer - Baruch Hu Elokeinu"
+ },
+ {
+  "start_utc": "2026-11-20T19:30:00Z",
+  "start_et": "2026-11-20 14:30:00",
+  "hour_et": "2026-11-20 14:00",
+  "spots": 2,
+  "total_seconds": 101,
+  "spot_seconds": "67 34",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "YECHIEL SCHRON - Tov L'hodos"
+ },
+ {
+  "start_utc": "2026-11-20T19:39:00Z",
+  "start_et": "2026-11-20 14:39:00",
+  "hour_et": "2026-11-20 14:00",
+  "spots": 1,
+  "total_seconds": 56,
+  "spot_seconds": "56",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors",
+  "next_item": "Yoely Greenfeld - Mini Koileich Mibechi"
+ },
+ {
+  "start_utc": "2026-11-20T20:02:54Z",
+  "start_et": "2026-11-20 15:02:54",
+  "hour_et": "2026-11-20 15:00",
+  "spots": 3,
+  "total_seconds": 210,
+  "spot_seconds": "11 84 115",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "DR DAVE INTRO - HOW BITACHON WORKS"
+ },
+ {
+  "start_utc": "2026-11-20T20:09:00Z",
+  "start_et": "2026-11-20 15:09:00",
+  "hour_et": "2026-11-20 15:00",
+  "spots": 1,
+  "total_seconds": 19,
+  "spot_seconds": "19",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R. DANIEL - VAYEITZEI  BEN ISH CHAI  FLOODED YH TO VH"
+ },
+ {
+  "start_utc": "2026-11-20T20:14:44Z",
+  "start_et": "2026-11-20 15:14:44",
+  "hour_et": "2026-11-20 15:00",
+  "spots": 1,
+  "total_seconds": 55,
+  "spot_seconds": "55",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "15:15\tShabbas Hazak - Azamer B'shabchin"
+ },
+ {
+  "start_utc": "2026-11-20T20:33:10Z",
+  "start_et": "2026-11-20 15:33:10",
+  "hour_et": "2026-11-20 15:00",
+  "spots": 1,
+  "total_seconds": 32,
+  "spot_seconds": "32",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors",
+  "next_item": "15:33\tHarei Yehudah\tD'ror Yikra - Lev Tahor"
+ },
+ {
+  "start_utc": "2026-11-20T21:01:26Z",
+  "start_et": "2026-11-20 16:01:26",
+  "hour_et": "2026-11-20 16:00",
+  "spots": 1,
+  "total_seconds": 132,
+  "spot_seconds": "132",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R. DANIEL - VAYEITZEI  SAW MALACHIM  R MOSHE DONT HIDE"
  }
 ]
