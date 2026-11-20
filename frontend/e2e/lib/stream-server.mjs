@@ -7,6 +7,9 @@
  *                         without it: the page's fetch is refused, the plain element plays)
  * failing = true: every mount answers 503 (an engine or Icecast restart) until set back.
  * stall(ms) holds the data back, then sends it all at once (a network stall).
+ * hlsBurst = seconds: the HLS address starts with that much audio at once (a real HLS
+ * player gets the playlist's segments at once; a plain element in Chromium waits for
+ * about 200 KB before it plays, 12 s of a 128 kbps stream).
  */
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
@@ -30,14 +33,14 @@ export async function startStreamServer(port) {
   const clients = new Set();
   let stalledUntil = 0;
   const stats = { connects: 0, refused: 0, noCorsConnects: 0, hlsConnects: 0 };
-  const state = { failing: false };
+  const state = { failing: false, hlsBurst: 0.5 };
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     const noCors = url.pathname.startsWith('/nocors/');
     const cors = noCors ? { 'cache-control': 'no-store' } : { 'access-control-allow-origin': '*', 'cache-control': 'no-store' };
     const mount = noCors ? url.pathname.slice('/nocors'.length) : url.pathname;
     if (req.method === 'OPTIONS') { res.writeHead(204, { ...cors, 'access-control-allow-headers': '*' }); res.end(); return; }
-    const hls = /^\/hls\/[^/]+\/mp3\.m3u8$/.test(mount);
+    const hls = /^\/hls\/[^/]+\/mp3\.(m3u8|hls)$/.test(mount);
     if (!mount.startsWith('/live-') && !hls) { res.writeHead(404, cors); res.end('no such mount'); return; }
     if (state.failing) { stats.refused++; res.writeHead(503, cors); res.end('restarting'); return; }
     stats.connects++;
@@ -51,7 +54,7 @@ export async function startStreamServer(port) {
       while (n > 0) { const k = Math.min(n, body.length - pos); out.push(body.subarray(pos, pos + k)); pos = (pos + k) % body.length; n -= k; }
       return Buffer.concat(out);
     };
-    res.write(take(BYTES_PER_SEC * 0.5)); // burst on connect
+    res.write(take(BYTES_PER_SEC * (hls ? state.hlsBurst : 0.5))); // burst on connect
     const c = { res, timer: null };
     c.timer = setInterval(() => {
       owed += (BYTES_PER_SEC * TICK) / 1000;
@@ -69,6 +72,8 @@ export async function startStreamServer(port) {
     noCorsUrl: (sid) => `http://localhost:${port}/nocors/live-${sid}`,
     get failing() { return state.failing; },
     set failing(v) { state.failing = !!v; },
+    get hlsBurst() { return state.hlsBurst; },
+    set hlsBurst(v) { state.hlsBurst = v; },
     missing: `http://localhost:${port}/missing`,
     origin: `http://localhost:${port}`,
     stats,

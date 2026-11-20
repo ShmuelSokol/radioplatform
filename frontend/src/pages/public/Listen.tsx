@@ -142,7 +142,15 @@ export default function Listen({ stationId: given }: { stationId?: string } = {}
   // The address comes with the item on air. During a live show no item is on air, so
   // a page opened then had no stream and stayed silent until the show ended (the
   // first real show, 2026-11-18): the show lookup carries the address too.
-  const streamUrl = wsNowPlaying?.stream_url || activeShow?.stream_url || null;
+  // "Nothing on air" for a moment (the server says so between items, or a re-read finds
+  // no item) keeps the address: the stream plays on. It was stopped and started again
+  // outside the tap, a gap, and on an iPhone a restart that may be refused (2026-11-20).
+  // Only an item on air with no stream address (a browser-player station) drops it.
+  const freshStreamUrl = wsNowPlaying?.stream_url || activeShow?.stream_url || null;
+  const knownStreamUrl = useRef<string | null>(null);
+  if (freshStreamUrl) knownStreamUrl.current = freshStreamUrl;
+  else if (wsNowPlaying || activeShow?.active) knownStreamUrl.current = null;
+  const streamUrl = freshStreamUrl ?? knownStreamUrl.current;
   const [streamFailed, setStreamFailed] = useState(false);
   const useStream = !!streamUrl && !streamFailed;
   // The tab's one stream player (lib/stationStream): it outlives this page, so the

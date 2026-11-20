@@ -582,6 +582,9 @@ cd frontend && for s in library-display display-findings; do BASE_URL=http://loc
 # Sound in the control room on an iPhone: the Listen button and tap-to-sound time, in Chromium made to follow Safari's tap rule
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-iphone-sound.mjs
 
+# iPhone: the stream taken away a second after Listen plays again by itself, and a moment of "nothing on air" does not stop it (Listen page and control room)
+cd frontend && BASE_URL=http://localhost:4173 node e2e/iphone-stream-start.mjs
+
 # The stream reconnects by itself, the Listen button says when this device is silent, meters from the engine with no click (fake backend + stand-in Icecast)
 cd frontend && BASE_URL=http://localhost:4173 node e2e/stream-keeps-playing.mjs
 
