@@ -4357,6 +4357,68 @@ async def sc_shabbos_silence(h: Harness) -> None:
             await db.commit()
 
 
+async def sc_shabbos_long_restart(h: Harness) -> None:
+    """KBR Jerusalem 2026-11-20 13:57Z: a real Shabbos queues 300+ silence rows, all hard
+    timed at candle lighting. All of them went to the engine's timed lane as one group, the
+    engine fell behind, the music lane ran dry and its emergency playlist played into
+    Shabbos. Here: a window long enough for 300+ silences, a backend restart (a deploy)
+    in the middle of it, then the window removed. Nothing heard inside, no emergency start
+    report, at most SILENCE_TIMED_MAX silences handed to the timed lane, music after."""
+    from sqlalchemy import delete
+
+    from app.db.engine import async_session_factory
+    from app.models.holiday_window import HolidayWindow
+    from app.services.playout_engine import SILENCE_TIMED_MAX
+
+    name = "shabbos_long_restart"
+    await wait_music(h)
+    cur = await h.on_air()
+    await h.clear_pending()
+    await h.queue([(n, {}) for n in ("song1", "song2", "song3", "song4", "song5", "song6")
+                   if not cur or h.assets[n] != cur.asset_id][:4])
+    log_path = h.stack.dir / "backend.log"
+    offset = log_path.stat().st_size
+    wid = uuid.uuid4()
+    start = at(60)
+    end = start + timedelta(seconds=320 * 60)  # 320 silences of the harness's 60 s
+    async with async_session_factory() as db:
+        db.add(HolidayWindow(id=wid, name="Harness long Shabbos", start_datetime=start, end_datetime=end,
+                             is_blackout=True, affected_stations={"station_ids": [str(STATION_ID)]}))
+        await db.commit()
+    try:
+        await asyncio.sleep(max(0, start.timestamp() - time.time()) - 5)
+        silence_id = str(h.assets["silence"])
+        queued = [e for e in await h.rows() if str(e.asset_id) == silence_id and e.status == "pending"]
+        h.check(name, len(queued) >= 300, f"300+ silence rows queued before the start ({len(queued)})")
+        await asyncio.sleep(max(0, start.timestamp() + 100 - time.time()))
+        h.stack.restart_backend()
+        restarted = time.time()
+        await asyncio.sleep(max(0, start.timestamp() + 280 - time.time()))
+        heard = h.heard(start.timestamp() + 3, time.time() - 1)
+        loud = [(round(t - start.timestamp(), 1), round(db)) for t, db, _ in heard if db > -45]
+        h.check(name, not loud, f"nothing heard inside the window, restart at +100 s ({len(loud)} loud: {loud[:5]})")
+        h.check(name, len(heard) > 200, f"the stream was measured the whole time ({len(heard)} windows)")
+        with open(log_path, errors="replace") as f:
+            f.seek(offset)
+            blog = f.read()
+        lines = blog.splitlines()
+        emerg = [ln for ln in lines if "lane=emergency" in ln]
+        h.check(name, not emerg, f"no emergency start report: {emerg[:3]}")
+        handed = [ln for ln in lines if "Handed timed entry" in ln]
+        h.check(name, len(handed) <= SILENCE_TIMED_MAX,
+                f"at most {SILENCE_TIMED_MAX} silences handed to the timed lane ({len(handed)})")
+        nexts = [ln for ln in lines if "Engine next -> " in ln]
+        h.check(name, len(nexts) >= 2, f"silence handed through /next ({len(nexts)}), also after the restart")
+        log(f"{name}: restart at +{restarted - start.timestamp():.0f} s, {len(handed)} timed, {len(nexts)} via /next")
+    finally:
+        async with async_session_factory() as db:
+            await db.execute(delete(HolidayWindow).where(HolidayWindow.id == wid))
+            await db.commit()
+    await asyncio.sleep(40)
+    tail = [n for _, n in timeline(h.heard(time.time() - 8, time.time() - 1))]
+    h.check(name, bool(tail) and all(n.startswith("song") for n in tail), f"station music after the window: {tail}")
+
+
 async def sc_shabbos_alert(h: Harness, restart: bool = False) -> None:
     """An emergency alert from the EAS box during Shabbos (Shmuel 2026-11-20: radios are
     left on over Shabbos so that an emergency announcement is heard). The station keeps
@@ -4950,6 +5012,7 @@ SCENARIOS = {
     "blackout_ended_early": sc_blackout_ended_early,
     "shabbos_silence": sc_shabbos_silence,
     "shabbos_alert": sc_shabbos_alert,
+    "shabbos_long_restart": sc_shabbos_long_restart,
     "shabbos_alert_engine_restart": lambda h: sc_shabbos_alert(h, restart=True),
     "output_limiter": sc_output_limiter,
     "fit_before_hour": sc_fit_before_hour,

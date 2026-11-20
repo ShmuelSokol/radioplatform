@@ -1598,17 +1598,39 @@ EMERGENCY_ALERT_AFTER = 5.0
 
 
 async def _emergency_alert(db, station_id, state: EngineState) -> None:
-    await _alert(
-        db,
-        station_id,
-        state,
-        force=True,
-        title=EMERGENCY_ALERT_TITLE,
-        message=(
-            "The engine could not get a track from the backend and is playing "
-            "its local emergency files."
-        ),
+    blacked_out = False
+    try:
+        blacked_out = await _blacked_out(db, station_id)
+    except Exception:
+        logger.warning("Blackout check for the emergency alert failed", exc_info=True)
+    message = (
+        "The engine could not get a track from the backend and is playing "
+        "its local emergency files."
     )
+    if blacked_out:
+        message += " The station is in Shabbos / Yom Tov: this is music on the air during it."
+    await _alert(db, station_id, state, force=True, title=EMERGENCY_ALERT_TITLE, message=message)
+    # The alert row alone reached nobody (KBR Jerusalem played its emergency files into
+    # Shabbos for two hours, 2026-11-20): push it as well
+    try:
+        from app.services.bug_report_service import send_ntfy
+
+        await send_ntfy(
+            message,
+            title=("Music during Shabbos" if blacked_out else "Emergency playlist on air"),
+            click="https://kbrlive.com/admin/alerts",
+            tags="rotating_light",
+            priority="urgent" if blacked_out else "high",
+        )
+    except Exception as e:
+        logger.warning("Emergency playlist push failed: %s", e)
+    if blacked_out:
+        # Off the emergency files: the engine asks /next again, which in a blackout
+        # always gives silence
+        try:
+            await engine_skip(station_id)
+        except Exception as e:
+            logger.warning("Skip off the emergency playlist failed: %s", e)
 
 
 async def _emergency_alert_later(station_id, spell: int) -> None:

@@ -2248,3 +2248,26 @@ async def test_silences_the_engine_refused_are_offered_again(client, db_session,
     await playout_engine.tick(db_session, station)
     taken = playout_engine.get_state(station.id).silence_handed
     assert sum(len(v) for v in taken.values()) == playout_engine.SILENCE_TIMED_MAX
+
+
+@pytest.mark.asyncio
+async def test_emergency_music_in_a_blackout_pushes_and_moves_the_engine_off(client, db_session, eng, monkeypatch):
+    """KBR Jerusalem 2026-11-20: its emergency files played into Shabbos for two hours and
+    the alert row reached nobody. In a blackout the alert is also pushed (urgent) and the
+    engine is skipped off the emergency files, so it asks /next, which gives silence."""
+    from app.services import bug_report_service
+
+    station, _, engine, _ = eng
+    pushes = []
+
+    async def fake_push(message, title, **kw):
+        pushes.append((title, kw.get("priority")))
+        return True
+
+    monkeypatch.setattr(bug_report_service, "send_ntfy", fake_push)
+    silence, _ = await _blackout_with_silences(db_session, station, 3)
+    await _on_air(client, station, "", lane="emergency")
+    assert pushes == [("Music during Shabbos", "urgent")]
+    assert "/skip" in engine.paths()
+    r = await _next(client, station)
+    assert (await _fresh(db_session, uuid.UUID(r.json()["entry_id"]))).asset_id == silence.id
