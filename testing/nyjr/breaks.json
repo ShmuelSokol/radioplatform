@@ -2121,5 +2121,16 @@
   "block_names": "107.9  Kol  B'Ramah  Lakewood",
   "items": "107.9  Kol  B'Ramah  Lakewood",
   "next_item": "Weber    Thank You - Chabadsker Nigun"
+ },
+ {
+  "start_utc": "2026-11-21T22:59:59Z",
+  "start_et": "2026-11-21 17:59:59",
+  "hour_et": "2026-11-21 17:00",
+  "spots": 1,
+  "total_seconds": 84,
+  "spot_seconds": "84",
+  "block_names": "Childrens Hour",
+  "items": "Childrens Hour",
+  "next_item": "Eli Marcus - Av Harachamim."
  }
 ]
