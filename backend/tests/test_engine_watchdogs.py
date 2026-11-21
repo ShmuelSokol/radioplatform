@@ -5,6 +5,7 @@
 - kbr-engine-watch.sh, from outside: an engine whose Icecast mount is missing or whose
   HLS playlist stopped changing for 60 s is restarted (systemctl faked here).
 """
+import json
 import os
 import shutil
 import subprocess
@@ -43,7 +44,7 @@ def _setup(tmp_path, mount_listed: bool, hls_age: float, active_for: float):
     os.utime(playlist, (t, t))
     status = tmp_path / "status.json"
     url = f"http://h:8000/live-{SID}" if mount_listed else "http://h:8000/live-other"
-    status.write_text('{"icestats":{"source":{"listenurl":"%s"}}}' % url)
+    status.write_text(json.dumps({"icestats": {"source": {"listenurl": url}}}))
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     started = time.strftime("%a %Y-%m-%d %H:%M:%S UTC", time.gmtime(time.time() - active_for))
