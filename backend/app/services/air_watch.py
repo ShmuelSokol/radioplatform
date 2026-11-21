@@ -15,6 +15,8 @@ active station, it checks:
                  shows, for DRIFT_SECONDS
   timed_skipped  a time check, weather or sponsorship was marked skipped although
                  nothing else aired in its place
+  stream_stopped  engine station: its output sent no audio for STREAM_STOPPED_SECONDS
+                 (also in blackouts and live shows)
   box_clock, box_disk, box_audio
                  a local FM box reports its clock wrong, its disk nearly full, or audio
                  of the coming items not on its disk for 15 minutes
@@ -58,7 +60,8 @@ TIME_CATEGORY = "time_announcement"
 WEATHER_CATEGORY = "weather_spot"
 PUSH_REPEAT_SECONDS = 15 * 60
 RECENT_KEEP = 200
-SERIOUS = {"late_timed", "hour_missing", "dead_air", "engine_drift", "box_clock"}
+STREAM_STOPPED_SECONDS = 60.0
+SERIOUS = {"late_timed", "hour_missing", "dead_air", "engine_drift", "box_clock", "stream_stopped"}
 
 
 DRIFT_TITLE = "Stream server and site disagree"
@@ -109,6 +112,8 @@ class AirWatch:
         config = station.automation_config or {}
         if sid in settings.relay_station_ids:
             self._check_box(station, found, mono)  # also during a live show
+        elif settings.engine_drives(station.id):
+            self._check_stream(station, found)  # also during a live show and a blackout
         if config.get("live_show_id"):
             return found  # a live show owns the air
         from app.api.v1.queue import _is_blacked_out
@@ -373,6 +378,24 @@ class AirWatch:
                 st.drift_since = st.drift_entry = None
 
         return found
+
+    def _check_stream(self, station: Station, found: list[Finding]) -> None:
+        """The engine's output stopped: its levels (sent every second while audio goes
+        out) have not come for STREAM_STOPPED_SECONDS. The engine restarts itself after
+        30 s of no audio (radio.liq "Stall watchdog"); this is the alarm when it does not
+        come back (Main 2026-11-20 22:16Z: the mount was gone for a day, no alert)."""
+        from app.services import playout_engine
+
+        quiet = playout_engine.levels_quiet_for(station.id)
+        if quiet is None or quiet < STREAM_STOPPED_SECONDS:
+            return
+        since = int(time.time() - quiet)
+        found.append(Finding(
+            kind="stream_stopped", station_id=str(station.id), station_name=station.name,
+            title="Stream server output stopped",
+            detail=f"No audio has gone out from the stream server for {int(quiet)} s. The engine "
+                   "restarts itself after 30 s; if this stays, its server needs a look.",
+            key=f"stream_stopped:{station.id}:{since // 60}"))
 
     def _check_box(self, station: Station, found: list[Finding], mono: float) -> None:
         """A local FM box's own report (sent with its relay's poll): one finding per

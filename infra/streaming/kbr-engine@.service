@@ -17,6 +17,12 @@ RestartSec=3
 # Audio must not be starved by anything else on the machine
 Nice=-10
 LimitNOFILE=65536
+# A runaway engine is stopped at this size and started again, before the whole server
+# runs out of memory (2026-11-20: two engines, no swap, load 26, SSH unreachable, the
+# kernel killed an engine at ~300 MB). Normal use is well below.
+MemoryMax=450M
+# Asked last by the kernel's out-of-memory killer, after anything else on the box
+OOMScoreAdjust=-500
 
 [Install]
 WantedBy=multi-user.target

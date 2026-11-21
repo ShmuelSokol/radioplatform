@@ -485,3 +485,15 @@ Measured on the same recording: -15.4 LUFS, items within about 2 LU, LRA 10.2 ->
 `light` (the script's default) is the old chain. radio.liq is one shared file on the droplet, so the switch is per engine env, not per script; a change restarts only the engines whose env changed. The harness runs with `light` by default (its level checks measure each lane's exact level, which the leveler evens out on purpose); scenario `broadcast_processing` restarts the engine with the broadcast chain; `KBR_HARNESS_PROCESSING=broadcast` runs any scenario with it.
 
 Not covered: All Day Stories on the browser player (no processing at all); FM later needs its own pre-emphasis-aware clipper on the box, not this chain.
+
+## The engine keeps the blackout itself; stalled engines restart (2026-11-21)
+
+First engine Shabbos (2026-11-20): the blackout's "Silence (5 min)" had an analysis with its start cue at the end of the file (the analysis of a silent file), so every silence ended at once; the lanes ran dry and the emergency music played (Main 21:19:49Z and 21:37-21:49Z, Jerusalem 13:57Z), /next was asked every 1-2 s, the 1 GB droplet ran out of memory, Jerusalem's engine was OOM-killed and Main's output stalled (mount gone, 0.5% CPU) for a day. PR 483 stopped the cue; after Shabbos:
+
+- **Blackouts in the engine** (radio.liq "Blackouts"): the engine asks `GET /playout/{id}/blackouts` at start and every 30 s (lines `<start> <end>`, unix seconds, an hour back to 10 days ahead) and keeps them on disk (`<emergency dir>.blackouts`), so a start with no backend knows them. While one is on: a blank lane sits above the emergency music, and everything below the alert lane is muted unless the item on air carries `kbr_blackout_ok=1` (build_uri sets it for silence and the Shabbos-ending item). The blank is not reported (lane "blackout"). An EAS alert is never muted. The backend sends `/blackouts` when a blackout ends while silence is on air, so an early end unmutes at once.
+- **Cues on silent files**: `stored_analysis` drops a start cue at or past the end; the analysis and the range analysis never store one.
+- **Backstop**: `/next`'s silence row for an empty blackout queue is made at most once a minute per station.
+- **Stall watchdogs**: radio.liq exits when no audio frame went out for 30 s (`KBR_STALL_SECONDS`; it runs in a thread, proved with a blocked clock in `harness/stall_watchdog_check.liq`) and systemd restarts it; `kbr-engine-watch` (timer, every 20 s, from setup.sh) restarts an engine whose Icecast mount is missing or whose HLS playlist stopped changing for 60 s (not in its first 120 s); air watch raises `stream_stopped` when an engine's levels stop for 60 s.
+- **Server room**: setup.sh adds a 1 GB swap file (swappiness 10), masks fwupd, and the engine unit has `MemoryMax=450M` and `OOMScoreAdjust=-500`.
+
+Harness: `blackout_guard_silence` (silence file 404, emergency folder full), `blackout_guard_backend` (backend stopped and engine restarted inside the window), `blackout_ended_early_unmutes`; the harness silence carries production's bad analysis.

@@ -220,6 +220,9 @@ async def analyze_by_range(url: str, previous: dict | None = None,
 
     cue_in = float(cue_in)
     cue_out = max(cue_out, min(length, cue_in + 5.0))
+    if cue_in >= cue_out - 0.5:
+        # A start cue at the end (a silent file): play it whole (models/asset.py)
+        cue_in, cue_out = 0.0, length
     cross_start = min(cue_out, max(cue_in + 5.0, cue_out - 3.0))
     extra = {}
     if sampled:

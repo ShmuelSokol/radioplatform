@@ -2396,3 +2396,67 @@ async def test_the_track_preloaded_before_a_blackout_is_dropped_once(client, db_
     for _ in range(3):
         await playout_engine.tick(db_session, station)
     assert engine.paths().count("/flush") == 1
+
+
+@pytest.mark.asyncio
+async def test_the_backstop_makes_at_most_one_silence_a_minute(client, db_session, eng):
+    """Shabbos 2026-11-20: each silence ended at once and the backstop made a new row every
+    1-2 s. Now one a minute per station; meanwhile the engine is told there is nothing."""
+    station, _, _, _ = eng
+    silence, rows = await _blackout_with_silences(db_session, station, 1)
+    await db_session.delete(rows[0])
+    await db_session.commit()
+    first = await _next(client, station)
+    assert first.status_code == 200
+    second = await _next(client, station, first.json()["entry_id"])
+    assert second.status_code == 204
+    made = (await db_session.execute(
+        select(QueueEntry).where(QueueEntry.asset_id == silence.id))).scalars().all()
+    assert len(made) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_engine_is_given_the_blackout_windows(client, db_session, eng):
+    """The engine keeps the windows itself (radio.liq "Blackouts"): one per line, unix seconds.
+    Another station's window is left out; a window for every station is in."""
+    station, _, _, _ = eng
+    now = datetime.now(UTC)
+    mine = HolidayWindow(id=uuid.uuid4(), name="Shabbos", is_blackout=True,
+                         start_datetime=now + timedelta(days=1), end_datetime=now + timedelta(days=2),
+                         affected_stations={"station_ids": [str(station.id)]})
+    other = HolidayWindow(id=uuid.uuid4(), name="Elsewhere", is_blackout=True,
+                          start_datetime=now + timedelta(hours=3), end_datetime=now + timedelta(hours=5),
+                          affected_stations={"station_ids": [str(uuid.uuid4())]})
+    everyone = HolidayWindow(id=uuid.uuid4(), name="Yom Tov", is_blackout=True,
+                             start_datetime=now - timedelta(minutes=5), end_datetime=now + timedelta(hours=1),
+                             affected_stations=None)
+    far = HolidayWindow(id=uuid.uuid4(), name="Far", is_blackout=True,
+                        start_datetime=now + timedelta(days=30), end_datetime=now + timedelta(days=31))
+    db_session.add_all([mine, other, everyone, far])
+    await db_session.commit()
+    r = await client.get(f"/api/v1/playout/{station.id}/blackouts", headers=HEADERS)
+    assert r.status_code == 200
+    lines = [tuple(float(x) for x in ln.split()) for ln in r.json()["lines"].split("\n")]
+    assert len(lines) == 2
+    assert abs(lines[0][0] - everyone.start_datetime.timestamp()) < 1
+    assert abs(lines[1][1] - mine.end_datetime.timestamp()) < 1
+    assert (await client.get(f"/api/v1/playout/{station.id}/blackouts")).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_air_watch_alerts_when_the_engine_output_stops(client, db_session, eng, monkeypatch):
+    """Main 2026-11-20 22:16Z: the engine's output stalled and the mount was gone for a day,
+    unseen. Its levels (every second while audio goes out) stopping is now an alert."""
+    from app.services import air_watch
+
+    station, _, _, _ = eng
+    watch = air_watch.AirWatch()
+    r = await client.post(f"/api/v1/playout/{station.id}/levels", headers=HEADERS,
+                          json={"l": [0.1], "r": [0.1], "step": 0.1})
+    assert r.status_code == 200
+    found = await watch.check_station(db_session, station, datetime.now(UTC))
+    assert not [f for f in found if f.kind == "stream_stopped"]
+    monkeypatch.setitem(playout_engine._levels_at, str(station.id), time.monotonic() - 90)
+    found = await watch.check_station(db_session, station, datetime.now(UTC))
+    stopped = [f for f in found if f.kind == "stream_stopped"]
+    assert len(stopped) == 1 and "stream_stopped" in air_watch.SERIOUS

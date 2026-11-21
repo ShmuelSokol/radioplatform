@@ -78,6 +78,12 @@ def _analyze_file(file_data: str) -> dict:
     if regions and abs(regions[-1]["end"] - total_duration) < 0.5:
         cue_out = regions[-1]["start"]
 
+    # A file that is silent from start to end (the blackout's silence): no cues at all.
+    # The rules above put the start cue at the end and the end cue at 0, and the item
+    # ended the moment it started (Shabbos 2026-11-20).
+    if cue_in >= cue_out - 0.5:
+        cue_in, cue_out = 0.0, total_duration
+
     # cross_start: cue_out - 3.0, clamped to at least cue_in + 5
     cross_start = max(cue_in + 5.0, cue_out - 3.0)
 

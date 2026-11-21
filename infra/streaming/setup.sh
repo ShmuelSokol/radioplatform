@@ -83,6 +83,23 @@ ADMIN_PW="$(old KBR_ICECAST_ADMIN_PASSWORD)"; ADMIN_PW="${ADMIN_PW:-$(secret)}"
 
 curl -fsSL "$RAW/radio.liq" -o /etc/kbr-engine/radio.liq.new
 curl -fsSL "$RAW/kbr-engine@.service" -o /etc/systemd/system/kbr-engine@.service
+curl -fsSL "$RAW/kbr-engine-watch.sh" -o /usr/local/bin/kbr-engine-watch && chmod 755 /usr/local/bin/kbr-engine-watch
+curl -fsSL "$RAW/kbr-engine-watch.service" -o /etc/systemd/system/kbr-engine-watch.service
+curl -fsSL "$RAW/kbr-engine-watch.timer" -o /etc/systemd/system/kbr-engine-watch.timer
+
+# Room to breathe on a 1 GB server (2026-11-20: no swap, memory ran out, SSH timed out):
+# a 1 GB swap file, used only under pressure, and no firmware updater (168 MB, nothing to
+# update on a cloud server)
+if ! swapon --show | grep -q .; then
+  if [ ! -f /swapfile ]; then
+    fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null
+  fi
+  swapon /swapfile && echo "Swap: 1 GB on /swapfile"
+  grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+sysctl -q -w vm.swappiness=10 && echo 'vm.swappiness=10' > /etc/sysctl.d/90-kbr.conf
+systemctl disable --now fwupd.service fwupd-refresh.timer 2>/dev/null || true
+systemctl mask fwupd.service 2>/dev/null || true
 curl -fsSL "$RAW/nginx-stream.conf" -o /tmp/kbr-nginx.conf
 curl -fsSL "$RAW/icecast.xml" -o /tmp/kbr-icecast.xml
 
@@ -237,6 +254,7 @@ else
 fi
 
 systemctl enable icecast2 nginx >/dev/null
+systemctl enable --now kbr-engine-watch.timer >/dev/null
 ICE_SUM="$(sum_of /etc/icecast2/icecast.xml /etc/default/icecast2)"
 if [ "$ICE_SUM" != "$(cat "$APPLIED/icecast" 2>/dev/null)" ] || ! systemctl is-active --quiet icecast2; then
   systemctl restart icecast2
