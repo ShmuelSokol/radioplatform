@@ -44,7 +44,7 @@ def _setup(tmp_path, mount_listed: bool, hls_age: float, active_for: float):
     os.utime(playlist, (t, t))
     status = tmp_path / "status.json"
     url = f"http://h:8000/live-{SID}" if mount_listed else "http://h:8000/live-other"
-    status.write_text(json.dumps({"icestats": {"source": {"listenurl": url}}}))
+    status.write_text(json.dumps({"icestats": {"source": {"listenurl": url}}}, separators=(",", ":")))
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     started = time.strftime("%a %Y-%m-%d %H:%M:%S UTC", time.gmtime(time.time() - active_for))
