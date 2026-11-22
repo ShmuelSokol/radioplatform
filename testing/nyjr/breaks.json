@@ -2556,10 +2556,10 @@
   "start_et": "2026-11-22 11:04:10",
   "hour_et": "2026-11-22 11:00",
   "spots": 1,
-  "total_seconds": null,
-  "spot_seconds": "?",
+  "total_seconds": 74,
+  "spot_seconds": "74",
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors",
-  "next_item": ""
+  "next_item": "8th Note - Yossel Lipa"
  }
 ]
