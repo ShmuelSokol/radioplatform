@@ -2237,10 +2237,10 @@
   "start_et": "2026-11-21 22:03:03",
   "hour_et": "2026-11-21 22:00",
   "spots": 2,
-  "total_seconds": null,
-  "spot_seconds": "83 ?",
+  "total_seconds": 150,
+  "spot_seconds": "83 67",
   "block_names": "Mesivta D'Rakia",
   "items": "Mesivta D'Rakia | Mesivta D'Rakia",
-  "next_item": ""
+  "next_item": "22:05\tWEINBERGER INTRO 718 - Intro"
  }
 ]
