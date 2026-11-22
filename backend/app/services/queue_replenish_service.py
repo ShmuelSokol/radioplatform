@@ -211,6 +211,10 @@ class QueueReplenishService:
         # built-in hourly time and weather instead of replacing them. The hour is queued
         # first, so a block due on the hour plays right after the time and weather.
         keep_hourly = blocks_keep_hourly(self.automation_config)
+        try:
+            await self._drop_unwanted_half_hours()
+        except Exception:
+            logger.exception("Half-hour time and weather could not be checked for station %s", self.station_id)
         # "Hourly Station ID" (automation_config.hourly_station_id): the station ID
         # jingle airs in the same hh:00 group, after the time check and weather.
         wants_id = bool(self.automation_config.get("hourly_station_id"))
@@ -1215,6 +1219,52 @@ class QueueReplenishService:
         await self.db.flush()
         logger.info("Requests-only replenish: filled %.1fs", filled)
 
+    async def _drop_unwanted_half_hours(self) -> int:
+        """Take out the automatic :30 time checks and weather the station no longer
+        wants: the time check with `half_hour_time_check` off, the weather unless it is
+        on every 30 minutes. They are queued 48 h ahead, so switching the setting off
+        left two days of them (Main 2026-11-22: the PC removed 90 by hand). Pending
+        entries due more than a minute from now only; the station's own clock decides
+        what is :30. Does not commit."""
+        from app.services.weather_spot_service import half_hour_time_check, station_announcement_zone
+
+        cfg = self.automation_config or {}
+        unwanted = []
+        if not half_hour_time_check(cfg):
+            unwanted.append("time_announcement")
+        interval = int(cfg.get("weather_interval_minutes", 30) or 0)
+        if not (cfg.get("weather_enabled") and interval == 30):
+            unwanted.append("weather_spot")
+        if not unwanted:
+            return 0
+        after = datetime.now(timezone.utc) + timedelta(minutes=1)
+        rows = (await self.db.execute(
+            select(QueueEntry.id, QueueEntry.preempt_at)
+            .join(Asset, Asset.id == QueueEntry.asset_id)
+            .where(
+                QueueEntry.station_id == self.station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.source == "auto",
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at > after,
+                Asset.category.in_(unwanted),
+            )
+        )).all()
+        if not rows:
+            return 0
+        zone = await station_announcement_zone(self.db, self.station_id)
+        ids = []
+        for entry_id, at in rows:
+            at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+            if at.astimezone(zone).minute == 30:
+                ids.append(entry_id)
+        if ids:
+            await self.db.execute(
+                delete(QueueEntry).where(QueueEntry.id.in_(ids)).execution_options(synchronize_session=False)
+            )
+            logger.info("Station %s: %d :30 time/weather entries taken out (setting off)", self.station_id, len(ids))
+        return len(ids)
+
     async def _schedule_top_of_hour(self, time_and_weather: bool, station_id: bool) -> None:
         if time_and_weather:
             await self._schedule_hourly_announcements()
@@ -1354,15 +1404,13 @@ class QueueReplenishService:
         # hour, so once ads were scheduled days ahead, every hour looked "already
         # scheduled" and time/weather announcements silently stopped being created.
         result = await self.db.execute(
-            select(QueueEntry.preempt_at, Asset.category)
+            select(QueueEntry.preempt_at, Asset.category, QueueEntry.source)
             .join(Asset, Asset.id == QueueEntry.asset_id)
             .where(
                 QueueEntry.station_id == self.station_id,
                 QueueEntry.status == "pending",
                 QueueEntry.preempt_at.isnot(None),
-                # A program block due at the same minute (blocks_keep_hourly) does not
-                # count: the hour still gets its time and weather.
-                or_(QueueEntry.source.is_(None), QueueEntry.source.notin_(("ad_slot", "block"))),
+                or_(QueueEntry.source.is_(None), QueueEntry.source != "ad_slot"),
             )
         )
 
@@ -1371,8 +1419,17 @@ class QueueReplenishService:
                 dt = dt.replace(tzinfo=timezone.utc)
             return dt.replace(second=0, microsecond=0)
 
+        # A program block due at the same minute (blocks_keep_hourly) does not count:
+        # the hour still gets its time and weather. Unless the block brings its own time
+        # check: then it is the hour's (Main 2026-11-22 aired both, time and weather twice).
+        rows = result.all()
         # The hour's Omer count (queued by its own pass) does not stand for its time check
-        existing_rows = [(_norm(at), category) for at, category in result.all() if at and category != "omer_count"]
+        existing_rows = [
+            (_norm(at), category)
+            for at, category, source in rows
+            if at and category != "omer_count"
+            and (source != "block" or category in ("time_announcement", "weather_spot"))
+        ]
         existing_preempts = {at for at, _ in existing_rows}
         # A half hour that already has its weather can still lack its time check
         # (switched on later, or the clip recorded later)
