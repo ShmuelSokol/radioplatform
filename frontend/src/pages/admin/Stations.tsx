@@ -620,6 +620,10 @@ function AutomationConfig({ stationId, config, onSave, saving }: {
     return out;
   });
   const comingFriday = nextFriday();
+  const [candleWeekly, setCandleWeekly] = useState<{ id: string; title: string } | null>(
+    ending.candle_every_week
+      ? { id: String(ending.candle_every_week), title: String(ending.candle_every_week_title || 'Chosen item') }
+      : null);
   const omerCfg = (config.omer_count ?? {}) as Record<string, any>;
   const [omerOn, setOmerOn] = useState<boolean>(omerCfg.enabled !== false);
   const [omerSwitch, setOmerSwitch] = useState<string>(String(omerCfg.switch_minutes ?? 0));
@@ -658,6 +662,8 @@ function AutomationConfig({ stationId, config, onSave, saving }: {
         yom_tov: endingYomTov,
         candle_items: Object.fromEntries(Object.entries(candleItems).map(([d, v]) => [d, v.id])),
         candle_titles: Object.fromEntries(Object.entries(candleItems).map(([d, v]) => [d, v.title])),
+        candle_every_week: candleWeekly?.id ?? null,
+        candle_every_week_title: candleWeekly?.title ?? null,
       },
       omer_count: {
         ...omerCfg,
@@ -787,6 +793,15 @@ function AutomationConfig({ stationId, config, onSave, saving }: {
             searchLabel="Search the library for the item at candle lighting" clearLabel="Nothing (silence right away)">
             Give it the category shabbos_ending in the Library so it never plays at any other time.
           </LibraryPick>
+          <LibraryPick value={candleWeekly} onChange={setCandleWeekly} disabled={!endingOn}
+            testId="shabbos-ending-weekly"
+            label="Candle lighting item every Friday (the same recording)"
+            placeholder="Search the library (the Good Shabbos sign-off)"
+            searchLabel="Search the library for the item that ends at candle lighting every Friday"
+            clearLabel="None">
+            For a recording with no times in it. It ends exactly at candle lighting every week, the song just
+            before it. A recording chosen below for one Friday takes its place that week. Category shabbos_ending.
+          </LibraryPick>
           <LibraryPick value={candleItems[comingFriday] ?? null} disabled={!endingOn}
             onChange={v => setCandleItems(prev => {
               const next = { ...prev };
@@ -797,8 +812,8 @@ function AutomationConfig({ stationId, config, onSave, saving }: {
             label={`Candle lighting announcement for Friday ${comingFriday}`}
             placeholder="Search the library (this week's recording)"
             searchLabel="Search the library for this week's candle lighting announcement" clearLabel="None this week">
-            Optional, a new recording each week with that week&apos;s time. It ends exactly at candle lighting and the
-            song ends just before it. A week with none ends with the song. Category shabbos_ending.
+            Optional, for a recording made for this week only (one that says this week&apos;s times). It ends
+            exactly at candle lighting and the song ends just before it. A week with neither ends with the song.
           </LibraryPick>
           {Object.keys(candleItems).filter(d => d !== comingFriday).sort().map(d => (
             <div key={d} className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-600"

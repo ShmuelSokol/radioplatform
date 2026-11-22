@@ -39,6 +39,9 @@ silence (candle lighting to shekia + 72).
   follows at candle lighting. A new recording each week (it says the time), so a week with no item,
   or an item marked do not play / rejected / placeholder, ends with the song as before: nothing
   placeholder airs. Stations page shows a picker for the coming Friday (this device's calendar).
+  **Same item every week**: `candle_every_week` (+ `candle_every_week_title`), for a recording with no
+  times in it (Shmuel 2026-11-22 chose the short sign-off "A gut Shabbos to our entire Kol B'ramah
+  family..."), so nobody re-approves it weekly. A dated `candle_items` entry wins for its week.
 - **Windows**: Shabbos = reason "Shabbos", or a Yom Tov window starting on a Friday (station
   time). Erev Yom Tov only with `yom_tov`. Manual windows never.
 - **Tests**: `tests/test_shabbos_ending.py`; simulator `tests/test_station_sim.py -k good_shabbos`
