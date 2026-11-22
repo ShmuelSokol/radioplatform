@@ -121,9 +121,15 @@ SHOFAR = {"id": "5f0f0a00-0000-4000-8000-00000000500f", "title": "Shofar (sim st
           "asset_type": "jingle", "category": "shabbos_ending", "duration": 21.0}
 
 
-def _ending(after: bool = True) -> dict:
-    return {"shabbos_ending": {"enabled": True, "song_asset_id": GOOD_SHABBOS["id"],
-                               "after_asset_id": SHOFAR["id"] if after else None}}
+CANDLE_ITEM = {"id": "5f0f0a00-0000-4000-8000-00000000c4d1", "title": "Candle lighting 4:18 (sim stand-in)",
+               "asset_type": "jingle", "category": "shabbos_ending", "duration": 300.0}
+
+
+def _ending(after: bool = True, candle: str | None = None) -> dict:
+    cfg = {"enabled": True, "song_asset_id": GOOD_SHABBOS["id"], "after_asset_id": SHOFAR["id"] if after else None}
+    if candle:
+        cfg["candle_items"] = {candle: CANDLE_ITEM["id"]}
+    return {"shabbos_ending": cfg}
 
 
 @pytest.mark.asyncio
@@ -168,6 +174,28 @@ async def test_good_shabbos_song_without_a_shofar(tmp_path):
                   "Shabbos/Yom Tov: silence from candle lighting to 72 min after shekia"):
         assert result.checks_run[check] >= 1
         assert not result.failed(check), _failing(result, check)
+
+
+@pytest.mark.asyncio
+async def test_candle_lighting_item_last_song_before_it(tmp_path):
+    """Main following 107.9 (coordinator 2026-11-22): that Friday's 5-minute candle lighting
+    announcement ends exactly at candle lighting, the Good Shabbos song right before it,
+    then the shofar and the silence."""
+    from tests.sim.run import PICK
+
+    _, result = await simulate(EXPORT, datetime(2026, 11, 20, 15, 45, tzinfo=NY), 0.75, ["main"], tmp_path,
+                               overrides={PICK["main"]: _ending(candle="2026-11-20")},
+                               extra_assets=[GOOD_SHABBOS, SHOFAR, CANDLE_ITEM], regenerate_windows=True)
+    print(result.report())
+    for check in ("Erev Shabbos: song ends at candle lighting, shofar, then silence",
+                  "Shabbos/Yom Tov: silence from candle lighting to 72 min after shekia"):
+        assert result.checks_run[check] >= 1
+        assert not result.failed(check), _failing(result, check)
+    rows = [r for r in result.rows if r.asset_id in (GOOD_SHABBOS["id"], CANDLE_ITEM["id"], SHOFAR["id"])]
+    assert [r.asset_id for r in rows][-3:] == [GOOD_SHABBOS["id"], CANDLE_ITEM["id"], SHOFAR["id"]]
+    dead = [f for f in result.failed("no dead air or emergency music")
+            if not (f.text.startswith("emergency music for") and float(f.text.split()[3]) < 8.0)]
+    assert not dead, [f"{f.at}: {f.text}" for f in dead]
 
 
 @pytest.mark.asyncio

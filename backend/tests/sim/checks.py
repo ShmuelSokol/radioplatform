@@ -596,9 +596,10 @@ def shabbos_silence(res: Result, ctx: Context):
 
 def shabbos_ending(res: Result, ctx: Context):
     """Erev Shabbos (Shmuel 2026-11-19): the station's chosen song (automation_config
-    .shabbos_ending) is the last song and ends exactly at candle lighting, not cut; the item
-    after it (the shofar) starts right at candle lighting; nothing else airs between the
-    song's start and the silence."""
+    .shabbos_ending) is the last song and ends exactly at candle lighting, not cut, or,
+    when that Friday has a candle lighting item, the item ends at candle lighting and the
+    song where the item starts; the item after them (the shofar) starts right at candle
+    lighting; nothing else airs between the song's start and the silence."""
     check = "Erev Shabbos: song ends at candle lighting, shofar, then silence"
     res.checks_run.setdefault(check, 0)
     start, end = ctx.window()
@@ -618,13 +619,31 @@ def shabbos_ending(res: Result, ctx: Context):
                 continue
             _count(res, check)
             at = f"{w['start'].astimezone(tz):%a %H:%M:%S}"
-            song = next((r for r in rows if r.asset_id == str(cfg["song_asset_id"]) and r.start < ws < r.end + 5), None)
+            # That Friday's candle lighting announcement, when there is one, is last and
+            # ends at candle lighting; the song ends where it starts
+            candle_id = (cfg.get("candle_items") or {}).get(f"{w['start'].astimezone(tz):%Y-%m-%d}")
+            song_end = ws
+            candle = None
+            if candle_id:
+                candle = next((r for r in rows if r.asset_id == str(candle_id) and r.start < ws < r.end + 5), None)
+                if candle is None:
+                    _add(res, check, sid, at, "the candle lighting item did not air before candle lighting")
+                    continue
+                if abs(candle.end - ws) > ON_TIME_SECONDS:
+                    _add(res, check, candle, candle.local_end,
+                         f"candle lighting item ends {candle.end - ws:+.1f} s from candle lighting")
+                if candle.cut and candle.end < ws - ON_TIME_SECONDS:
+                    _add(res, check, candle, candle.local_end, "candle lighting item was cut")
+                song_end = candle.start
+            song = next((r for r in rows if r.asset_id == str(cfg["song_asset_id"])
+                         and r.start < song_end < r.end + 5), None)
             if song is None:
                 _add(res, check, sid, at, "the song did not air before candle lighting")
                 continue
-            if abs(song.end - ws) > ON_TIME_SECONDS:
-                _add(res, check, song, song.local_end, f"song ends {song.end - ws:+.1f} s from candle lighting")
-            if song.cut and song.end < ws - ON_TIME_SECONDS:
+            if abs(song.end - song_end) > ON_TIME_SECONDS:
+                _add(res, check, song, song.local_end, f"song ends {song.end - song_end:+.1f} s from "
+                     + ("the candle lighting item" if candle else "candle lighting"))
+            if song.cut and song.end < song_end - ON_TIME_SECONDS:
                 _add(res, check, song, song.local_end, "song was cut")
             for r in rows:
                 # (a copy already on its way to air when the run starts, i.e. when the
@@ -632,10 +651,10 @@ def shabbos_ending(res: Result, ctx: Context):
                 if r is not song and r.asset_id == str(cfg["song_asset_id"]) and r.start > start + 600 \
                         and ws - 6 * 3600 < r.start < ws:
                     _add(res, check, r, r.local_start, "the song also aired earlier the same afternoon")
-                if r.category == "shabbos_ending" and not (cfg.get("after_asset_id") == r.asset_id
-                                                           and abs(r.start - ws) <= ON_TIME_SECONDS):
+                if r.category == "shabbos_ending" and r is not candle and not (
+                        cfg.get("after_asset_id") == r.asset_id and abs(r.start - ws) <= ON_TIME_SECONDS):
                     _add(res, check, r, r.local_start, f"{r.label()} aired outside the Shabbos ending")
-            between = [r for r in rows if r is not song and r.kind != "silence"
+            between = [r for r in rows if r is not song and r is not candle and r.kind != "silence"
                        and max(r.start, song.start) + 0.5 < min(r.end, ws)]
             for r in between[:3]:
                 _add(res, check, r, r.local_start, f"{r.label()} airs during the song")

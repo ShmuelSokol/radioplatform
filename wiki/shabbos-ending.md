@@ -31,6 +31,14 @@ silence (candle lighting to shekia + 72).
   timed item ... starts now") and the shofar and silence follow early too. hour_fit usually
   prevents it by reordering the songs before; the simulator's stand-in engine has no hold lane
   and logs those seconds as emergency music.
+- **Candle lighting announcement (weekly)**, coordinator 2026-11-22 for Main, following 107.9
+  ("a 5-minute candle lighting item ends right at candle lighting"; their Friday 11-20 log: "CANDLES
+  AT 4:18" 4:12:59-4:18:04 PM): `candle_items: {"<Friday, station date>": "<asset id>"}` (+
+  `candle_titles` for the page). When that window's date has an item, it is a hard entry ending at
+  candle lighting and the song is back-timed to end where it starts; the shofar (if set) still
+  follows at candle lighting. A new recording each week (it says the time), so a week with no item,
+  or an item marked do not play / rejected / placeholder, ends with the song as before: nothing
+  placeholder airs. Stations page shows a picker for the coming Friday (this device's calendar).
 - **Windows**: Shabbos = reason "Shabbos", or a Yom Tov window starting on a Friday (station
   time). Erev Yom Tov only with `yom_tov`. Manual windows never.
 - **Tests**: `tests/test_shabbos_ending.py`; simulator `tests/test_station_sim.py -k good_shabbos`

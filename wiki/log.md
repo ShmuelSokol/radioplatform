@@ -508,3 +508,4 @@ INGEST 2026-11-22 spot-schedules.md sponsor_quiet_hours and sponsors_stop_before
 INGEST 2026-11-22 program-blocks.md optional block items (skip if missing, not the programme); Main's 11-19 missing weather = hourly block without a weather item
 UPDATE 2026-11-22 streaming-architecture.md kbr-engine-watch watches the HLS media playlist mp3.m3u8, not the master live.m3u8 (false restart of Main 14:09Z)
 UPDATE 2026-11-22 program-blocks.md block time/weather items vs kept built-in hourly: one per minute (drop_double_announcements), purge any timing, :30 cleared when switched off (Main aired time+weather twice 11:00 AM ET)
+UPDATE 2026-11-22 shabbos-ending.md weekly candle lighting announcement (candle_items by Friday date) ends at candle lighting, Good Shabbos song before it; missing/off-air week falls back to the song
