@@ -38,7 +38,13 @@ def _setup(tmp_path, mount_listed: bool, hls_age: float, active_for: float):
     (stations / f"{SID}.env").write_text("KBR_STATION_ID=x\n")
     hls = tmp_path / "hls" / SID
     hls.mkdir(parents=True)
-    playlist = hls / "live.m3u8"
+    # live.m3u8 (the master) is written once at start and never again; mp3.m3u8 (the
+    # media playlist) is rewritten every second while audio goes out
+    master = hls / "live.m3u8"
+    master.write_text("#EXTM3U\n")
+    t = time.time() - 55000
+    os.utime(master, (t, t))
+    playlist = hls / "mp3.m3u8"
     playlist.write_text("#EXTM3U\n")
     t = time.time() - hls_age
     os.utime(playlist, (t, t))
@@ -99,3 +105,18 @@ def test_a_stall_is_restarted_only_after_it_lasts(tmp_path):
     env["KBR_WATCH_STALL"] = "60"
     out, calls = _run(tmp_path, env)
     assert "restart" not in calls and "mount" in out
+
+
+def test_the_watched_playlist_is_the_one_the_engine_rewrites():
+    """2026-11-22 14:09Z: the watchdog watched live.m3u8, the master playlist written once,
+    and restarted every healthy engine. The media playlist is named after the stream in
+    radio.liq's output.file.hls."""
+    import re
+
+    liq = (INFRA / "radio.liq").read_text()
+    hls = liq.split("output.file.hls(")[1].split("\n)\n")[0]
+    master = re.search(r'playlist="([^"]+)"', hls).group(1)
+    stream = re.search(r'\[\("([^"]+)", ', hls).group(1)
+    script = (INFRA / "kbr-engine-watch.sh").read_text()
+    assert f'HLS="$HLS_ROOT/$SID/{stream}.m3u8"' in script
+    assert f"/{master}\"" not in script
