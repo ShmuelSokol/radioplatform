@@ -2781,5 +2781,49 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Why 2nd Camp Survives"
+ },
+ {
+  "start_utc": "2026-11-22T21:08:31Z",
+  "start_et": "2026-11-22 16:08:31",
+  "hour_et": "2026-11-22 16:00",
+  "spots": 1,
+  "total_seconds": 55,
+  "spot_seconds": "55",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "YBC Chanukah - Haneiros"
+ },
+ {
+  "start_utc": "2026-11-22T21:10:00Z",
+  "start_et": "2026-11-22 16:10:00",
+  "hour_et": "2026-11-22 16:00",
+  "spots": 1,
+  "total_seconds": 31,
+  "spot_seconds": "31",
+  "block_names": "CANDLES AT 4:15",
+  "items": "CANDLES AT 4:15",
+  "next_item": "Yitzchak Fuchs  Mi'mamakim - Shir Ushvacha."
+ },
+ {
+  "start_utc": "2026-11-22T21:29:29Z",
+  "start_et": "2026-11-22 16:29:29",
+  "hour_et": "2026-11-22 16:00",
+  "spots": 3,
+  "total_seconds": 171,
+  "spot_seconds": "59 54 58",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Green Peace of My Heart - Avinu Malkeinu"
+ },
+ {
+  "start_utc": "2026-11-22T22:03:19Z",
+  "start_et": "2026-11-22 17:03:19",
+  "hour_et": "2026-11-22 17:00",
+  "spots": 2,
+  "total_seconds": null,
+  "spot_seconds": "68 ?",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": ""
  }
 ]
