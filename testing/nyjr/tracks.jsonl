@@ -1279,3 +1279,6 @@
 {"start_utc": "2026-11-22T10:59:58Z", "start_epoch": 1795345198, "playlist_time": "6:00", "artist": "", "title": "Weather Sponsors", "raw": "6:00\tWeather Sponsors", "logged_utc": "2026-11-22T11:00:02Z"}
 {"start_utc": "2026-11-22T11:01:08Z", "start_epoch": 1795345268, "playlist_time": "6:01", "artist": "", "title": "Weather Sponsors", "raw": "6:01\tWeather Sponsors", "logged_utc": "2026-11-22T11:02:02Z"}
 {"start_utc": "2026-11-22T11:01:14Z", "start_epoch": 1795345274, "playlist_time": "6:01", "artist": "Sruly Bornstein", "title": "Arachin 5", "raw": "6:01\tSruly Bornstein\tArachin 5", "logged_utc": "2026-11-22T11:02:02Z"}
+{"start_utc": "2026-11-22T12:01:31Z", "start_epoch": 1795348891, "playlist_time": "7:01", "artist": "", "title": "Weather Sponsors", "raw": "7:01\tWeather Sponsors", "logged_utc": "2026-11-22T12:02:02Z"}
+{"start_utc": "2026-11-22T12:02:39Z", "start_epoch": 1795348959, "playlist_time": "7:02", "artist": "", "title": "Weather Sponsors", "raw": "7:02\tWeather Sponsors", "logged_utc": "2026-11-22T12:03:03Z"}
+{"start_utc": "2026-11-22T12:02:48Z", "start_epoch": 1795348968, "playlist_time": "7:02", "artist": "Kosman R. Mishna", "title": "Eruvin 1", "raw": "7:02\tKosman R. Mishna\tEruvin 1", "logged_utc": "2026-11-22T12:03:03Z"}
