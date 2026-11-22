@@ -41,6 +41,11 @@ export interface TimingDefaults {
   other: TimingMode;
   // Play the recorded half-hour time check ("The time is 10:30 ...") before the :30 weather
   half_hour_time_check: boolean;
+  // No sponsorships between these times every night ("00:35" to "06:00"); both "" = none
+  sponsor_quiet_start?: string;
+  sponsor_quiet_end?: string;
+  // Sponsorships stop this many minutes before Shabbos and Yom Tov (0 = right up to it)
+  sponsors_stop_before_blackout_minutes?: number;
 }
 
 export interface SpotSchedule {

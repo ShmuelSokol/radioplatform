@@ -3,8 +3,9 @@ import apiClient from './client';
 export type BlockTiming = 'hard' | 'soft';
 
 export type BlockItem =
-  | { kind: 'asset'; asset_id: string; label?: string }
-  | { kind: 'category'; asset_type: string; category?: string; label?: string }
+  // optional: the block goes without it when it has nothing to play
+  | { kind: 'asset'; asset_id: string; label?: string; optional?: boolean }
+  | { kind: 'category'; asset_type: string; category?: string; label?: string; optional?: boolean }
   | { kind: 'time'; label?: string }
   | { kind: 'weather'; label?: string }
   // max_seconds: the most sponsorship time one airing holds (then count may be left out)

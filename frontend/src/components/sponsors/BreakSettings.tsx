@@ -58,6 +58,60 @@ export default function BreakSettings({ stationId }: { stationId: string }) {
         />
         Time check on the half hour ("The time is 10:30") before the weather
       </label>
+      <span className="flex flex-wrap items-center gap-2" data-testid="sponsor-quiet-hours">
+        No sponsorships from
+        <input
+          type="time"
+          aria-label="No sponsorships from"
+          defaultValue={timing.sponsor_quiet_start ?? ''}
+          key={`qs-${timing.sponsor_quiet_start}`}
+          disabled={busy}
+          onBlur={(e) => {
+            const start = e.target.value;
+            const end = timing.sponsor_quiet_end || (start ? '06:00' : '');
+            if (start !== (timing.sponsor_quiet_start ?? '')) {
+              save.mutate({ ...timing, sponsor_quiet_start: start, sponsor_quiet_end: start ? end : '' });
+            }
+          }}
+          className="px-2 py-1 border rounded-lg"
+        />
+        to
+        <input
+          type="time"
+          aria-label="No sponsorships until"
+          defaultValue={timing.sponsor_quiet_end ?? ''}
+          key={`qe-${timing.sponsor_quiet_end}`}
+          disabled={busy || !timing.sponsor_quiet_start}
+          onBlur={(e) => {
+            const end = e.target.value;
+            if (end && end !== (timing.sponsor_quiet_end ?? '')) {
+              save.mutate({ ...timing, sponsor_quiet_end: end });
+            }
+          }}
+          className="px-2 py-1 border rounded-lg"
+        />
+        <span className="text-xs text-gray-600">(clear the first time for none)</span>
+      </span>
+      <label className="flex items-center gap-2">
+        Sponsorships stop
+        <input
+          type="number"
+          min={0}
+          max={180}
+          defaultValue={timing.sponsors_stop_before_blackout_minutes ?? 0}
+          key={`sb-${timing.sponsors_stop_before_blackout_minutes}`}
+          disabled={busy}
+          onBlur={(e) => {
+            const minutes = Math.max(0, Math.min(180, Math.round(Number(e.target.value) || 0)));
+            if (minutes !== (timing.sponsors_stop_before_blackout_minutes ?? 0)) {
+              save.mutate({ ...timing, sponsors_stop_before_blackout_minutes: minutes });
+            }
+          }}
+          data-testid="sponsors-stop-before"
+          className="w-20 px-2 py-1 border rounded-lg"
+        />
+        minutes before Shabbos and Yom Tov
+      </label>
       {save.isError && <p className="w-full text-red-700" role="alert">That change was not saved. Try again in a moment.</p>}
       {!mayChange && <p className="w-full text-xs text-gray-600">Only managers can change these.</p>}
     </div>

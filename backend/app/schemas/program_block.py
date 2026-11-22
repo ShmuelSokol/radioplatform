@@ -19,6 +19,10 @@ class BlockItem(BaseModel):
     count: int | None = Field(None, ge=1, le=10)  # sponsors: how many places
     # sponsors: the most sponsorship time this item may hold in one airing
     max_seconds: int | None = Field(None, ge=15, le=900)
+    # asset/category: when it has nothing to play the block simply goes without it;
+    # the block's programme (its last recording that is not optional) decides
+    # whether the recordings before it play
+    optional: bool = False
 
     @model_validator(mode="after")
     def _complete(self):

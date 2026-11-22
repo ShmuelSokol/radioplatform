@@ -12,7 +12,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -309,13 +309,24 @@ class TimingDefaults(BaseModel):
     # Left out (an older page): the station keeps what it has
     half_hour: Literal["hard", "soft"] | None = None
     half_hour_time_check: bool | None = None
+    # No sponsorships overnight: "HH:MM" both, or both "" for none (left out: kept)
+    sponsor_quiet_start: str | None = Field(None, pattern=r"^$|^([01]?\d|2[0-3]):[0-5]\d$")
+    sponsor_quiet_end: str | None = Field(None, pattern=r"^$|^([01]?\d|2[0-4]):[0-5]\d$")
+    # Sponsorships stop this many minutes before Shabbos / Yom Tov (0 = right up to it)
+    sponsors_stop_before_blackout_minutes: int | None = Field(None, ge=0, le=180)
 
 
 def _timing_out(config: dict | None) -> dict:
     config = config or {}
+    quiet = config.get("sponsor_quiet_hours") or {}
     return {
         **timing_choices(config.get("spot_timing")),
         "half_hour_time_check": half_hour_time_check(config),
+        "sponsor_quiet_start": quiet.get("start") or "",
+        "sponsor_quiet_end": quiet.get("end") or "",
+        "sponsors_stop_before_blackout_minutes": int(
+            config.get("sponsors_stop_before_blackout_minutes") or 0
+        ),
     }
 
 
@@ -346,6 +357,21 @@ async def set_timing_defaults(
     config["spot_timing"] = saved
     if data.half_hour_time_check is not None:
         config["half_hour_time_check"] = data.half_hour_time_check
+    if data.sponsor_quiet_start is not None or data.sponsor_quiet_end is not None:
+        start, end = data.sponsor_quiet_start or "", data.sponsor_quiet_end or ""
+        if bool(start) != bool(end):
+            raise HTTPException(422, "Give both the start and the end of the hours with no sponsorships, or neither")
+        if start and start == end:
+            raise HTTPException(422, "The hours with no sponsorships start and end at the same time")
+        if start:
+            config["sponsor_quiet_hours"] = {"start": start, "end": end}
+        else:
+            config.pop("sponsor_quiet_hours", None)
+    if data.sponsors_stop_before_blackout_minutes is not None:
+        if data.sponsors_stop_before_blackout_minutes:
+            config["sponsors_stop_before_blackout_minutes"] = data.sponsors_stop_before_blackout_minutes
+        else:
+            config.pop("sponsors_stop_before_blackout_minutes", None)
     station.automation_config = config
     await db.flush()
     await _retime_announcements(db, station)

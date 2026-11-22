@@ -519,6 +519,23 @@ export default function ProgramBlocks() {
                     <span className="font-medium">{itemText(item)}</span>
                     <span className="block text-xs text-gray-500">{itemHint(item)}</span>
                   </span>
+                  {(item.kind === 'asset' || item.kind === 'category') && (
+                    <label
+                      className="inline-flex items-center gap-1 text-xs text-gray-600 min-h-[40px]"
+                      title="When there is nothing to play for this item, the block goes on without it"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!item.optional}
+                        onChange={(e) => {
+                          const items = [...form.items];
+                          items[i] = { ...item, optional: e.target.checked };
+                          setForm({ ...form, items });
+                        }}
+                      />
+                      Skip if missing
+                    </label>
+                  )}
                   <button
                     type="button"
                     aria-label={`Move ${itemText(item)} up`}
