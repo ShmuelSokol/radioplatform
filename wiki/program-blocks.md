@@ -48,8 +48,9 @@ time and weather always used, so playout needs nothing new.
 
 Once a station has at least one active block, `replenish()` skips
 `_schedule_hourly_announcements()` and the reconciler deletes the pending
-entries that code queued (source "auto", no timing mode, category
-`time_announcement` or `weather_spot`). A station with no blocks behaves as
+entries that code queued (source "auto", any timing mode, category
+`time_announcement` or `weather_spot`; before 2026-11-22 only untimed ones, so
+switching `blocks_keep_hourly` off left the hard built-in pair queued). A station with no blocks behaves as
 before. So a station moving to blocks must put the time and weather in a block
 or it loses them.
 
@@ -65,6 +66,19 @@ announcement and the 8 PM Daf Yomi (2026-11-16). `GET /program-blocks/capabiliti
 returns `{"keep_hourly": true}` so scripts can tell a server that has this.
 Recordings meant only for blocks use category `block_only` (in `NEVER_RANDOM_CATEGORIES`:
 never drawn as filler). Test: `tests/test_blocks_keep_hourly.py`.
+
+**Never twice.** A kept station whose block also has its own `time` or `weather` item
+at the same minute used to queue both (Main, 11:00 AM ET 2026-11-22: time, weather,
+time, weather). Now the block's own items win: `drop_double_announcements` (end of
+`reconcile_block_entries`) removes the built-in copy at that minute, and
+`_schedule_hourly_announcements` counts a block's time/weather entry as the hour's, so
+it does not queue it again. Either order of the two passes, and turning
+`blocks_keep_hourly` on or off, leaves one time check and one weather per minute.
+
+**:30 switched off.** `QueueReplenishService._drop_unwanted_half_hours` (every top-up)
+takes out queued automatic :30 time checks when `half_hour_time_check` is off and :30
+weather unless weather is every 30 minutes; they are queued 48 h ahead, so switching off
+left two days of them. Tests: `tests/test_double_hourly.py`.
 
 ## Sponsor places
 

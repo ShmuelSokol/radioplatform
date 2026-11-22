@@ -21,7 +21,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset, in_category, not_contract_audio, not_holiday_only, not_placeholder
@@ -73,6 +73,55 @@ class Occurrence:
     @property
     def problems(self) -> list[str]:
         return [i.problem for i in self.items if i.problem]
+
+
+ANNOUNCEMENT_CATEGORIES = ("time_announcement", "weather_spot")
+
+
+async def drop_double_announcements(db: AsyncSession, station_id, after: datetime) -> int:
+    """One time check and one weather per minute. A station that keeps the built-in
+    hourly time and weather beside its blocks (blocks_keep_hourly) and has a block
+    with its own time or weather item at the same minute queued both: Main at 11:00
+    AM on 2026-11-22 said the time and the weather twice. The block's own items stay
+    (they are where the block puts them, and the block is not queued again for a
+    minute it already has); the built-in copy goes, and the built-in pass leaves that
+    minute alone from then on. Pending entries due after `after` only. Does not commit."""
+    rows = (
+        await db.execute(
+            select(QueueEntry.id, QueueEntry.preempt_at, QueueEntry.source, Asset.category)
+            .join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.source.in_(("auto", SOURCE)),
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at > after,
+                Asset.category.in_(ANNOUNCEMENT_CATEGORIES),
+            )
+        )
+    ).all()
+    from_blocks = {
+        (as_utc(at).replace(second=0, microsecond=0), category)
+        for _id, at, source, category in rows
+        if source == SOURCE
+    }
+    doubles = [
+        entry_id
+        for entry_id, at, source, category in rows
+        if source == "auto" and (as_utc(at).replace(second=0, microsecond=0), category) in from_blocks
+    ]
+    if not doubles:
+        return 0
+    await db.execute(
+        delete(QueueEntry)
+        .where(QueueEntry.id.in_(doubles))
+        .execution_options(synchronize_session=False)
+    )
+    logger.info(
+        "Station %s: %d built-in time/weather entries dropped, the block's own play then",
+        station_id, len(doubles),
+    )
+    return len(doubles)
 
 
 def blocks_keep_hourly(config: dict | None) -> bool:
@@ -664,10 +713,12 @@ async def _reconcile_blocks(
                 QueueEntry.station_id == station_id,
                 QueueEntry.status == "pending",
                 QueueEntry.source == "auto",
-                QueueEntry.timing_mode.is_(None),
+                # any timing: since timing_mode exists every one has it, and a purge
+                # of only untimed ones left Main's built-in hourly pair queued beside
+                # its block's own time and weather (2026-11-22)
                 QueueEntry.preempt_at.isnot(None),
                 QueueEntry.preempt_at > earliest,
-                Asset.category.in_(("time_announcement", "weather_spot")),
+                Asset.category.in_(ANNOUNCEMENT_CATEGORIES),
             )
         )
         for entry in legacy.scalars().all():
@@ -725,6 +776,7 @@ async def _reconcile_blocks(
         ))
         added += 1
     await db.flush()
+    removed += await drop_double_announcements(db, station_id, earliest)
     if added or removed:
         logger.info("Program blocks for station %s: +%d -%d", station_id, added, removed)
     return {
