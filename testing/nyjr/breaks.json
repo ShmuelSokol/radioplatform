@@ -2418,5 +2418,16 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  YAAKOV EASAV OLAM HABAH"
+ },
+ {
+  "start_utc": "2026-11-22T13:05:14Z",
+  "start_et": "2026-11-22 08:05:14",
+  "hour_et": "2026-11-22 08:00",
+  "spots": 2,
+  "total_seconds": 84,
+  "spot_seconds": "55 29",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Benny Kulanu Nelech - Tashiru"
  }
 ]
