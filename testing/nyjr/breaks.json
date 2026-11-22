@@ -2154,5 +2154,16 @@
   "block_names": "Krias Shema Al HaMitah",
   "items": "Krias Shema Al HaMitah | Krias Shema Al HaMitah",
   "next_item": "Chanukah - Al Hanisim"
+ },
+ {
+  "start_utc": "2026-11-22T00:09:03Z",
+  "start_et": "2026-11-21 19:09:03",
+  "hour_et": "2026-11-21 19:00",
+  "spots": 1,
+  "total_seconds": 61,
+  "spot_seconds": "61",
+  "block_names": "More Stories for Kids",
+  "items": "More Stories for Kids",
+  "next_item": "Schachter  R. Fischel - Chanukah Story Part 1"
  }
 ]
