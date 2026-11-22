@@ -2676,11 +2676,11 @@
   "start_utc": "2026-11-22T19:03:04Z",
   "start_et": "2026-11-22 14:03:04",
   "hour_et": "2026-11-22 14:00",
-  "spots": 2,
-  "total_seconds": null,
-  "spot_seconds": "62 ?",
+  "spots": 3,
+  "total_seconds": 154,
+  "spot_seconds": "62 77 15",
   "block_names": "Weather Schedule Sponsors",
-  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors",
-  "next_item": ""
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH   TO SEIR  SEIRAH"
  }
 ]
