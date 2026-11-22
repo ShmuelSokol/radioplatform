@@ -2258,11 +2258,11 @@
   "start_utc": "2026-11-22T05:03:35Z",
   "start_et": "2026-11-22 00:03:35",
   "hour_et": "2026-11-22 00:00",
-  "spots": 3,
-  "total_seconds": null,
-  "spot_seconds": "39 66 ?",
+  "spots": 4,
+  "total_seconds": 197,
+  "spot_seconds": "39 66 62 30",
   "block_names": "Mesivta D'Rakia | Kol B'Ramah Sponsors",
-  "items": "Mesivta D'Rakia | Mesivta D'Rakia | Kol B'Ramah Sponsors",
-  "next_item": ""
+  "items": "Mesivta D'Rakia | Mesivta D'Rakia | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Shlomo at Dr Ritchies - 5 Mizmor Ldavid Nigun"
  }
 ]
