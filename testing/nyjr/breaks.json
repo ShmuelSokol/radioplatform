@@ -2396,5 +2396,27 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors",
   "next_item": "Kosman R. Mishna - Eruvin 1"
+ },
+ {
+  "start_utc": "2026-11-22T12:14:32Z",
+  "start_et": "2026-11-22 07:14:32",
+  "hour_et": "2026-11-22 07:00",
+  "spots": 1,
+  "total_seconds": 41,
+  "spot_seconds": "41",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "7:15\tWerdyger Yisroel - Kivinu"
+ },
+ {
+  "start_utc": "2026-11-22T12:59:57Z",
+  "start_et": "2026-11-22 07:59:57",
+  "hour_et": "2026-11-22 07:00",
+  "spots": 3,
+  "total_seconds": 160,
+  "spot_seconds": "67 71 22",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  YAAKOV EASAV OLAM HABAH"
  }
 ]
