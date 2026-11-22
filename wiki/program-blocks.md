@@ -127,6 +127,10 @@ weather audio (that can call the voice service), so run lengths leave those out.
 ## An announcement never airs without its programme (2026-11-17)
 When a block's last recording (its programme) has nothing to play, the recordings before it (the announcement of it) are left out too, with the reason in the preview and Schedule Check (`_Resolver.resolve`). Jerusalem 20:00Z 2026-11-17 was a different case that code cannot catch: the "Hourly schedule announcement" block (every hour) plays a clip titled "KBR schedule: Daf Yomi (Jerusalem)" on its own, while the Daf Yomi block itself was switched off. Put an announcement in the same block as what it announces.
 
+An item marked `optional` ("Skip if missing" on the page) is not the programme: when it has nothing to play the block goes on without it and the items before it still play (Main's hourly package after the weather, whose promo, kids-in-car alert and Torah pieces have no recordings yet; 2026-11-22). Its reason still shows in the preview and Schedule Check.
+
+Main aired no weather on Thursday 2026-11-19 because its "Hourly schedule announcement" block (every hh:00) replaced the built-in hourly time and weather and had no `time` or `weather` item. A station whose blocks run every hour must put the time and weather in the hourly block (or set `blocks_keep_hourly`).
+
 ## Part of the year (`season_start` / `season_end`, 2026-11-18)
 
 A block may air only between two days of every year: `season_start` and `season_end`,

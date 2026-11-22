@@ -55,6 +55,7 @@ class ResolvedItem:
     title: str | None = None
     duration: float | None = None
     problem: str | None = None  # why nothing will play for this item
+    optional: bool = False  # the block goes without it when it has nothing to play
     open_place: bool = False  # a sponsor place no sponsorship has taken
 
 
@@ -400,7 +401,7 @@ class _Resolver:
                     await self._sponsor_items(planned, item_places(item), timed=bool(item.get("max_seconds")))
                 )
                 continue
-            out = ResolvedItem(kind=kind, label=label)
+            out = ResolvedItem(kind=kind, label=label, optional=bool(item.get("optional")))
             if kind == "asset":
                 asset = await self._asset(item.get("asset_id"))
                 if asset is None:
@@ -432,7 +433,7 @@ class _Resolver:
         # The block's programme (its last recording) has nothing to play: what comes
         # before it (an announcement of it) is left out too, so listeners never hear
         # "Daf Yomi" announced and then music (Jerusalem 2026-11-17)
-        recordings = [i for i in occurrence.items if i.kind in ("asset", "category")]
+        recordings = [i for i in occurrence.items if i.kind in ("asset", "category") and not i.optional]
         if len(recordings) > 1 and recordings[-1].problem:
             for item in recordings[:-1]:
                 if not item.problem:

@@ -241,12 +241,12 @@ async def test_timing_setting_api_and_queued_items_follow_it(client: AsyncClient
     url = "/api/v1/spot-schedules/timing-defaults"
     sid = str(station.id)
     r = await client.get(url, params={"station_id": sid}, headers=auth_headers)
-    assert r.json() == {"on_the_hour": "hard", "half_hour": "soft", "other": "soft", "half_hour_time_check": False}
+    assert r.json() == {"on_the_hour": "hard", "half_hour": "soft", "other": "soft", "half_hour_time_check": False, "sponsor_quiet_start": "", "sponsor_quiet_end": "", "sponsors_stop_before_blackout_minutes": 0}
 
     r = await client.put(url, json={"station_id": sid, "on_the_hour": "hard", "other": "soft",
                                     "half_hour": "hard", "half_hour_time_check": True}, headers=auth_headers)
     assert r.status_code == 200, r.text
-    assert r.json() == {"on_the_hour": "hard", "half_hour": "hard", "other": "soft", "half_hour_time_check": True}
+    assert r.json() == {"on_the_hour": "hard", "half_hour": "hard", "other": "soft", "half_hour_time_check": True, "sponsor_quiet_start": "", "sponsor_quiet_end": "", "sponsors_stop_before_blackout_minutes": 0}
     mode = (await db_session.execute(
         select(QueueEntry.timing_mode).where(QueueEntry.id == queued.id))).scalar()
     assert mode == "hard"

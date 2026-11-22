@@ -53,6 +53,15 @@ Spacing rules between sponsors are still to come.
 
 The planner reads `HolidayWindow` rows with `is_blackout` for the station (`load_blackouts`). A slot inside a blackout is not a slot: plays in a partly covered daypart are spread over the slots that remain (Friday afternoon before candle lighting, Saturday after it ends); a daypart that is entirely off the air is skipped. Skipped plays come back as `Unplaced` with `blackout` set, and the preview reports them under `off_air` (per window, with a count) instead of `unplaced`, because they are intended, not a problem for a manager to fix. `reconcile_spot_slots` uses the same plan, so queued slots inside a new or changed window are removed on the next refill.
 
+
+## Hours with no sponsorships (2026-11-22)
+
+Main follows 107.9: no sponsorships overnight, and none in the last minutes before Shabbos. Two station settings, both on Break settings (Sponsorship board, All contracts) and in `PUT /spot-schedules/timing-defaults`:
+
+- `automation_config.sponsor_quiet_hours` `{"start": "00:35", "end": "06:00"}`: every night; a start after the end runs past midnight.
+- `automation_config.sponsors_stop_before_blackout_minutes` (e.g. 45): the minutes before each Shabbos or Yom Tov blackout.
+
+`sponsor_rest_windows` turns them into `Blackout(..., sponsors_only=True)` and `load_sponsor_blackouts` adds them to the real blackouts for the planner (`plan_for_station`), the board (`sponsor_room`) and missed plays (`sponsor_delivery`). Nothing else (time checks, blocks, songs) sees them, so the station stays on the air; a block's sponsor places there simply stay empty. Plays that fall there are reported like Shabbos ones (`blackout` set, "no sponsorships then (quiet hours)"), not as missed. Tests: `tests/test_main_follows_1079.py`.
 ## Exact times and hard / soft timing
 
 A `SpotSchedule` with `fixed_times` ("07:00,13:30", station time) airs at those clock times on its days instead of being spread over dayparts. Exact times are planned first; spread plays skip a slot an exact time already holds, and two schedules asking for the same minute leave the later one unplaced.

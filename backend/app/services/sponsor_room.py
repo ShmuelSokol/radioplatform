@@ -27,7 +27,7 @@ from app.services.spot_schedule_service import (
     DAYPARTS,
     DEFAULT_SLOT_MINUTES,
     TIME_SLOTS,
-    load_blackouts,
+    load_sponsor_blackouts,
     plan_for_station,
     station_tz,
     talk_tier,
@@ -84,7 +84,7 @@ async def slot_room(db: AsyncSession, station: Station, days: int = 7, now: date
         for key, _a, _b in BOARD_SLOTS:
             cells[(day, key)] = Cell(day, key)
 
-    blackouts = await load_blackouts(db, station.id, start, end)
+    blackouts = await load_sponsor_blackouts(db, station, start, end)
 
     def dark(local: datetime) -> bool:
         at = local.astimezone(UTC)

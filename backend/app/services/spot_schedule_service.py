@@ -196,9 +196,18 @@ class Blackout:
     start: datetime
     end: datetime
     name: str
+    # True: the station is on the air but plays no sponsorships then (its quiet
+    # hours, or the minutes before Shabbos); see sponsor_rest_windows
+    sponsors_only: bool = False
 
     def covers(self, at: datetime) -> bool:
         return self.start <= at < self.end
+
+    @property
+    def why(self) -> str:
+        if self.sponsors_only:
+            return f"no sponsorships then ({self.name})"
+        return f"station is off the air ({self.name})"
 
 
 def station_tz(name: str | None) -> ZoneInfo:
@@ -350,7 +359,7 @@ def plan_spots(
                             local_date,
                             daypart_of(hour),
                             sched,
-                            f"station is off the air ({off.name})",
+                            off.why,
                             blackout=off,
                         )
                     )
@@ -422,7 +431,7 @@ def plan_spots(
                                     local_date,
                                     daypart,
                                     sched,
-                                    f"station is off the air ({off.name})",
+                                    off.why,
                                     blackout=off,
                                 )
                             )
@@ -548,7 +557,7 @@ def plan_spots(
                                 local_date,
                                 daypart,
                                 sched,
-                                f"station is off the air ({off_air.name})",
+                                off_air.why,
                                 blackout=off_air,
                             )
                         )
@@ -832,6 +841,73 @@ async def load_blackouts(
     return sorted(found, key=lambda b: b.start)
 
 
+def _hhmm(value) -> tuple[int, int] | None:
+    try:
+        hour, minute = (int(x) for x in str(value).split(":")[:2])
+    except (TypeError, ValueError):
+        return None
+    if 0 <= hour <= 24 and 0 <= minute < 60:
+        return hour, minute
+    return None
+
+
+def sponsor_rest_windows(
+    config: dict | None, tz: ZoneInfo, start: datetime, end: datetime, blackouts: list[Blackout]
+) -> list[Blackout]:
+    """Times the station is on the air but plays no sponsorships, from two station
+    settings (Main follows 107.9, 2026-11-22):
+
+    - `automation_config.sponsor_quiet_hours` {"start": "00:35", "end": "06:00"}:
+      every night (a start after the end runs past midnight);
+    - `automation_config.sponsors_stop_before_blackout_minutes` (e.g. 45): the
+      last minutes before each Shabbos or Yom Tov.
+    """
+    config = config or {}
+    found: list[Blackout] = []
+    quiet = config.get("sponsor_quiet_hours") or {}
+    a, b = _hhmm(quiet.get("start")), _hhmm(quiet.get("end"))
+    if a and b and a != b:
+        day = start.astimezone(tz).date() - timedelta(days=1)
+        last = end.astimezone(tz).date() + timedelta(days=1)
+        while day <= last:
+            midnight = datetime(day.year, day.month, day.day, tzinfo=tz)
+            begin = midnight + timedelta(hours=a[0], minutes=a[1])
+            stop = midnight + timedelta(hours=b[0], minutes=b[1])
+            if stop <= begin:
+                stop += timedelta(days=1)
+            begin, stop = begin.astimezone(UTC), stop.astimezone(UTC)
+            if begin < end and stop > start:
+                found.append(Blackout(begin, stop, "quiet hours", sponsors_only=True))
+            day += timedelta(days=1)
+    try:
+        before = int(config.get("sponsors_stop_before_blackout_minutes") or 0)
+    except (TypeError, ValueError):
+        before = 0
+    if before > 0:
+        for off in blackouts:
+            if off.sponsors_only:
+                continue
+            begin = off.start - timedelta(minutes=before)
+            if begin < end and off.start > start:
+                found.append(
+                    Blackout(begin, off.start, f"{before} min before {off.name}", sponsors_only=True)
+                )
+    return found
+
+
+async def load_sponsor_blackouts(
+    db: AsyncSession, station: Station, start: datetime, end: datetime
+) -> list[Blackout]:
+    """The station's blackouts plus the times it plays no sponsorships (see
+    sponsor_rest_windows): what the sponsorship planner, the board and missed
+    plays treat as no time for a sponsorship."""
+    blackouts = await load_blackouts(db, station.id, start, end)
+    rest = sponsor_rest_windows(
+        station.automation_config, station_tz(station.timezone), start, end, blackouts
+    )
+    return sorted(blackouts + rest, key=lambda b: b.start)
+
+
 async def plan_for_station(
     db: AsyncSession, station: Station, days: int = HORIZON_DAYS, now: datetime | None = None
 ) -> tuple[list[Placement], list[Unplaced]]:
@@ -844,8 +920,8 @@ async def plan_for_station(
     schedules = await airable_schedules(db, await load_station_schedules(db, station.id))
     tz = station_tz(station.timezone)
     minutes = (station.automation_config or {}).get("ad_slot_minutes") or DEFAULT_SLOT_MINUTES
-    blackouts = await load_blackouts(
-        db, station.id, now - timedelta(days=1), now + timedelta(days=days + 1)
+    blackouts = await load_sponsor_blackouts(
+        db, station, now - timedelta(days=1), now + timedelta(days=days + 1)
     )
     from app.services.program_block_service import load_breaks
 

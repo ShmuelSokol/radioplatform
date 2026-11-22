@@ -23,7 +23,7 @@ from app.services.spot_schedule_service import (
     _applies_on,
     as_utc,
     daypart_of,
-    load_blackouts,
+    load_sponsor_blackouts,
     parse_fixed_times,
     plan_for_station,
     station_tz,
@@ -115,7 +115,7 @@ async def delivery_for_sponsor(
             continue
         tz = station_tz(station.timezone)
         today = now.astimezone(tz).date()
-        blackouts = await load_blackouts(db, station.id, since, now)
+        blackouts = await load_sponsor_blackouts(db, station, since, now)
 
         for schedule in mine:
             aired = sorted(plays.get((str(station.id), str(schedule.asset_id)), []))

@@ -145,7 +145,7 @@ async def test_exact_time_spot_reaches_the_queue_with_its_timing(
     # the station default: make the on-the-hour slot soft, and let the schedule follow it
     url = "/api/v1/spot-schedules/timing-defaults"
     r = await client.get(url, params={"station_id": str(station_id)}, headers=auth_headers)
-    assert r.json() == {"on_the_hour": "hard", "half_hour": "soft", "other": "soft", "half_hour_time_check": False}
+    assert r.json() == {"on_the_hour": "hard", "half_hour": "soft", "other": "soft", "half_hour_time_check": False, "sponsor_quiet_start": "", "sponsor_quiet_end": "", "sponsors_stop_before_blackout_minutes": 0}
     r = await client.put(
         f"/api/v1/spot-schedules/{body['id']}", json={"timing_mode": None}, headers=auth_headers
     )
