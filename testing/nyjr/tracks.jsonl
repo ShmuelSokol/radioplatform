@@ -1337,3 +1337,7 @@
 {"start_utc": "2026-11-22T14:58:30Z", "start_epoch": 1795359510, "playlist_time": "9:58", "artist": "Sinai", "title": "Hamelech", "raw": "9:58\tSinai\tHamelech", "logged_utc": "2026-11-22T14:59:03Z"}
 {"start_utc": "2026-11-22T15:03:35Z", "start_epoch": 1795359815, "playlist_time": "10:03", "artist": "", "title": "Weather Sponsors", "raw": "10:03\tWeather Sponsors", "logged_utc": "2026-11-22T15:04:03Z"}
 {"start_utc": "2026-11-22T15:04:37Z", "start_epoch": 1795359877, "playlist_time": "10:04", "artist": "", "title": "Weather Sponsors", "raw": "10:04\tWeather Sponsors", "logged_utc": "2026-11-22T15:05:02Z"}
+{"start_utc": "2026-11-22T15:05:27Z", "start_epoch": 1795359927, "playlist_time": "10:05", "artist": "", "title": "Weather Sponsors", "raw": "10:05\tWeather Sponsors", "logged_utc": "2026-11-22T15:06:02Z"}
+{"start_utc": "2026-11-22T15:06:03Z", "start_epoch": 1795359963, "playlist_time": "10:06", "artist": "", "title": "Weather Sponsors", "raw": "10:06\tWeather Sponsors", "logged_utc": "2026-11-22T15:07:04Z"}
+{"start_utc": "2026-11-22T15:06:37Z", "start_epoch": 1795359997, "playlist_time": "10:06", "artist": "DR DAVE INTRO", "title": "HOW BITACHON WORKS", "raw": "10:06\tDR DAVE INTRO\tHOW BITACHON WORKS", "logged_utc": "2026-11-22T15:07:04Z"}
+{"start_utc": "2026-11-22T15:06:48Z", "start_epoch": 1795360008, "playlist_time": "10:06", "artist": "DR DAVE BITACHON", "title": "HOW BITACHON WORKS  13", "raw": "10:06\tDR DAVE BITACHON\tHOW BITACHON WORKS  13", "logged_utc": "2026-11-22T15:07:04Z"}
