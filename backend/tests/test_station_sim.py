@@ -127,7 +127,9 @@ CANDLE_ITEM = {"id": "5f0f0a00-0000-4000-8000-00000000c4d1", "title": "Candle li
 
 def _ending(after: bool = True, candle: str | None = None) -> dict:
     cfg = {"enabled": True, "song_asset_id": GOOD_SHABBOS["id"], "after_asset_id": SHOFAR["id"] if after else None}
-    if candle:
+    if candle == "every_week":
+        cfg["candle_every_week"] = CANDLE_ITEM["id"]
+    elif candle:
         cfg["candle_items"] = {candle: CANDLE_ITEM["id"]}
     return {"shabbos_ending": cfg}
 
@@ -177,14 +179,15 @@ async def test_good_shabbos_song_without_a_shofar(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_candle_lighting_item_last_song_before_it(tmp_path):
+@pytest.mark.parametrize("candle", ["2026-11-20", "every_week"])
+async def test_candle_lighting_item_last_song_before_it(tmp_path, candle):
     """Main following 107.9 (coordinator 2026-11-22): that Friday's 5-minute candle lighting
     announcement ends exactly at candle lighting, the Good Shabbos song right before it,
     then the shofar and the silence."""
     from tests.sim.run import PICK
 
     _, result = await simulate(EXPORT, datetime(2026, 11, 20, 15, 45, tzinfo=NY), 0.75, ["main"], tmp_path,
-                               overrides={PICK["main"]: _ending(candle="2026-11-20")},
+                               overrides={PICK["main"]: _ending(candle=candle)},
                                extra_assets=[GOOD_SHABBOS, SHOFAR, CANDLE_ITEM], regenerate_windows=True)
     print(result.report())
     for check in ("Erev Shabbos: song ends at candle lighting, shofar, then silence",

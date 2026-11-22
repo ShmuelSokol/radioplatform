@@ -13,6 +13,8 @@ Per station, `automation_config.shabbos_ending`:
                                    # announcement (a new recording each week, keyed by the
                                    # blackout's local date); it ends exactly at candle
                                    # lighting and the song ends where it starts
+     "candle_every_week": "<id>",  # optional: the same item every week (a sign-off with
+                                   # no times in it); a dated entry wins for its week
      "shabbos": true,              # Erev Shabbos (default true)
      "yom_tov": false}             # Erev Yom Tov too (default false)
 
@@ -84,6 +86,7 @@ def settings_of(config: dict | None) -> dict | None:
         "candle_items": {
             str(k): str(v) for k, v in (raw.get("candle_items") or {}).items() if v
         } if isinstance(raw.get("candle_items"), dict) else {},
+        "candle_every_week": str(raw["candle_every_week"]) if raw.get("candle_every_week") else None,
         "shabbos": raw.get("shabbos", True) is not False,
         "yom_tov": bool(raw.get("yom_tov", False)),
     }
@@ -216,7 +219,9 @@ async def reconcile(db: AsyncSession, station, now: datetime | None = None) -> d
     if window is not None:
         song = await _asset(db, cfg["song_asset_id"])
         after = await _asset(db, cfg["after_asset_id"])
-        candle = await _asset(db, cfg["candle_items"].get(window_date(window, station.timezone)))
+        candle = await _asset(
+            db, cfg["candle_items"].get(window_date(window, station.timezone)) or cfg["candle_every_week"]
+        )
         if candle is not None and not _may_air(candle):
             # Taken off the air or rejected: nothing placeholder or unapproved airs,
             # the week ends with the song as before
