@@ -34,7 +34,10 @@ for f in "$STATIONS"/*.env; do
   if [ -n "$STATUS" ] && ! printf '%s' "$STATUS" | grep -q "\"listenurl\":\"[^\"]*${MOUNT}\""; then
     ok=no; why="mount $MOUNT missing"
   fi
-  HLS="$HLS_ROOT/$SID/live.m3u8"
+  # The media playlist, rewritten with every 1 s segment. Not live.m3u8: that is the
+  # master playlist, written once at start (2026-11-22 14:09Z: watching it restarted Main
+  # every few minutes). radio.liq names it after its HLS stream ("mp3").
+  HLS="$HLS_ROOT/$SID/mp3.m3u8"
   if [ -f "$HLS" ] && [ $((now - $(stat -c %Y "$HLS"))) -gt 30 ]; then
     ok=no; why="HLS playlist not updated for $((now - $(stat -c %Y "$HLS"))) s"
   fi
