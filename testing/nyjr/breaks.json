@@ -2352,5 +2352,38 @@
   "block_names": "Rain Forest",
   "items": "Rain Forest",
   "next_item": "Yair Dalal - Dikklat Nour"
+ },
+ {
+  "start_utc": "2026-11-22T10:11:27Z",
+  "start_et": "2026-11-22 05:11:27",
+  "hour_et": "2026-11-22 05:00",
+  "spots": 1,
+  "total_seconds": 15,
+  "spot_seconds": "15",
+  "block_names": "Highest Frequncy",
+  "items": "Highest Frequncy",
+  "next_item": "5:11\tNakai - Red Wind"
+ },
+ {
+  "start_utc": "2026-11-22T10:35:50Z",
+  "start_et": "2026-11-22 05:35:50",
+  "hour_et": "2026-11-22 05:00",
+  "spots": 2,
+  "total_seconds": 66,
+  "spot_seconds": "14 52",
+  "block_names": "Kol B'Ramah  WMDI  107.9  Lakewood",
+  "items": "Kol B'Ramah  WMDI  107.9  Lakewood | Kol B'Ramah  WMDI  107.9  Lakewood",
+  "next_item": "5:36\tEyal Sela - Ethiopian"
+ },
+ {
+  "start_utc": "2026-11-22T10:59:58Z",
+  "start_et": "2026-11-22 05:59:58",
+  "hour_et": "2026-11-22 05:00",
+  "spots": 2,
+  "total_seconds": 76,
+  "spot_seconds": "70 6",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Sruly Bornstein - Arachin 5"
  }
 ]
