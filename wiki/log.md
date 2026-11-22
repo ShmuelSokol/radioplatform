@@ -509,4 +509,4 @@ INGEST 2026-11-22 program-blocks.md optional block items (skip if missing, not t
 UPDATE 2026-11-22 streaming-architecture.md kbr-engine-watch watches the HLS media playlist mp3.m3u8, not the master live.m3u8 (false restart of Main 14:09Z)
 UPDATE 2026-11-22 program-blocks.md block time/weather items vs kept built-in hourly: one per minute (drop_double_announcements), purge any timing, :30 cleared when switched off (Main aired time+weather twice 11:00 AM ET)
 UPDATE 2026-11-22 shabbos-ending.md weekly candle lighting announcement (candle_items by Friday date) ends at candle lighting, Good Shabbos song before it; missing/off-air week falls back to the song
-UPDATE 2026-11-22 station-simulator.md test_station_sim.py runs in its own CI job backend-sim beside backend-test (the one job hit 22 of 30 min, PR 491 was cut off)
+UPDATE 2026-11-22 station-simulator.md test_station_sim.py runs in its own CI job backend-sim (two halves by -k) beside backend-test (the one job hit 22 of 30 min, PR 491 was cut off)

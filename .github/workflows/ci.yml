@@ -92,12 +92,20 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
         run: pytest tests/ -v --tb=short --durations=25 --ignore=tests/test_station_sim.py
 
-  # The station simulator's broadcast-day scenarios (tests/test_station_sim.py, about 13
-  # min and growing with every scenario) run in their own job beside backend-test, so
-  # neither job nears its limit. SQLite only: no Postgres, Redis or Node to start.
+  # The station simulator's broadcast-day scenarios (tests/test_station_sim.py, 17 min on
+  # a runner of its own and growing with every scenario) run beside backend-test in two
+  # halves of about 8 min, so no job nears its limit. SQLite only: no Postgres, Redis or
+  # Node to start. A new scenario lands in the second half (`not` the first's names);
+  # move names between them when one half passes about 20 min.
   backend-sim:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        part:
+          - "motzei or candle_lighting_item or daf_yomi"
+          - "not (motzei or candle_lighting_item or daf_yomi)"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -110,7 +118,9 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Run simulator scenarios
         working-directory: backend
-        run: pytest tests/test_station_sim.py -v --tb=short --durations=15
+        env:
+          PART: ${{ matrix.part }}
+        run: pytest tests/test_station_sim.py -k "$PART" -v --tb=short --durations=15
 
   frontend-lint:
     runs-on: ubuntu-latest
