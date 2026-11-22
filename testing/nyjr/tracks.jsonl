@@ -1151,3 +1151,4 @@
 {"start_utc": "2026-11-21T23:57:44Z", "start_epoch": 1795305464, "playlist_time": "18:57", "artist": "Naftoli Kempeh  Elul", "title": "V'Havienu", "raw": "18:57\tNaftoli Kempeh  Elul\tV'Havienu", "logged_utc": "2026-11-21T23:58:01Z"}
 {"start_utc": "2026-11-22T00:03:15Z", "start_epoch": 1795305795, "playlist_time": "19:03", "artist": "", "title": "Krias Shema Al HaMitah", "raw": "19:03\tKrias Shema Al HaMitah", "logged_utc": "2026-11-22T00:04:02Z"}
 {"start_utc": "2026-11-22T00:04:47Z", "start_epoch": 1795305887, "playlist_time": "19:04", "artist": "", "title": "Krias Shema Al HaMitah", "raw": "19:04\tKrias Shema Al HaMitah", "logged_utc": "2026-11-22T00:05:02Z"}
+{"start_utc": "2026-11-22T00:05:16Z", "start_epoch": 1795305916, "playlist_time": "19:05", "artist": "Chanukah", "title": "Al Hanisim", "raw": "19:05\tChanukah\tAl Hanisim", "logged_utc": "2026-11-22T00:06:02Z"}
