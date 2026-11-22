@@ -2682,5 +2682,60 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH   TO SEIR  SEIRAH"
+ },
+ {
+  "start_utc": "2026-11-22T19:11:01Z",
+  "start_et": "2026-11-22 14:11:01",
+  "hour_et": "2026-11-22 14:00",
+  "spots": 1,
+  "total_seconds": 84,
+  "spot_seconds": "84",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Pruzbul - Shteig"
+ },
+ {
+  "start_utc": "2026-11-22T19:19:56Z",
+  "start_et": "2026-11-22 14:19:56",
+  "hour_et": "2026-11-22 14:00",
+  "spots": 1,
+  "total_seconds": 35,
+  "spot_seconds": "35",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors",
+  "next_item": "Fried Chanukah - HaNeiros Hallelu"
+ },
+ {
+  "start_utc": "2026-11-22T19:29:56Z",
+  "start_et": "2026-11-22 14:29:56",
+  "hour_et": "2026-11-22 14:00",
+  "spots": 1,
+  "total_seconds": 64,
+  "spot_seconds": "64",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors",
+  "next_item": "Craimer - V'choo Kechoson"
+ },
+ {
+  "start_utc": "2026-11-22T19:38:56Z",
+  "start_et": "2026-11-22 14:38:56",
+  "hour_et": "2026-11-22 14:00",
+  "spots": 1,
+  "total_seconds": 35,
+  "spot_seconds": "35",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors",
+  "next_item": "14:39\t2nd Dance 2\tVafilu Bhastorah - Yehuda Green"
+ },
+ {
+  "start_utc": "2026-11-22T20:02:12Z",
+  "start_et": "2026-11-22 15:02:12",
+  "hour_et": "2026-11-22 15:00",
+  "spots": 3,
+  "total_seconds": 131,
+  "spot_seconds": "62 54 15",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "DR DAVE INTRO - HOW BITACHON WORKS"
  }
 ]
