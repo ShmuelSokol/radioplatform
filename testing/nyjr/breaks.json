@@ -2495,5 +2495,71 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors | Weather Sponsors",
   "next_item": "DR DAVE INTRO - HOW BITACHON WORKS"
+ },
+ {
+  "start_utc": "2026-11-22T15:09:22Z",
+  "start_et": "2026-11-22 10:09:22",
+  "hour_et": "2026-11-22 10:00",
+  "spots": 1,
+  "total_seconds": 19,
+  "spot_seconds": "19",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  YAAKOV"
+ },
+ {
+  "start_utc": "2026-11-22T15:11:05Z",
+  "start_et": "2026-11-22 10:11:05",
+  "hour_et": "2026-11-22 10:00",
+  "spots": 1,
+  "total_seconds": 54,
+  "spot_seconds": "54",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "10:12\tBENNY FRIEDMAN COMP\tBENNY COMP 36 - 42"
+ },
+ {
+  "start_utc": "2026-11-22T15:29:21Z",
+  "start_et": "2026-11-22 10:29:21",
+  "hour_et": "2026-11-22 10:00",
+  "spots": 4,
+  "total_seconds": 211,
+  "spot_seconds": "83 31 65 32",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "MIRACLES 3 - LITTLE ONE"
+ },
+ {
+  "start_utc": "2026-11-22T15:59:57Z",
+  "start_et": "2026-11-22 10:59:57",
+  "hour_et": "2026-11-22 10:00",
+  "spots": 2,
+  "total_seconds": 116,
+  "spot_seconds": "62 54",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Ask Rabbi Leff  Kosher - Starbucks"
+ },
+ {
+  "start_utc": "2026-11-22T16:03:10Z",
+  "start_et": "2026-11-22 11:03:10",
+  "hour_et": "2026-11-22 11:00",
+  "spots": 1,
+  "total_seconds": 5,
+  "spot_seconds": "5",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Shalem"
+ },
+ {
+  "start_utc": "2026-11-22T16:04:10Z",
+  "start_et": "2026-11-22 11:04:10",
+  "hour_et": "2026-11-22 11:00",
+  "spots": 1,
+  "total_seconds": null,
+  "spot_seconds": "?",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": ""
  }
 ]
