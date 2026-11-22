@@ -621,7 +621,8 @@ def shabbos_ending(res: Result, ctx: Context):
             at = f"{w['start'].astimezone(tz):%a %H:%M:%S}"
             # That Friday's candle lighting announcement, when there is one, is last and
             # ends at candle lighting; the song ends where it starts
-            candle_id = (cfg.get("candle_items") or {}).get(f"{w['start'].astimezone(tz):%Y-%m-%d}")
+            candle_id = (cfg.get("candle_items") or {}).get(f"{w['start'].astimezone(tz):%Y-%m-%d}") \
+                or cfg.get("candle_every_week")
             song_end = ws
             candle = None
             if candle_id:

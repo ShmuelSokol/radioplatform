@@ -273,3 +273,28 @@ async def test_candle_item_added_later_moves_the_song(db_session):
     mine = sorted([e for e in await _pending(db_session, station.id) if e.source == shabbos_ending.SOURCE], key=_at)
     assert [e.asset_id for e in mine] == [song.id, candle.id]
     assert abs((_at(mine[0]) - (CANDLES - timedelta(seconds=576.29))).total_seconds()) < 0.01
+
+
+@pytest.mark.asyncio
+async def test_same_item_every_week(db_session):
+    """A sign-off with no times in it (Shmuel 2026-11-22): one recording every Friday;
+    a dated entry for a week wins over it."""
+    station, _, song, _, _ = await _setup(db_session, after=False)
+    weekly = await _candle(db_session, station, length=20.0, date="2026-11-13")  # dated entry for another week
+    cfg = dict(station.automation_config["shabbos_ending"])
+    cfg["candle_every_week"] = str(weekly.id)
+    station.automation_config = {"shabbos_ending": cfg}
+    await db_session.commit()
+    await shabbos_ending.reconcile(db_session, station, NOW)
+    mine = sorted([e for e in await _pending(db_session, station.id) if e.source == shabbos_ending.SOURCE], key=_at)
+    assert [e.asset_id for e in mine] == [song.id, weekly.id]
+    assert _at(mine[1]) == CANDLES - timedelta(seconds=20)
+
+    dated = await _candle(db_session, station, length=30.0)  # this week's own recording
+    cfg = dict(station.automation_config["shabbos_ending"])
+    cfg["candle_every_week"] = str(weekly.id)
+    station.automation_config = {"shabbos_ending": cfg}
+    await db_session.commit()
+    await shabbos_ending.reconcile(db_session, station, NOW + timedelta(minutes=1))
+    mine = sorted([e for e in await _pending(db_session, station.id) if e.source == shabbos_ending.SOURCE], key=_at)
+    assert [e.asset_id for e in mine] == [song.id, dated.id]
