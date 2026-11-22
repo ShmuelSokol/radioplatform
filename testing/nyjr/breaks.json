@@ -2429,5 +2429,38 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors",
   "next_item": "Benny Kulanu Nelech - Tashiru"
+ },
+ {
+  "start_utc": "2026-11-22T13:30:16Z",
+  "start_et": "2026-11-22 08:30:16",
+  "hour_et": "2026-11-22 08:00",
+  "spots": 3,
+  "total_seconds": 193,
+  "spot_seconds": "52 75 66",
+  "block_names": "Sponsors",
+  "items": "Sponsors | Sponsors | Sponsors",
+  "next_item": "Shmuly Schneider - Hisyatzivu"
+ },
+ {
+  "start_utc": "2026-11-22T13:59:57Z",
+  "start_et": "2026-11-22 08:59:57",
+  "hour_et": "2026-11-22 08:00",
+  "spots": 3,
+  "total_seconds": 148,
+  "spot_seconds": "63 82 3",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
+  "next_item": "Pliskin R. Zeleg - 73 Write Image Building Notes"
+ },
+ {
+  "start_utc": "2026-11-22T14:05:01Z",
+  "start_et": "2026-11-22 09:05:01",
+  "hour_et": "2026-11-22 09:00",
+  "spots": 1,
+  "total_seconds": null,
+  "spot_seconds": "?",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": ""
  }
 ]
