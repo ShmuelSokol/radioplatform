@@ -2737,5 +2737,49 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "DR DAVE INTRO - HOW BITACHON WORKS"
+ },
+ {
+  "start_utc": "2026-11-22T20:07:39Z",
+  "start_et": "2026-11-22 15:07:39",
+  "hour_et": "2026-11-22 15:00",
+  "spots": 1,
+  "total_seconds": 19,
+  "spot_seconds": "19",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Why Concubine"
+ },
+ {
+  "start_utc": "2026-11-22T20:10:34Z",
+  "start_et": "2026-11-22 15:10:34",
+  "hour_et": "2026-11-22 15:00",
+  "spots": 1,
+  "total_seconds": 55,
+  "spot_seconds": "55",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Yeshiva Boys Choir Chanukah - chanukah"
+ },
+ {
+  "start_utc": "2026-11-22T20:34:43Z",
+  "start_et": "2026-11-22 15:34:43",
+  "hour_et": "2026-11-22 15:00",
+  "spots": 4,
+  "total_seconds": 204,
+  "spot_seconds": "39 65 33 67",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "15:38\tYeedle - Va'Ani Ashir"
+ },
+ {
+  "start_utc": "2026-11-22T21:03:15Z",
+  "start_et": "2026-11-22 16:03:15",
+  "hour_et": "2026-11-22 16:00",
+  "spots": 2,
+  "total_seconds": null,
+  "spot_seconds": "69 ?",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": ""
  }
 ]
