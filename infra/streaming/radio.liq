@@ -98,6 +98,74 @@ if not hello_done() then
   end)
 end
 
+# ── Blackouts (Shabbos, Yom Tov): known to the engine itself ─────────────────
+# Inside a blackout nothing may be heard but its silence (and items the backend marks
+# kbr_blackout_ok=1, the shofar at candle lighting). On the first engine Shabbos
+# (2026-11-20) the silence the backend handed over ended at once (a start cue at the end
+# of the file), the lanes ran dry and the emergency music played on Main for 12 minutes.
+# So the engine keeps the blackout windows itself and, while one is on, mutes everything
+# not marked, and falls back to blank instead of the emergency music, whatever the
+# backend or the silence file does. The windows are asked for at start and every 30 s
+# and kept on disk, so an engine started with no backend still knows them; a failed ask
+# keeps the last list.
+blackout_windows = ref([])
+blackout_file = "#{emergency_dir}.blackouts"
+def blackout_parse(text) =
+  # One window per line: "<start> <end>" in unix seconds
+  list.fold(fun (acc, ln) -> begin
+    parts = string.split(separator=" ", string.trim(ln))
+    if list.length(parts) == 2 then
+      a = float_of_string(default=-1., list.nth(parts, 0))
+      b = float_of_string(default=-1., list.nth(parts, 1))
+      if a > 0. and b > a then list.append(acc, [(a, b)]) else acc end
+    else
+      acc
+    end
+  end, [], string.split(separator="\n", text))
+end
+def blackout_text(ws) =
+  string.concat(separator="\n", list.map(fun (w) -> "#{fst(w)} #{snd(w)}", ws))
+end
+try
+  if file.exists(blackout_file) then
+    blackout_windows := blackout_parse(file.contents(blackout_file))
+    log.important("blackout: #{list.length(blackout_windows())} window(s) read from disk")
+  end
+catch err do
+  log.important("blackout: could not read #{blackout_file}: #{err}")
+end
+def fetch_blackouts() =
+  try
+    resp = http.get(headers=auth_headers, timeout=8., "#{backend_url}/playout/#{station_id}/blackouts")
+    if resp.status_code == 200 then
+      let json.parse (data : {lines : string}) = resp
+      ws = blackout_parse(data.lines)
+      if blackout_text(ws) != blackout_text(blackout_windows()) then
+        log.important("blackout: #{list.length(ws)} window(s) from the backend")
+        try
+          file.write(data=blackout_text(ws), blackout_file)
+        catch err do
+          log.important("blackout: could not keep the windows on disk: #{err}")
+        end
+      end
+      blackout_windows := ws
+    else
+      log.important("blackout: backend answered #{resp.status_code}; keeping the last windows")
+    end
+  catch err do
+    log.important("blackout: windows not fetched (#{err}); keeping the last ones")
+  end
+end
+fetch_blackouts()
+thread.run.recurrent(fast=false, delay=30., fun () -> begin
+  fetch_blackouts()
+  30.
+end)
+def blackout_on() =
+  t = time()
+  list.exists(fun (w) -> t >= fst(w) and t < snd(w), blackout_windows())
+end
+
 # ── Main lane: ask the backend for the next track ────────────────────────────
 # Last entry from the music lane that went on air
 last_main_entry = ref("")
@@ -561,7 +629,10 @@ on_air_quiet = switch(id="host_gate", track_sensitive=false, [
   ({live_on()}, fallback(id="host_lane", track_sensitive=false, [live_feed, blank(id="host_on_air")]))
 ])
 
-radio = fallback(id="radio", track_sensitive=false, [on_air_quiet, timed, main, hold, emergency])
+# In a blackout, quiet instead of the emergency music when nothing else plays
+blackout_quiet = switch(id="blackout_gate", track_sensitive=false, [(blackout_on, blank(id="blackout_blank"))])
+
+radio = fallback(id="radio", track_sensitive=false, [on_air_quiet, timed, main, hold, blackout_quiet, emergency])
 radio = amplify(override=null(), {master_gain()}, radio)
 # What is on air from the lanes above. Start reports and /status read this, so an item
 # mixed over the top (below) never counts as a change of track.
@@ -571,6 +642,24 @@ program = radio
 overlay_queue = request.queue(id="overlay", interactive=false)
 overlay = amplify(1., override="liq_amplify", overlay_queue)
 radio = add(normalize=false, [program, overlay])
+
+# In a blackout only items marked kbr_blackout_ok=1 are heard (the backend marks its
+# silence and the item at candle lighting). Anything else that reaches the air (a song
+# handed over by mistake, an interrupted song coming back, a mix-over, the emergency
+# music) is muted. The alert lane (below) is never muted: an EAS alert airs on Shabbos.
+blackout_ok = ref(false)
+program.on_track(fun (m) -> blackout_ok := m["kbr_blackout_ok"] == "1")
+program.on_metadata(fun (m) -> if m["kbr_entry"] != "" then blackout_ok := m["kbr_blackout_ok"] == "1" end)
+blackout_muted = ref(false)
+def blackout_gain() =
+  muted = blackout_on() and not blackout_ok()
+  if muted != blackout_muted() then
+    blackout_muted := muted
+    log.important(if muted then "blackout: muted (what is on air is not the blackout's silence)" else "blackout: not muted" end)
+  end
+  if muted then 0. else 1. end
+end
+radio = amplify(override=null(), blackout_gain, radio)
 
 # ── Emergency alert lane: above everything, live shows and time checks included ─
 # An emergency alert (EAS) takes the station over the moment it arrives, plays whole,
@@ -942,7 +1031,8 @@ emergency_seq = ref(0)
 def send_started(m) =
   entry = m["kbr_entry"]
   # No entry: an emergency file, or the quiet held just before a hard timed item
-  lane = if entry != "" then m["kbr_lane"] elsif live_on() then "live" elsif hold_open() then "hold" else "emergency" end
+  lane = if entry != "" then m["kbr_lane"] elsif live_on() then "live" elsif hold_open() then "hold"
+         elsif blackout_on() then "blackout" else "emergency" end
   was = on_air_lane()
   on_air_lane := lane
   if lane == "timed" and timed_pending() > 0 and not list.mem(entry, timed_dropped()) then timed_pending := timed_pending() - 1 end
@@ -1017,6 +1107,9 @@ def send_started(m) =
     end
   elsif lane == "live" then
     log.important("live: a host is on air; the stream is quiet")
+  elsif lane == "blackout" then
+    # Not reported: the blackout's quiet when no silence item is there (never music)
+    log.important("blackout: nothing to play; quiet")
   else
     if lane == "main" and main_interrupted() then
       # The music lane came back on a new track, not the interrupted song (after a long
@@ -1181,6 +1274,12 @@ control("/live", fun (req) -> begin
 end)
 
 # Drop the pre-loaded next track (the queue changed) and ask the backend again
+# Fetch the blackout windows now (the backend asks when one ended early or was removed)
+control("/blackouts", fun (_) -> begin
+  thread.run(fast=false, fetch_blackouts)
+  '{"ok":true}'
+end)
+
 control("/flush", fun (_) -> begin
   flush_count := flush_count() + 1
   ask_after := 0.
@@ -1295,7 +1394,9 @@ control("/status", fun (_) -> begin
   json.stringify({ok=true, entry_id=m["kbr_entry"], title=m["title"],
                   main_remaining=left, timed_waiting=timed_queue.length() + list.length(timed_room()),
                   live=live_on(), instance=engine_instance,
-                  alert=alert_on_air(), alert_id=alert_current(), alert_source=alert_source()})
+                  alert=alert_on_air(), alert_id=alert_current(), alert_source=alert_source(),
+                  blackout=blackout_on(), blackout_muted=blackout_muted(),
+                  blackout_windows=list.length(blackout_windows())})
 end)
 
 # Optional: also write the output to a WAV file (testing only)
@@ -1375,6 +1476,25 @@ thread.run.recurrent(fast=false, delay=1., fun () -> begin
     end
   end
   1.
+end)
+
+# ── Stall watchdog ───────────────────────────────────────────────────────────
+# Liquidsoap 2.2 cannot bring a failed output back inside a running engine: its clock
+# stops for good. Main 2026-11-20 22:16Z: under overload the Icecast connection broke,
+# the clock stopped (0.5% CPU, no audio, the mount gone) and stayed so for a day. If no
+# audio frame has gone out for stall_seconds the engine exits and systemd starts it again
+# within seconds (it says hello and carries on from the queue; in a blackout it knows the
+# windows from disk at once).
+stall_seconds = float_of_string(environment.get(default="30.", "KBR_STALL_SECONDS"))
+last_frame = ref(time())
+radio = source.on_frame(radio, fun () -> last_frame := time())
+thread.run.recurrent(fast=false, delay=10., fun () -> begin
+  quiet_for = time() - last_frame()
+  if quiet_for > stall_seconds then
+    log(level=2, "watchdog: no audio for #{quiet_for} s (the output stalled); restarting the engine")
+    shutdown()
+  end
+  5.
 end)
 
 # ── One MP3 encode for both outputs ──────────────────────────────────────────

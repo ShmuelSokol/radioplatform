@@ -503,3 +503,4 @@ UPDATE 2026-11-19 playlist-generation.md pull_late_id also takes out an ID waiti
 UPDATE 2026-11-20 playlist-generation.md a station ID already past max_minutes keeps only 1 min from breaks (id_margin)
 UPDATE 2026-11-20 playlist-generation.md program-blocks.md station IDs go in the breaks (placement hourly default / every_block), between songs only by choice
 UPDATE 2026-11-20 program-blocks.md leftover between-songs IDs cleared at top-up when placement is not between_songs (drop_misplaced)
+INGEST 2026-11-21 streaming-architecture.md engine keeps blackout windows itself (GET /playout/{id}/blackouts, on disk), blank lane + mute of unmarked items in a blackout, never emergency music; stall watchdogs (radio.liq 30 s exit, kbr-engine-watch timer, air watch stream_stopped); swap/fwupd/MemoryMax in setup.sh; silent-file cues dropped

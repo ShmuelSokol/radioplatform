@@ -280,9 +280,9 @@ def test_the_engine_holds_quiet_before_a_hard_item_instead_of_emergency_music():
     # hard item, the emergency lane must not fill in. The hold lane sits above it, is
     # open only while a timed item is loaded and due within 8 s, and is not reported.
     liq = (INFRA / "radio.liq").read_text()
-    assert "[on_air_quiet, timed, main, hold, emergency]" in liq
+    assert "[on_air_quiet, timed, main, hold, blackout_quiet, emergency]" in liq
     assert "(timed_pending() > 0 and left < 8. and left > -2.)" in liq
-    assert 'elsif hold_open() then "hold" else "emergency"' in liq
+    assert 'elsif hold_open() then "hold"' in liq and 'elsif blackout_on() then "blackout" else "emergency" end' in liq
     assert "engine_proto = 6" in liq
 
 
@@ -591,3 +591,30 @@ def test_the_same_item_back_within_a_moment_is_not_reported_as_a_new_start():
     # lane, within 1.5 s); a song coming back after a dropped timed item still counts
     assert 'entry == previous_reported()' in liq
     assert 'm["kbr_lane"] == on_air_lane() and time() - reported_at() < 1.5' in liq
+
+
+def test_in_a_blackout_the_engine_never_falls_back_to_emergency_music():
+    """Shabbos 2026-11-20: the backend's silence ended at once and the emergency music played
+    on Main for 12 minutes. The engine now keeps the windows itself: a blank lane above the
+    emergency music while one is on, everything muted but items marked kbr_blackout_ok, the
+    windows kept on disk for a start with no backend, and asked for again on /blackouts."""
+    liq = (INFRA / "radio.liq").read_text()
+    assert 'blackout_quiet = switch(id="blackout_gate", track_sensitive=false, [(blackout_on, blank(id="blackout_blank"))])' in liq
+    assert 'm["kbr_blackout_ok"] == "1"' in liq
+    assert "radio = amplify(override=null(), blackout_gain, radio)" in liq
+    assert 'blackout_file = "#{emergency_dir}.blackouts"' in liq
+    assert '"#{backend_url}/playout/#{station_id}/blackouts"' in liq
+    assert 'control("/blackouts"' in liq
+    # the gain sits below the alert lane: an EAS alert is never muted
+    assert liq.index("blackout_gain, radio)") < liq.index('radio = fallback(id="with_alert"')
+
+
+def test_a_stalled_engine_restarts_itself_and_is_watched_from_outside():
+    liq = (INFRA / "radio.liq").read_text()
+    assert "radio = source.on_frame(radio, fun () -> last_frame := time())" in liq
+    assert "shutdown()" in liq.split("# ── Stall watchdog")[1].split("# ── One MP3 encode")[0]
+    unit = (INFRA / "kbr-engine@.service").read_text()
+    assert "Restart=always" in unit and "MemoryMax=" in unit
+    setup = (INFRA / "setup.sh").read_text()
+    assert "kbr-engine-watch.timer" in setup and "/swapfile" in setup and "fwupd" in setup
+    assert "OnUnitActiveSec=20" in (INFRA / "kbr-engine-watch.timer").read_text()

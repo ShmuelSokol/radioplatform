@@ -14,6 +14,7 @@ What it reports, per active station (none during a live show):
 | engine_drift | engine station: the engine's /status entry differs from the site's playing entry for 20 s, or the engine does not answer | critical + push |
 | overrun | the item shown on air is 30 s past its length (site and air parted) | warning |
 | timed_skipped | a time check, weather or block/sponsorship entry marked skipped with no twin (same asset and time) that aired | warning |
+| stream_stopped | engine station: no levels from the engine (sent every second while audio goes out) for 60 s, also in blackouts and live shows; the engine restarts itself after 30 s, so this means it did not come back (Main 2026-11-20 22:16Z was off air a day unseen) | critical + push |
 | box_clock | a local FM box reports its clock behind its plan (it plays music only until set); also during a live show | critical + push |
 | box_disk, box_audio | a local FM box has under 5 GB free, or items of its plan are not on its disk for 15 min (see [local-fm-box](local-fm-box.md)) | warning |
 

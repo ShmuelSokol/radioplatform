@@ -275,6 +275,13 @@ def stored_analysis(metadata_extra) -> dict:
     analysis = (metadata_extra or {}).get("audio_analysis") if isinstance(metadata_extra, dict) else None
     if not isinstance(analysis, dict):
         return {}
+    if not _cues_make_sense(analysis):
+        # A start cue at or past the end: the analysis of a silent (or nearly silent)
+        # file, "silence from 0 to the end". Handed over, the item ended the moment it
+        # started (the blackout's "Silence (5 min)", cue_in 300.017 of 300.01 s: the
+        # emergency music on Shabbos 2026-11-20). The file plays whole instead.
+        analysis = {k: v for k, v in analysis.items()
+                    if k not in ("cue_in_seconds", "cue_out_seconds", "cross_start_seconds")}
     if analysis.get("version", 1) < ANALYSIS_VERSION:
         analysis = {k: analysis[k] for k in ("cue_in_seconds", "replay_gain_db", "loudness_lufs") if k in analysis}
     # The level always follows today's rule, not the one in force when the item was
@@ -286,6 +293,22 @@ def stored_analysis(metadata_extra) -> dict:
         if analysis.get("replay_gain_db") != gain:
             analysis = {**analysis, "replay_gain_db": gain}
     return analysis
+
+
+def _cues_make_sense(analysis: dict) -> bool:
+    """False when the start cue is at or past the end cue (or the item's end)."""
+    def num(key):
+        v = analysis.get(key)
+        return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    cue_in = num("cue_in_seconds")
+    if cue_in is None or cue_in <= 0:
+        return True
+    cue_out = num("cue_out_seconds")
+    end = cue_out if cue_out is not None and cue_out > 0 else num("duration")
+    if cue_out is not None and cue_out <= 0 and end is None:
+        return False  # an end cue of 0 with a start cue after it
+    return end is None or cue_in < end - 0.5
 
 
 def replay_gain_for(loudness_lufs: float) -> float:

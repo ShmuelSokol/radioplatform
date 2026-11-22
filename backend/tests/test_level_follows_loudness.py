@@ -80,3 +80,44 @@ def test_a_silence_is_never_handed_its_analysis():
         uri = playout_engine.build_uri(entry, lane)
         assert "liq_cue_in" not in uri and "liq_cue_out" not in uri and "liq_amplify" not in uri
         assert uri.endswith(":https://files.example.test/silence_5min.mp3")
+
+
+def test_a_start_cue_at_the_end_is_never_trusted():
+    from app.models.asset import stored_analysis
+
+    # production's silence: start cue past the end, end cue 0
+    a = stored_analysis({"audio_analysis": {"version": 2, "duration": 300.01, "cue_in_seconds": 300.017,
+                                            "cue_out_seconds": 0.0, "replay_gain_db": 0.0}})
+    assert "cue_in_seconds" not in a and "cue_out_seconds" not in a
+    # an old analysis keeps only cue_in: still dropped when it is past the end
+    a = stored_analysis({"audio_analysis": {"version": 1, "duration": 60.0, "cue_in_seconds": 60.0}})
+    assert "cue_in_seconds" not in a
+    # an ordinary song keeps its cues
+    a = stored_analysis({"audio_analysis": {"version": 99, "duration": 200.0, "cue_in_seconds": 0.4,
+                                            "cue_out_seconds": 197.0}})
+    assert a["cue_in_seconds"] == 0.4 and a["cue_out_seconds"] == 197.0
+
+
+def test_the_analysis_of_a_silent_file_has_no_cues(monkeypatch):
+    from app.services import audio_analysis_service as aas
+
+    monkeypatch.setattr(aas, "measure_loudness", lambda p: (None, None))
+    monkeypatch.setattr(aas, "get_audio_duration", lambda p: 300.01)
+    monkeypatch.setattr(aas, "detect_silence", lambda p, **k: [{"start": 0.0, "end": 300.01}])
+    a = aas._analyze_file("x.mp3")
+    assert a["cue_in_seconds"] == 0.0 and a["cue_out_seconds"] == 300.01
+
+
+def test_blackout_items_are_marked_for_the_engine():
+    from types import SimpleNamespace
+
+    def uri(kind, source):
+        asset = SimpleNamespace(id="a", title="t", artist=None, album=None, asset_type=kind, duration=30.0,
+                                file_path="https://files.example.test/a.mp3", category=None, metadata_extra={})
+        entry = SimpleNamespace(id="e", asset=asset, asset_id="a", station_id="s", preempt_at=None,
+                                source=source, timing_mode=None, block_id=None)
+        return playout_engine.build_uri(entry, "main")
+
+    assert 'kbr_blackout_ok="1"' in uri("silence", "blackout")
+    assert 'kbr_blackout_ok="1"' in uri("music", playout_engine.SHABBOS_END_SOURCE)
+    assert "kbr_blackout_ok" not in uri("music", "auto")

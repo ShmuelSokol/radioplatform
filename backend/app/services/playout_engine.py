@@ -267,8 +267,12 @@ def get_state(station_id) -> EngineState:
 def reset_state(station_id=None) -> None:
     if station_id is None:
         _states.clear()
+        _backstop_made.clear()
+        _levels_at.clear()
     else:
         _states.pop(str(station_id), None)
+        _backstop_made.pop(str(station_id), None)
+        _levels_at.pop(str(station_id), None)
 
 
 def token_ok(presented: str | None) -> bool:
@@ -569,6 +573,10 @@ def build_uri(entry: QueueEntry, lane: str) -> str | None:
         "title": asset.title or "",
         "artist": asset.artist or "",
     }
+    # What may be heard in a blackout: the engine mutes everything else while one is on
+    # (radio.liq "Blackouts"), its silence and the item at candle lighting excepted
+    if is_silence or entry.source == SHABBOS_END_SOURCE:
+        fields["kbr_blackout_ok"] = "1"
     cue_in = analysis.get("cue_in_seconds")
     # A shiur paused by a timed item carries on where it stopped
     if resume_offset(entry) > 0 and not is_silence:
@@ -1109,6 +1117,8 @@ async def handle_next(
 
 
 SHABBOS_END_SOURCE = "shabbos_end"  # shabbos_ending.SOURCE
+BACKSTOP_EVERY_SECONDS = 60.0
+_backstop_made: dict[str, float] = {}
 
 
 async def _blackout_silence(db: AsyncSession, station_id) -> QueueEntry | None:
@@ -1118,6 +1128,14 @@ async def _blackout_silence(db: AsyncSession, station_id) -> QueueEntry | None:
     with the timed lane, which never got ready, and the music lane had nothing)."""
     from app.models.asset import Asset
 
+    # At most one such row a minute per station: when the engine used each one up at
+    # once (a silence that ended as it started) a new row was made every 1-2 s all
+    # Shabbos. Meanwhile the engine is told there is nothing and stays quiet (it knows
+    # the blackout itself).
+    mono = time.monotonic()
+    if mono - _backstop_made.get(str(station_id), -1e9) < BACKSTOP_EVERY_SECONDS:
+        return None
+    _backstop_made[str(station_id)] = mono
     try:
         silence = (await db.execute(
             select(Asset).where(Asset.asset_type == "silence").order_by(Asset.created_at, Asset.id).limit(1)
@@ -1137,6 +1155,47 @@ async def _blackout_silence(db: AsyncSession, station_id) -> QueueEntry | None:
         logger.error("Station %s: could not queue blackout silence: %s", station_id, e)
         await db.rollback()
         return None
+
+
+BLACKOUT_DAYS = 10
+
+# When each engine last sent its on-air levels (every second while audio goes out). They
+# stop when its output has stalled (Main 2026-11-20 22:16Z: off air for a day, unseen);
+# air watch raises stream_stopped (services/air_watch.py).
+_levels_at: dict[str, float] = {}
+
+
+def note_levels(station_id) -> None:
+    _levels_at[str(station_id)] = time.monotonic()
+
+
+def levels_quiet_for(station_id) -> float | None:
+    """Seconds since the engine's last levels, None if it sent none since this start."""
+    at = _levels_at.get(str(station_id))
+    return None if at is None else time.monotonic() - at
+
+
+async def blackout_lines(db: AsyncSession, station_id, now: datetime | None = None) -> str:
+    """The station's blackout windows from an hour ago to BLACKOUT_DAYS ahead, one per
+    line: "<start> <end>" (unix seconds), for the engine (GET /playout/{id}/blackouts)."""
+    from app.models.holiday_window import HolidayWindow
+    from app.services.station_service import window_covers_station
+
+    now = now or datetime.now(UTC)
+    rows = (await db.execute(
+        select(HolidayWindow).where(
+            HolidayWindow.is_blackout.is_(True),
+            HolidayWindow.end_datetime > now - timedelta(hours=1),
+            HolidayWindow.start_datetime < now + timedelta(days=BLACKOUT_DAYS),
+        ).order_by(HolidayWindow.start_datetime)
+    )).scalars().all()
+
+    def ts(t: datetime) -> float:
+        return (t if t.tzinfo else t.replace(tzinfo=UTC)).timestamp()
+
+    return "\n".join(f"{ts(w.start_datetime):.3f} {ts(w.end_datetime):.3f}"
+                     for w in rows if window_covers_station(w, station_id)
+                     and ts(w.end_datetime) > ts(w.start_datetime))
 
 
 async def _blacked_out(db: AsyncSession, station_id) -> bool:
@@ -2518,6 +2577,13 @@ async def tick(db: AsyncSession, station) -> None:
             )
             current = res.unique().scalars().first()
             if current and current.asset and current.asset.asset_type == "silence":
+                # The engine keeps the windows itself and stays muted until it has them
+                # again (radio.liq "Blackouts"): a window ended early or removed would
+                # keep it quiet for up to its next ask. Ask it to fetch them now.
+                try:
+                    await _command("/blackouts", {}, station_id=station_id)
+                except Exception as e:
+                    logger.warning("Engine blackout refresh failed for %s: %s", station_id, e)
                 # Silence already in the engine's timed lane (a blackout's silence is
                 # hard-timed at its start, so all of it went there at once) is dropped
                 # there too: /flush clears only the music lane, and /skip would just

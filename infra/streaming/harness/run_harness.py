@@ -4430,6 +4430,122 @@ async def sc_shabbos_long_restart(h: Harness) -> None:
     h.check(name, bool(tail) and all(n.startswith("song") for n in tail), f"station music after the window: {tail}")
 
 
+async def sc_blackout_engine_guard(h: Harness, broken: str = "silence") -> None:
+    """The engine itself keeps the blackout (radio.liq "Blackouts", after Shabbos
+    2026-11-20, when the backend's silence ended at once and the emergency music played on
+    Main for 12 minutes). A window with the emergency folder full and
+      broken="silence": the silence file missing (404), so no silence can load at all;
+      broken="backend":  the backend stopped and the engine restarted inside the window,
+                         so it knows the window only from disk.
+    Nothing is heard inside the window, and the station's music comes back after it."""
+    import shutil
+
+    from sqlalchemy import delete
+
+    from app.db.engine import async_session_factory
+    from app.models.holiday_window import HolidayWindow
+
+    name = f"blackout_guard_{broken}"
+    await wait_music(h)
+    cur = await h.on_air()
+    await h.clear_pending()
+    await h.queue([(n, {}) for n in ("song1", "song2", "song3", "song4", "song5", "song6")
+                   if not cur or h.assets[n] != cur.asset_id][:4])
+    eng_log = h.stack.dir / "engine.log"
+    eng_offset = eng_log.stat().st_size
+    wid = uuid.uuid4()
+    # The engine asks for the windows every 30 s: start after its next ask
+    start = at(45)
+    end = start + timedelta(seconds=200)
+    silence = h.stack.audio / "silence.mp3"
+    aside = h.stack.dir / "silence-aside.mp3"
+    emerg = sorted((h.stack.dir / "emergency").glob("*.mp3"))
+    h.check(name, bool(emerg), f"emergency folder has files ({len(emerg)})")
+    async with async_session_factory() as db:
+        db.add(HolidayWindow(id=wid, name=f"Harness guard {broken}", start_datetime=start, end_datetime=end,
+                             is_blackout=True, affected_stations={"station_ids": [str(STATION_ID)]}))
+        await db.commit()
+    backend_down = False
+    try:
+        if broken == "silence":
+            shutil.move(str(silence), str(aside))
+        await asyncio.sleep(max(0, start.timestamp() - time.time()) + 30)
+        measured_from = start.timestamp() + 3
+        if broken == "backend":
+            p = h.stack.backend
+            os.killpg(p.pid, signal.SIGTERM)
+            p.wait(timeout=15)
+            h.stack.procs.remove(p)
+            backend_down = True
+            log(f"{name}: backend stopped at +{time.time() - start.timestamp():.0f} s; restarting the engine")
+            h.stack.restart_engine()
+            measured_from = time.time() + 1
+            await asyncio.sleep(60)
+            h.stack.start_backend()
+            backend_down = False
+            log(f"{name}: backend back at +{time.time() - start.timestamp():.0f} s")
+        await asyncio.sleep(max(0, end.timestamp() - time.time()))
+        heard = h.heard(measured_from, end.timestamp() - 2)
+        loud = [(round(t - start.timestamp(), 1), round(db)) for t, db, _ in heard if db > -45]
+        h.check(name, not loud, f"nothing heard inside the window ({len(loud)} loud windows: {loud[:5]})")
+        h.check(name, len(heard) > 50, f"the stream was measured ({len(heard)} windows)")
+        with open(eng_log, errors="replace") as f:
+            f.seek(eng_offset)
+            elog = f.read()
+        if broken == "backend":
+            h.check(name, "window(s) read from disk" in elog, "the restarted engine read the windows from disk")
+        h.check(name, "blackout:" in elog, "the engine logged its blackout guard")
+    finally:
+        if backend_down:
+            h.stack.start_backend()
+        if aside.exists():
+            shutil.move(str(aside), str(silence))
+        async with async_session_factory() as db:
+            await db.execute(delete(HolidayWindow).where(HolidayWindow.id == wid))
+            await db.commit()
+    await asyncio.sleep(45)
+    tail = [n for _, n in timeline(h.heard(time.time() - 8, time.time() - 1))]
+    h.check(name, bool(tail) and all(n.startswith("song") for n in tail), f"station music after the window: {tail}")
+
+
+async def sc_blackout_ended_early_unmutes(h: Harness) -> None:
+    """A window removed while it is on (staff ended it early): the engine, which keeps
+    the windows itself, is asked to fetch them again and the music is back at once, not
+    after its next 30 s ask."""
+    from sqlalchemy import delete
+
+    from app.db.engine import async_session_factory
+    from app.models.holiday_window import HolidayWindow
+
+    name = "blackout_ended_early_unmutes"
+    await wait_music(h)
+    cur = await h.on_air()
+    await h.clear_pending()
+    await h.queue([(n, {}) for n in ("song1", "song2", "song3", "song4", "song5", "song6")
+                   if not cur or h.assets[n] != cur.asset_id][:4])
+    wid = uuid.uuid4()
+    start = at(45)
+    async with async_session_factory() as db:
+        db.add(HolidayWindow(id=wid, name="Harness early end", start_datetime=start,
+                             end_datetime=start + timedelta(hours=2),
+                             is_blackout=True, affected_stations={"station_ids": [str(STATION_ID)]}))
+        await db.commit()
+    try:
+        await asyncio.sleep(max(0, start.timestamp() - time.time()) + 40)
+        heard = h.heard(start.timestamp() + 3, time.time() - 1)
+        loud = [(round(t - start.timestamp(), 1), round(db)) for t, db, _ in heard if db > -45]
+        h.check(name, not loud, f"quiet inside the window ({len(loud)} loud)")
+    finally:
+        async with async_session_factory() as db:
+            await db.execute(delete(HolidayWindow).where(HolidayWindow.id == wid))
+            await db.commit()
+    removed = time.time()
+    await asyncio.sleep(25)
+    tail = [n for _, n in timeline(h.heard(time.time() - 6, time.time() - 1))]
+    h.check(name, bool(tail) and all(n.startswith("song") for n in tail),
+            f"music within 25 s of the window's removal: {tail}")
+    log(f"{name}: removed at {removed:.0f}")
+
 async def sc_shabbos_alert(h: Harness, restart: bool = False) -> None:
     """An emergency alert from the EAS box during Shabbos (Shmuel 2026-11-20: radios are
     left on over Shabbos so that an emergency announcement is heard). The station keeps
@@ -5024,6 +5140,9 @@ SCENARIOS = {
     "shabbos_silence": sc_shabbos_silence,
     "shabbos_alert": sc_shabbos_alert,
     "shabbos_long_restart": sc_shabbos_long_restart,
+    "blackout_guard_silence": lambda h: sc_blackout_engine_guard(h, "silence"),
+    "blackout_guard_backend": lambda h: sc_blackout_engine_guard(h, "backend"),
+    "blackout_ended_early_unmutes": sc_blackout_ended_early_unmutes,
     "shabbos_alert_engine_restart": lambda h: sc_shabbos_alert(h, restart=True),
     "output_limiter": sc_output_limiter,
     "fit_before_hour": sc_fit_before_hour,

@@ -1,0 +1,6 @@
+[Unit]
+Description=KBR Live: restart a playout engine whose output has stalled
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/kbr-engine-watch

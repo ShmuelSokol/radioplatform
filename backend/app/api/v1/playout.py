@@ -87,6 +87,18 @@ async def plan(
     return await playout_plan.build_plan(db, station_id, hours, days=days)
 
 
+@router.get("/{station_id}/blackouts")
+async def blackouts(
+    station_id: uuid.UUID = Depends(_require_engine),
+    db: AsyncSession = Depends(get_db),
+):
+    """The blackout windows (Shabbos, Yom Tov) from an hour ago to BLACKOUT_DAYS ahead,
+    one per line as "<start> <end>" in unix seconds. The engine asks every minute and
+    keeps them on disk: while one is on it mutes everything but the blackout's silence
+    and never falls back to its emergency music (radio.liq "Blackouts")."""
+    return {"lines": await playout_engine.blackout_lines(db, station_id)}
+
+
 @router.post("/{station_id}/box-upload")
 async def box_upload(
     request: Request,
@@ -294,6 +306,7 @@ async def levels_report(body: LevelsReport, station_id: uuid.UUID = Depends(_req
     from app.api.v1.websocket import broadcast_levels
 
     broadcast_levels(str(station_id), body.l, body.r, body.step)
+    playout_engine.note_levels(station_id)
     return {"ok": True}
 
 

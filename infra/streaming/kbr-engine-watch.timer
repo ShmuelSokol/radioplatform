@@ -1,0 +1,10 @@
+[Unit]
+Description=KBR Live: check the playout engines' output every 20 s
+
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=20
+AccuracySec=2
+
+[Install]
+WantedBy=timers.target
