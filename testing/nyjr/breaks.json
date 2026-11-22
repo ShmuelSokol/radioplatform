@@ -2775,11 +2775,11 @@
   "start_utc": "2026-11-22T21:03:15Z",
   "start_et": "2026-11-22 16:03:15",
   "hour_et": "2026-11-22 16:00",
-  "spots": 2,
-  "total_seconds": null,
-  "spot_seconds": "69 ?",
+  "spots": 3,
+  "total_seconds": 160,
+  "spot_seconds": "69 56 35",
   "block_names": "Weather Schedule Sponsors",
-  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors",
-  "next_item": ""
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Why 2nd Camp Survives"
  }
 ]
