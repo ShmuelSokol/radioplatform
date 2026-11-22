@@ -2286,5 +2286,27 @@
   "block_names": "Highest Frequncy",
   "items": "Highest Frequncy",
   "next_item": "Naftoli Kempeh  Ana Eilech - Vayebser Lanu"
+ },
+ {
+  "start_utc": "2026-11-22T07:31:15Z",
+  "start_et": "2026-11-22 02:31:15",
+  "hour_et": "2026-11-22 02:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Night Mix ID",
+  "items": "Night Mix ID",
+  "next_item": "WEBER  KORBAN - OD YOSEF CHAI"
+ },
+ {
+  "start_utc": "2026-11-22T08:03:46Z",
+  "start_et": "2026-11-22 03:03:46",
+  "hour_et": "2026-11-22 03:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Highest Frequncy",
+  "items": "Highest Frequncy",
+  "next_item": "Aslan Rav - Segulah   Hafkeid Alav"
  }
 ]
