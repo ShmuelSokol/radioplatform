@@ -9,11 +9,18 @@ Per station, `automation_config.shabbos_ending`:
     {"enabled": true,
      "song_asset_id": "<id>",      # ends exactly at the blackout's start
      "after_asset_id": "<id>",     # optional: airs at the blackout's start, before the silence
+     "candle_items": {"2026-11-27": "<id>"},  # optional: that Friday's candle lighting
+                                   # announcement (a new recording each week, keyed by the
+                                   # blackout's local date); it ends exactly at candle
+                                   # lighting and the song ends where it starts
      "shabbos": true,              # Erev Shabbos (default true)
      "yom_tov": false}             # Erev Yom Tov too (default false)
 
 The blackout's start is candle lighting (shabbos_service: sunset - 18, or - 40 in
-Israel), so the song ends where the silence would begin.
+Israel), so the song ends where the silence would begin. When that week has a candle
+lighting item (Main, following 107.9, coordinator 2026-11-22), the item is last and ends
+at candle lighting, and the song is back-timed to end where the item starts. A week with
+no item keeps the song as the last thing.
 
 How it airs: the song is a hard timed entry at `start - its played length`; the
 item after it is a hard timed entry at `start`, placed first in the blackout's own
@@ -74,6 +81,9 @@ def settings_of(config: dict | None) -> dict | None:
     return {
         "song_asset_id": str(raw["song_asset_id"]),
         "after_asset_id": str(raw["after_asset_id"]) if raw.get("after_asset_id") else None,
+        "candle_items": {
+            str(k): str(v) for k, v in (raw.get("candle_items") or {}).items() if v
+        } if isinstance(raw.get("candle_items"), dict) else {},
         "shabbos": raw.get("shabbos", True) is not False,
         "yom_tov": bool(raw.get("yom_tov", False)),
     }
@@ -130,12 +140,31 @@ async def _next_window(db: AsyncSession, station, now: datetime, cfg: dict) -> H
     return None
 
 
-def plan(window_start: datetime, song: Asset | None, after: Asset | None) -> list[tuple[Asset, datetime]]:
-    """(item, time) pairs: the song ending at the window's start, the item after it at the start."""
+def window_date(window: HolidayWindow, tz: str) -> str:
+    """The blackout's start date in station time (the key of `candle_items`)."""
+    try:
+        return _aware(window.start_datetime).astimezone(ZoneInfo(tz or "UTC")).date().isoformat()
+    except Exception:
+        return _aware(window.start_datetime).date().isoformat()
+
+
+def plan(
+    window_start: datetime, song: Asset | None, after: Asset | None, candle: Asset | None = None
+) -> list[tuple[Asset, datetime]]:
+    """(item, time) pairs, earliest first: the song, then (when there is one) the candle
+    lighting item ending at the window's start, the song ending where it starts; the
+    item after them at the start."""
     start = _aware(window_start)
     out: list[tuple[Asset, datetime]] = []
+    end = start
+    candle_at = None
+    if candle is not None and played_seconds(candle) > 0:
+        candle_at = start - timedelta(seconds=played_seconds(candle))
+        end = candle_at
     if song is not None:
-        out.append((song, start - timedelta(seconds=played_seconds(song))))
+        out.append((song, end - timedelta(seconds=played_seconds(song))))
+    if candle_at is not None:
+        out.append((candle, candle_at))
     if after is not None:
         out.append((after, start))
     return out
@@ -149,6 +178,17 @@ async def _asset(db: AsyncSession, asset_id: str | None) -> Asset | None:
     except ValueError:
         return None
     return (await db.execute(select(Asset).where(Asset.id == key))).scalar_one_or_none()
+
+
+def _may_air(asset: Asset) -> bool:
+    """Not do-not-play, not a placeholder, not rejected in review (models.asset.not_placeholder)."""
+    from app.models.asset import NEVER_AUTO_CATEGORIES, NEVER_AUTO_TITLES
+
+    if (getattr(asset, "review_status", None) or "") == "rejected":
+        return False
+    if (asset.category or "").strip().lower() in NEVER_AUTO_CATEGORIES:
+        return False
+    return (asset.title or "").strip().lower() not in NEVER_AUTO_TITLES
 
 
 async def _ours(db: AsyncSession, station_id) -> list[QueueEntry]:
@@ -176,11 +216,18 @@ async def reconcile(db: AsyncSession, station, now: datetime | None = None) -> d
     if window is not None:
         song = await _asset(db, cfg["song_asset_id"])
         after = await _asset(db, cfg["after_asset_id"])
+        candle = await _asset(db, cfg["candle_items"].get(window_date(window, station.timezone)))
+        if candle is not None and not _may_air(candle):
+            # Taken off the air or rejected: nothing placeholder or unapproved airs,
+            # the week ends with the song as before
+            logger.warning("Shabbos ending on station %s: candle lighting item %s may not air", station.id, candle.id)
+            candle = None
         if song is None:
             logger.warning("Shabbos ending on station %s: song %s not in the library", station.id, cfg["song_asset_id"])
         _analyse_soon(song)
         _analyse_soon(after)
-        wanted = plan(window.start_datetime, song, after)
+        _analyse_soon(candle)
+        wanted = plan(window.start_datetime, song, after, candle)
         if wanted and wanted[0][1] <= settle:
             # The ending is already handed over (or about to be): leave it as it is
             return changed

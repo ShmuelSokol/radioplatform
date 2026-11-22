@@ -202,3 +202,74 @@ async def test_other_copies_of_the_song_leave_the_queue(db_session):
     left = {e.id for e in await _pending(db_session, station.id)}
     assert ids[1] in left and ids[2] in left and ids[4] in left
     assert ids[3] not in left and ids[5] not in left
+
+
+async def _candle(db, station, *, length=300.0, date="2026-11-20", category="shabbos_ending", **extra):
+    item = Asset(id=uuid.uuid4(), title="Candle lighting 4:18", asset_type="jingle", category=category,
+                 duration=length, file_path="c.mp3", **extra)
+    db.add(item)
+    await db.flush()
+    cfg = dict(station.automation_config["shabbos_ending"])
+    cfg["candle_items"] = {date: str(item.id)}
+    station.automation_config = {"shabbos_ending": cfg}
+    await db.commit()
+    return item
+
+
+@pytest.mark.asyncio
+async def test_candle_lighting_item_ends_at_candle_lighting_song_before_it(db_session):
+    station, other, song, shofar, silence = await _setup(db_session, after=False)
+    candle = await _candle(db_session, station)
+    await shabbos_ending.reconcile(db_session, station, NOW)
+    mine = sorted([e for e in await _pending(db_session, station.id) if e.source == shabbos_ending.SOURCE], key=_at)
+    assert [e.asset_id for e in mine] == [song.id, candle.id]
+    assert _at(mine[1]) == CANDLES - timedelta(seconds=300)
+    assert abs((_at(mine[0]) - (CANDLES - timedelta(seconds=300 + 276.29))).total_seconds()) < 0.01
+    assert all(e.timing_mode == "hard" for e in mine)
+    assert await _pending(db_session, other.id) == []
+    again = await shabbos_ending.reconcile(db_session, station, NOW + timedelta(seconds=5))
+    assert again == {"added": 0, "removed": 0, "cleared": 0}
+
+
+@pytest.mark.asyncio
+async def test_candle_item_with_shofar_after(db_session):
+    station, _, song, shofar, _ = await _setup(db_session)
+    candle = await _candle(db_session, station, length=200.0)
+    await shabbos_ending.reconcile(db_session, station, NOW)
+    rows = await _pending(db_session, station.id)
+    mine = sorted([e for e in rows if e.source == shabbos_ending.SOURCE], key=_at)
+    assert [e.asset_id for e in mine] == [song.id, candle.id, shofar.id]
+    group = [e for e in rows if _at(e) == CANDLES]
+    assert group[0].asset_id == shofar.id
+
+
+@pytest.mark.asyncio
+async def test_other_weeks_item_not_used(db_session):
+    """Last week's recording says last week's time: a week with no item ends with the song."""
+    station, _, song, _, _ = await _setup(db_session, after=False)
+    await _candle(db_session, station, date="2026-11-13")
+    await shabbos_ending.reconcile(db_session, station, NOW)
+    mine = [e for e in await _pending(db_session, station.id) if e.source == shabbos_ending.SOURCE]
+    assert [e.asset_id for e in mine] == [song.id]
+    assert abs((_at(mine[0]) - (CANDLES - timedelta(seconds=276.29))).total_seconds()) < 0.01
+
+
+@pytest.mark.parametrize("kw", [{"category": "do_not_play"}, {"review_status": "rejected"}])
+@pytest.mark.asyncio
+async def test_candle_item_off_the_air_not_used(db_session, kw):
+    station, _, song, _, _ = await _setup(db_session, after=False)
+    await _candle(db_session, station, **kw)
+    await shabbos_ending.reconcile(db_session, station, NOW)
+    mine = [e for e in await _pending(db_session, station.id) if e.source == shabbos_ending.SOURCE]
+    assert [e.asset_id for e in mine] == [song.id]
+
+
+@pytest.mark.asyncio
+async def test_candle_item_added_later_moves_the_song(db_session):
+    station, _, song, _, _ = await _setup(db_session, after=False)
+    await shabbos_ending.reconcile(db_session, station, NOW)
+    candle = await _candle(db_session, station)
+    await shabbos_ending.reconcile(db_session, station, NOW + timedelta(minutes=1))
+    mine = sorted([e for e in await _pending(db_session, station.id) if e.source == shabbos_ending.SOURCE], key=_at)
+    assert [e.asset_id for e in mine] == [song.id, candle.id]
+    assert abs((_at(mine[0]) - (CANDLES - timedelta(seconds=576.29))).total_seconds()) < 0.01

@@ -377,6 +377,13 @@ function FillerPick({ value, onChange }: {
   );
 }
 
+/** The coming Friday (today on a Friday) as YYYY-MM-DD, this device's calendar. */
+function nextFriday(today: Date = new Date()): string {
+  const d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  d.setDate(d.getDate() + ((5 - d.getDay() + 7) % 7));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function LibraryPick({ value, onChange, testId, label, placeholder, searchLabel, clearLabel, disabled, children }: {
   value: { id: string; title: string } | null;
   onChange: (v: { id: string; title: string } | null) => void;
@@ -604,6 +611,15 @@ function AutomationConfig({ stationId, config, onSave, saving }: {
     ending.after_asset_id ? { id: String(ending.after_asset_id), title: String(ending.after_title || 'Chosen item') } : null);
   const [endingShabbos, setEndingShabbos] = useState<boolean>(ending.shabbos !== false);
   const [endingYomTov, setEndingYomTov] = useState<boolean>(ending.yom_tov === true);
+  // This week's candle lighting announcement (a new recording each week), keyed by the Friday's date
+  const [candleItems, setCandleItems] = useState<Record<string, { id: string; title: string }>>(() => {
+    const ids = (ending.candle_items ?? {}) as Record<string, string>;
+    const titles = (ending.candle_titles ?? {}) as Record<string, string>;
+    const out: Record<string, { id: string; title: string }> = {};
+    for (const [d, id] of Object.entries(ids)) if (id) out[d] = { id: String(id), title: String(titles[d] || 'Chosen item') };
+    return out;
+  });
+  const comingFriday = nextFriday();
   const omerCfg = (config.omer_count ?? {}) as Record<string, any>;
   const [omerOn, setOmerOn] = useState<boolean>(omerCfg.enabled !== false);
   const [omerSwitch, setOmerSwitch] = useState<string>(String(omerCfg.switch_minutes ?? 0));
@@ -640,6 +656,8 @@ function AutomationConfig({ stationId, config, onSave, saving }: {
         after_title: endingAfter?.title ?? null,
         shabbos: endingShabbos,
         yom_tov: endingYomTov,
+        candle_items: Object.fromEntries(Object.entries(candleItems).map(([d, v]) => [d, v.id])),
+        candle_titles: Object.fromEntries(Object.entries(candleItems).map(([d, v]) => [d, v.title])),
       },
       omer_count: {
         ...omerCfg,
@@ -755,7 +773,8 @@ function AutomationConfig({ stationId, config, onSave, saving }: {
             <span className="block mt-1 text-xs text-gray-500">
               This song is started at just the right moment so it ends exactly at candle lighting (the start of the
               station&apos;s Shabbos silence). The item after it (the shofar) plays right at candle lighting, then the
-              silence. Time checks, sponsorships and station IDs are kept out of its way. Needs a song.
+              silence. With a candle lighting announcement for that Friday, the announcement ends at candle lighting
+              and the song just before it. Time checks, sponsorships and station IDs are kept out of its way. Needs a song.
             </span>
           </span>
         </label>
@@ -768,6 +787,29 @@ function AutomationConfig({ stationId, config, onSave, saving }: {
             searchLabel="Search the library for the item at candle lighting" clearLabel="Nothing (silence right away)">
             Give it the category shabbos_ending in the Library so it never plays at any other time.
           </LibraryPick>
+          <LibraryPick value={candleItems[comingFriday] ?? null} disabled={!endingOn}
+            onChange={v => setCandleItems(prev => {
+              const next = { ...prev };
+              if (v) next[comingFriday] = v; else delete next[comingFriday];
+              return next;
+            })}
+            testId="shabbos-ending-candle"
+            label={`Candle lighting announcement for Friday ${comingFriday}`}
+            placeholder="Search the library (this week's recording)"
+            searchLabel="Search the library for this week's candle lighting announcement" clearLabel="None this week">
+            Optional, a new recording each week with that week&apos;s time. It ends exactly at candle lighting and the
+            song ends just before it. A week with none ends with the song. Category shabbos_ending.
+          </LibraryPick>
+          {Object.keys(candleItems).filter(d => d !== comingFriday).sort().map(d => (
+            <div key={d} className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-600"
+              data-testid={`shabbos-ending-candle-${d}`}>
+              <span>Friday {d}: {candleItems[d].title}</span>
+              <button type="button" disabled={!endingOn} className="underline"
+                onClick={() => setCandleItems(prev => { const n = { ...prev }; delete n[d]; return n; })}>
+                Remove
+              </button>
+            </div>
+          ))}
           <div className="mt-3 flex flex-wrap gap-4">
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={endingShabbos} disabled={!endingOn}
