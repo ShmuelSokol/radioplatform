@@ -2825,5 +2825,38 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Kibud Av"
+ },
+ {
+  "start_utc": "2026-11-22T22:07:36Z",
+  "start_et": "2026-11-22 17:07:36",
+  "hour_et": "2026-11-22 17:00",
+  "spots": 1,
+  "total_seconds": 54,
+  "spot_seconds": "54",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Simcha Friedman - Od Yavo Hayom"
+ },
+ {
+  "start_utc": "2026-11-22T22:31:38Z",
+  "start_et": "2026-11-22 17:31:38",
+  "hour_et": "2026-11-22 17:00",
+  "spots": 4,
+  "total_seconds": 189,
+  "spot_seconds": "31 64 66 28",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "EITAN KATZ  TERUMAH - NIGUN ON THE ROOF"
+ },
+ {
+  "start_utc": "2026-11-22T22:59:59Z",
+  "start_et": "2026-11-22 17:59:59",
+  "hour_et": "2026-11-22 17:00",
+  "spots": 4,
+  "total_seconds": 265,
+  "spot_seconds": "63 59 59 84",
+  "block_names": "Childrens Hour",
+  "items": "Childrens Hour | Childrens Hour | Childrens Hour | Childrens Hour",
+  "next_item": "Reb Alter  Chanukah - Dreidel 3"
  }
 ]
