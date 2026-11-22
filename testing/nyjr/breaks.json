@@ -2583,5 +2583,16 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "Pliskin My Father My King - 49 Healing"
+ },
+ {
+  "start_utc": "2026-11-22T17:05:21Z",
+  "start_et": "2026-11-22 12:05:21",
+  "hour_et": "2026-11-22 12:00",
+  "spots": 1,
+  "total_seconds": 5,
+  "spot_seconds": "5",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  CAF TO PACH"
  }
 ]
