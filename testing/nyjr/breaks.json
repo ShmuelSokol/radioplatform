@@ -2594,5 +2594,49 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  CAF TO PACH"
+ },
+ {
+  "start_utc": "2026-11-22T17:10:00Z",
+  "start_et": "2026-11-22 12:10:00",
+  "hour_et": "2026-11-22 12:00",
+  "spots": 1,
+  "total_seconds": 84,
+  "spot_seconds": "84",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Oneg - Habeit M'shamayim"
+ },
+ {
+  "start_utc": "2026-11-22T17:31:45Z",
+  "start_et": "2026-11-22 12:31:45",
+  "hour_et": "2026-11-22 12:00",
+  "spots": 3,
+  "total_seconds": 130,
+  "spot_seconds": "36 60 34",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Sheves Chaverim - Im HaShem"
+ },
+ {
+  "start_utc": "2026-11-22T17:59:57Z",
+  "start_et": "2026-11-22 12:59:57",
+  "hour_et": "2026-11-22 12:00",
+  "spots": 3,
+  "total_seconds": 154,
+  "spot_seconds": "62 77 15",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "Rabbi Leff Fund - 518 323 0376    ID 64848"
+ },
+ {
+  "start_utc": "2026-11-22T18:04:11Z",
+  "start_et": "2026-11-22 13:04:11",
+  "hour_et": "2026-11-22 13:00",
+  "spots": 1,
+  "total_seconds": 29,
+  "spot_seconds": "29",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  613 SHAMARTI"
  }
 ]
