@@ -2242,5 +2242,27 @@
   "block_names": "Mesivta D'Rakia",
   "items": "Mesivta D'Rakia | Mesivta D'Rakia",
   "next_item": "22:05\tWEINBERGER INTRO 718 - Intro"
+ },
+ {
+  "start_utc": "2026-11-22T04:10:46Z",
+  "start_et": "2026-11-21 23:10:46",
+  "hour_et": "2026-11-21 23:00",
+  "spots": 6,
+  "total_seconds": 280,
+  "spot_seconds": "30 53 68 76 49 4",
+  "block_names": "Mesivta D'Rakia | Kol B'Ramah Sponsors",
+  "items": "Mesivta D'Rakia | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH   YOSEF THE FLAME TO ESAV"
+ },
+ {
+  "start_utc": "2026-11-22T05:03:35Z",
+  "start_et": "2026-11-22 00:03:35",
+  "hour_et": "2026-11-22 00:00",
+  "spots": 2,
+  "total_seconds": null,
+  "spot_seconds": "39 ?",
+  "block_names": "Mesivta D'Rakia",
+  "items": "Mesivta D'Rakia | Mesivta D'Rakia",
+  "next_item": ""
  }
 ]
