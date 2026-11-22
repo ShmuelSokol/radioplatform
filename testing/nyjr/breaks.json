@@ -2165,5 +2165,49 @@
   "block_names": "More Stories for Kids",
   "items": "More Stories for Kids",
   "next_item": "Schachter  R. Fischel - Chanukah Story Part 1"
+ },
+ {
+  "start_utc": "2026-11-22T01:12:40Z",
+  "start_et": "2026-11-21 20:12:40",
+  "hour_et": "2026-11-21 20:00",
+  "spots": 5,
+  "total_seconds": 221,
+  "spot_seconds": "39 36 17 67 62",
+  "block_names": "Kol B'Ramah Sponsors | Weather Schedule Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "Micha Gamerman - Zochrenu Et Zion"
+ },
+ {
+  "start_utc": "2026-11-22T01:27:59Z",
+  "start_et": "2026-11-21 20:27:59",
+  "hour_et": "2026-11-21 20:00",
+  "spots": 1,
+  "total_seconds": 62,
+  "spot_seconds": "62",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors",
+  "next_item": "BARUCH LEVINE Lev Chodosh - Yehiyu Leratzon"
+ },
+ {
+  "start_utc": "2026-11-22T01:34:35Z",
+  "start_et": "2026-11-21 20:34:35",
+  "hour_et": "2026-11-21 20:00",
+  "spots": 4,
+  "total_seconds": 205,
+  "spot_seconds": "66 54 26 59",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Fried - Chazak"
+ },
+ {
+  "start_utc": "2026-11-22T02:01:05Z",
+  "start_et": "2026-11-21 21:01:05",
+  "hour_et": "2026-11-21 21:00",
+  "spots": 3,
+  "total_seconds": 185,
+  "spot_seconds": "83 39 63",
+  "block_names": "Mesivta D'Rakia",
+  "items": "Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia",
+  "next_item": "Deutsch Elie - Yedid Nefesh"
  }
 ]
