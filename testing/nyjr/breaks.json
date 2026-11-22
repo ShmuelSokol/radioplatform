@@ -2132,5 +2132,27 @@
   "block_names": "Childrens Hour",
   "items": "Childrens Hour",
   "next_item": "Eli Marcus - Av Harachamim."
+ },
+ {
+  "start_utc": "2026-11-21T23:30:38Z",
+  "start_et": "2026-11-21 18:30:38",
+  "hour_et": "2026-11-21 18:00",
+  "spots": 1,
+  "total_seconds": 66,
+  "spot_seconds": "66",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors",
+  "next_item": "Hooked on Chanukah - Maoz Tzur"
+ },
+ {
+  "start_utc": "2026-11-22T00:03:15Z",
+  "start_et": "2026-11-21 19:03:15",
+  "hour_et": "2026-11-21 19:00",
+  "spots": 2,
+  "total_seconds": null,
+  "spot_seconds": "92 ?",
+  "block_names": "Krias Shema Al HaMitah",
+  "items": "Krias Shema Al HaMitah | Krias Shema Al HaMitah",
+  "next_item": ""
  }
 ]
