@@ -2561,5 +2561,27 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors",
   "next_item": "8th Note - Yossel Lipa"
+ },
+ {
+  "start_utc": "2026-11-22T16:32:14Z",
+  "start_et": "2026-11-22 11:32:14",
+  "hour_et": "2026-11-22 11:00",
+  "spots": 3,
+  "total_seconds": 168,
+  "spot_seconds": "57 69 42",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Yehudah  Oh Yerushalayim - Ad Bli"
+ },
+ {
+  "start_utc": "2026-11-22T17:00:43Z",
+  "start_et": "2026-11-22 12:00:43",
+  "hour_et": "2026-11-22 12:00",
+  "spots": 4,
+  "total_seconds": 168,
+  "spot_seconds": "22 52 73 21",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "Pliskin My Father My King - 49 Healing"
  }
 ]
