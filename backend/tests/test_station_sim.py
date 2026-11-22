@@ -179,15 +179,14 @@ async def test_good_shabbos_song_without_a_shofar(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("candle", ["2026-11-20", "every_week"])
-async def test_candle_lighting_item_last_song_before_it(tmp_path, candle):
-    """Main following 107.9 (coordinator 2026-11-22): that Friday's 5-minute candle lighting
-    announcement ends exactly at candle lighting, the Good Shabbos song right before it,
+async def test_candle_lighting_item_last_song_before_it(tmp_path):
+    """Main following 107.9 (coordinator 2026-11-22): the candle lighting sign-off (the same
+    recording every Friday; a dated one for a week is tests/test_shabbos_ending.py) ends exactly at candle lighting, the Good Shabbos song right before it,
     then the shofar and the silence."""
     from tests.sim.run import PICK
 
     _, result = await simulate(EXPORT, datetime(2026, 11, 20, 15, 45, tzinfo=NY), 0.75, ["main"], tmp_path,
-                               overrides={PICK["main"]: _ending(candle=candle)},
+                               overrides={PICK["main"]: _ending(candle="every_week")},
                                extra_assets=[GOOD_SHABBOS, SHOFAR, CANDLE_ITEM], regenerate_windows=True)
     print(result.report())
     for check in ("Erev Shabbos: song ends at candle lighting, shofar, then silence",
