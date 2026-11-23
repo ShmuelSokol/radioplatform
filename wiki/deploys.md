@@ -66,6 +66,7 @@ threads cannot reach the API to look first, so the check is automatic:
 - A merge whose CI fails on main is not deployed, and nothing announces it. The next
   backend merge with green CI deploys everything. If the backend looks old, look at
   the last CI runs on main first.
+  (2026-11-23: sentry-sdk 3.0.0 came out and failed `test_sentry_only_with_a_dsn`, so PR 499 sat undeployed; requirements are ranges, so a new major release of any package can do this. sentry-sdk is pinned `<3`.)
 
 ## Checking it
 

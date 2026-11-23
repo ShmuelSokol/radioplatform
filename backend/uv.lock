@@ -2095,7 +2095,7 @@ requires-dist = [
     { name = "redis", specifier = ">=5.2.0" },
     { name = "resend", specifier = ">=2.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
-    { name = "sentry-sdk", extras = ["fastapi"], specifier = ">=2.0.0" },
+    { name = "sentry-sdk", extras = ["fastapi"], specifier = ">=2.0.0,<3" },
     { name = "slowapi", specifier = ">=0.1.9" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.35" },
     { name = "stripe", specifier = ">=8.0.0" },
