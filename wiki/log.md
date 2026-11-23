@@ -518,3 +518,6 @@ UPDATE 2026-11-23 hourly-slots.md station-simulator.md queue page times: estimat
 UPDATE 2026-11-23 holiday-music.md hourly-slots.md spot-schedules.md no holiday mix in one-category playlists; hour_fit takes out a ended block's songs pushed past the hard item; soft sponsorship breaks get hard_by at the next no-sponsorship time (Main's first Carlebach half hour)
 UPDATE 2026-11-23 hourly-slots.md leftover clean-up checks the real schedule block after the hard item (PR 498 emptied Main's 4-6 AM instrumentals); misplaced songs after a hard item trigger one redraw; full-night simulator test
 INGEST 2026-11-23 station-simulator.md new check songs_in_their_block (queue entry block_id vs the block on at air time); caught PR 498's 4 AM Top 500 songs
+UPDATE 2026-11-23 hourly-slots.md leftover/misplaced checks also run while the song before the hour is on air; log lines give the hard item's station time
+UPDATE 2026-11-23 hourly-slots.md drop_songs_of_ended_blocks: songs of a block that has ended give way at air time to the waiting songs of the block on (Main's 12:30 start)
+INGEST 2026-11-23 deploys.md sentry-sdk 3.0.0 (released 2026-11-22/23) breaks sentry_sdk.init; pinned <3. It failed main CI on PR 499, so that merge was not deployed
