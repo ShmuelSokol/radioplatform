@@ -510,3 +510,4 @@ UPDATE 2026-11-22 streaming-architecture.md kbr-engine-watch watches the HLS med
 UPDATE 2026-11-22 program-blocks.md block time/weather items vs kept built-in hourly: one per minute (drop_double_announcements), purge any timing, :30 cleared when switched off (Main aired time+weather twice 11:00 AM ET)
 UPDATE 2026-11-22 shabbos-ending.md weekly candle lighting announcement (candle_items by Friday date) ends at candle lighting, Good Shabbos song before it; missing/off-air week falls back to the song
 UPDATE 2026-11-22 shabbos-ending.md candle_every_week: one approved sign-off ends at candle lighting every Friday; a dated entry wins for its week
+UPDATE 2026-11-23 station-simulator.md real play-log checks: station-ID spacing only for placement between_songs (hourly IDs sit in the breaks); a spoken item logged at 1.8x its length is a double play the log merged; exports' asset_categories (Also in) load into the sim

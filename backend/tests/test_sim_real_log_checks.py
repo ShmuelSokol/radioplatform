@@ -1,4 +1,4 @@
-"""The station-ID rule check follows the station's placement: spacing only between songs."""
+"""Real play-log checks: station-ID rule follows placement; a doubled spot is caught."""
 from datetime import UTC, datetime, timedelta
 
 from tests.sim.playlog import check_export
@@ -38,3 +38,18 @@ def test_hourly_ids_are_not_held_to_between_song_spacing():
 def test_between_songs_ids_an_hour_apart_fail_the_spacing():
     found = _failing("between_songs")
     assert found and all("min apart" in f.text for f in found)
+
+
+def test_a_spot_logged_at_twice_its_length_is_a_double_play():
+    """The engine played one sponsorship twice back to back and the log merged the plays
+    into one row (Main 2026-11-20 14:19Z): the real-log check reports it."""
+    export = _export(None)
+    export["assets"].append({"id": "spot", "title": "Spot", "asset_type": "spot", "category": "sponsorship",
+                             "duration": 21.8})
+    last = export["play_logs"][-1]
+    t = datetime.fromisoformat(last["end_utc"])
+    export["play_logs"].append({"station_id": SID, "asset_id": "spot", "start_utc": t.isoformat(),
+                                "end_utc": (t + timedelta(seconds=42.6)).isoformat()})
+    res = check_export(export)
+    found = [f for f in res.findings if f.check == "spoken item not played twice in a row"]
+    assert len(found) == 1 and "played twice" in found[0].text

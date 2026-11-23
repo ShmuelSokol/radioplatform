@@ -148,3 +148,10 @@ has one `resume@N` entry per night for the same shiur. Counting them per item re
 Check "queue page times hold" (2026-11-19): every 30 simulated minutes the run reads the queue as the control room does (`_get_queue_impl`) and keeps each waiting item's `estimated_start` for the next hour. Items that air more than 3 min from that time are findings. Automatic station IDs are left out, because they move on purpose. With the stand-in fixed (below), estimates held within about 30 s over an hour on Main.
 
 The stand-in engine now drops a flushed entry from its `given` list as radio.liq does (`/flush`: unless it is on air). Before, the backend took every flushed song for "aired without a start report" and marked it played. That emptied places in the queue: about a quarter of items aired 4 to 7 min off their estimate. The hold rule also counted the flushed song as pre-loaded, which caused the rare 4 to 6 s of emergency music between songs in the Yom Tov runs. Neither happens with the real engine.
+
+
+## Real play-log checks (2026-11-23)
+
+- Station-ID spacing (12-20 min, not next to a spot) applies only when `station_ids.placement` is `between_songs`; the default `hourly` puts IDs in the breaks.
+- A spoken item (spot, ID, time, weather...) logged at 1.8x its length or more was played twice back to back: the play log merges the two plays into one row, so "same sponsor within 20 min" cannot see it.
+- Exports carry `asset_categories` (Library > Also in, by category name); the simulator loads them, so a block on a category that exists only as an extra tag (Main's 3 AM instrumentals) finds its songs.
