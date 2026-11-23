@@ -3149,11 +3149,33 @@
   "start_utc": "2026-11-23T13:06:15Z",
   "start_et": "2026-11-23 08:06:15",
   "hour_et": "2026-11-23 08:00",
-  "spots": 1,
-  "total_seconds": null,
-  "spot_seconds": "?",
+  "spots": 2,
+  "total_seconds": 84,
+  "spot_seconds": "54 30",
   "block_names": "Weather Sponsors",
-  "items": "Weather Sponsors",
-  "next_item": ""
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Aish 2 - Mah Tovu"
+ },
+ {
+  "start_utc": "2026-11-23T13:35:03Z",
+  "start_et": "2026-11-23 08:35:03",
+  "hour_et": "2026-11-23 08:00",
+  "spots": 3,
+  "total_seconds": 206,
+  "spot_seconds": "68 72 66",
+  "block_names": "Sponsors",
+  "items": "Sponsors | Sponsors | Sponsors",
+  "next_item": "Efraim Mendolson - Ani Maamim"
+ },
+ {
+  "start_utc": "2026-11-23T13:59:57Z",
+  "start_et": "2026-11-23 08:59:57",
+  "hour_et": "2026-11-23 08:00",
+  "spots": 3,
+  "total_seconds": 131,
+  "spot_seconds": "65 62 4",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
+  "next_item": "Pliskin  My Father My King - 101 Embarassment"
  }
 ]
