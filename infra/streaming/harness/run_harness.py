@@ -1099,6 +1099,10 @@ async def sc_short_item_before_slow_file(h: Harness, item: str = "id2", delay: f
     silence over 1 s."""
     name = f"short_item_before_slow_file[{item}]"
     await wait_music(h)
+    # Let the queue top-up after the last start report finish first: run right after
+    # another scenario's Next, it wrote its songs between ours and the engine was handed
+    # a fill song in place of the slow item (a race in this harness, not the engine)
+    await asyncio.sleep(3)
     await h.clear_pending()
     h.stack.slow_files["story.mp3"] = delay
     try:
