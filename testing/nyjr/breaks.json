@@ -2968,5 +2968,27 @@
   "block_names": "Mesivta D'Rakia | Kol B'Ramah Sponsors",
   "items": "Mesivta D'Rakia | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Mesivta D'Rakia | Mesivta D'Rakia",
   "next_item": "Tatz R. Akiva - World to Come 1"
+ },
+ {
+  "start_utc": "2026-11-23T05:19:42Z",
+  "start_et": "2026-11-23 00:19:42",
+  "hour_et": "2026-11-23 00:00",
+  "spots": 2,
+  "total_seconds": 92,
+  "spot_seconds": "29 63",
+  "block_names": "Mesivta D'Rakia | Kol B'Ramah Sponsors",
+  "items": "Mesivta D'Rakia | Kol B'Ramah Sponsors",
+  "next_item": "Shlomo at Dr Ritchies - 10 Someone else then Shlomo"
+ },
+ {
+  "start_utc": "2026-11-23T06:02:32Z",
+  "start_et": "2026-11-23 01:02:32",
+  "hour_et": "2026-11-23 01:00",
+  "spots": 2,
+  "total_seconds": 59,
+  "spot_seconds": "30 29",
+  "block_names": "107.9  Kol  B'Ramah  Lakewood | Tikun Chatzos",
+  "items": "107.9  Kol  B'Ramah  Lakewood | Tikun Chatzos",
+  "next_item": "Meydad Tasa - Al Naharos Bavel"
  }
 ]
