@@ -2951,11 +2951,11 @@
   "start_utc": "2026-11-23T03:03:46Z",
   "start_et": "2026-11-22 22:03:46",
   "hour_et": "2026-11-22 22:00",
-  "spots": 4,
-  "total_seconds": null,
-  "spot_seconds": "35 53 56 ?",
+  "spots": 6,
+  "total_seconds": 283,
+  "spot_seconds": "35 53 56 69 67 3",
   "block_names": "Mesivta D'Rakia | Kol B'Ramah Sponsors",
-  "items": "Mesivta D'Rakia | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Mesivta D'Rakia",
-  "next_item": ""
+  "items": "Mesivta D'Rakia | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia",
+  "next_item": "Frand R. Yissocher - Vayishlach 2009 Davening at Kever Rochel"
  }
 ]
