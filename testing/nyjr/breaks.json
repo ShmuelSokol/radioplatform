@@ -3216,10 +3216,10 @@
   "start_et": "2026-11-23 10:02:41",
   "hour_et": "2026-11-23 10:00",
   "spots": 3,
-  "total_seconds": null,
-  "spot_seconds": "48 49 ?",
+  "total_seconds": 168,
+  "spot_seconds": "48 49 71",
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
-  "next_item": ""
+  "next_item": "DR DAVE INTRO - HOW BITACHON WORKS"
  }
 ]
