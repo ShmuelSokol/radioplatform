@@ -115,19 +115,16 @@ async def test_main_nights_carlebach_then_three_hours_of_instrumentals(tmp_path)
 
     # The song that straddles a block's start comes from the block before (the fill's
     # rule), so each block is checked from its first song change on
-    # The 12:30 sponsorships are soft and the fill places songs before them: one or
-    # two Night Chill songs drawn to start before 12:30 still air after the break
-    # (live 12:30:43 and 12:34:43 here; live 2026-11-23 one, to 12:34:08). Known, not
-    # yet fixed: Carlebach must start by 12:40 and be all that plays from then to 1 AM.
+    # The song on air at 12:30 finishes, then the soft sponsorships; every song that
+    # starts after them is Carlebach (two Night Chill songs aired there before
+    # hour_fit.drop_songs_of_ended_blocks)
     carlebach = between(0, 31, 1, 0)
-    first = next(i for i, r in enumerate(carlebach) if r.title.startswith("CARLEBACH"))
-    assert carlebach[first].start < datetime(2026, 11, 23, 0, 40, tzinfo=NY).timestamp(), carlebach[first].title
-    assert len(carlebach[first:]) >= 4
-    assert all(r.title.startswith("CARLEBACH") for r in carlebach[first:]), [r.title for r in carlebach]
+    assert len(carlebach) >= 4
+    assert all(r.title.startswith("CARLEBACH") for r in carlebach), [r.title for r in carlebach]
     assert not any(r.title.startswith("CARLEBACH") for r in between(1, 0, 3, 0)), "Carlebach after 1 AM"
 
     night = between(3, 1, 6, 0)
-    assert len(night) >= 36, len(night)  # the whole three hours, not the first
+    assert len(night) >= 30, len(night)  # the whole three hours (about 11 long tracks an hour), not the first
     wrong = [f"{_local(r.start):%H:%M:%S} {r.title}" for r in night if not r.title.startswith("INSTR")]
     assert not wrong, wrong
     # every hour of it

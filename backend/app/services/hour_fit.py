@@ -592,9 +592,123 @@ def _local(station, at: datetime) -> str:
         return at.strftime("%H:%M:%S UTC")
 
 
-async def _block_on_after(db: AsyncSession, station, hard_at: datetime) -> str | None:
-    """The schedule block the fill draws for a minute after the hard item (the
-    winner of the station's active schedules), as its id."""
+# station -> monotonic time of the last look for songs of a block that has ended
+_ended_look: dict[str, float] = {}
+
+
+async def drop_songs_of_ended_blocks(db: AsyncSession, station, now: datetime | None = None, *,
+                                     force: bool = False) -> bool:
+    """An automatic song belongs to the block on when it really starts (the fill's own
+    rule, wiki/playlist-generation.md). The fill places songs before breaks it does
+    not know the length of (sponsorships are planned after it), so a song drawn to
+    start just before a block change can come up minutes after it: Main's Carlebach
+    half hour began with two Night Chill songs at 12:30:43 and 12:37:13 behind the
+    soft 12:30 sponsorships (simulator 2026-11-23). Every look, the next song's
+    real start is worked out (the item on air, then any timed items due by then);
+    while it and the songs after it were drawn for a block that is not on at that
+    time, and a song of the block that is on waits behind them, they are taken out.
+    Never a person's pick, a station ID, what the engine holds, or a song about to
+    start. Returns True when the queue changed (the caller commits)."""
+    key = str(station.id)
+    if not force:
+        tick = _time.monotonic()
+        if tick - _ended_look.get(key, 0.0) < EVERY:
+            return False
+        _ended_look[key] = tick
+    now = now or datetime.now(timezone.utc)
+
+    def _read(*where, limit):
+        return (
+            select(QueueEntry)
+            .options(joinedload(QueueEntry.asset))
+            .where(QueueEntry.station_id == station.id, *where)
+            .order_by(QueueEntry.position)
+            .limit(limit)
+            .execution_options(populate_existing=True)
+        )
+
+    playing = (await db.execute(_read(QueueEntry.status == "playing", limit=1))).unique().scalars().first()
+    if playing is None or playing.started_at is None:
+        return False
+    from app.config import settings
+
+    engine = settings.engine_drives(station.id)
+    until = on_air_until(playing, engine)
+    if until is None:
+        return False
+    at = max(now, until)
+    timed = list(
+        (
+            await db.execute(
+                _read(
+                    QueueEntry.status == "pending",
+                    QueueEntry.preempt_at.isnot(None),
+                    QueueEntry.preempt_at <= at + timedelta(hours=1),
+                    limit=LOOK,
+                )
+            )
+        ).unique().scalars().all()
+    )
+    timed.sort(key=lambda e: (_aware(e.preempt_at), e.position))
+    # The timed items that come due before the next song starts air first
+    while timed and _aware(timed[0].preempt_at) <= at + timedelta(seconds=EARLY_START):
+        e = timed.pop(0)
+        due = _aware(e.preempt_at)
+        if not is_soft_timed(e) and due < at:
+            at = max(now, due)  # a hard item cuts the item on air
+        at += timedelta(seconds=_seconds(e, engine) or 30.0)
+    songs = list(
+        (await db.execute(_read(QueueEntry.status == "pending", QueueEntry.preempt_at.is_(None), limit=LOOK)))
+        .unique().scalars().all()
+    )
+    stale: list[QueueEntry] = []
+    on = None
+    for e in songs:
+        if e.source != "auto":
+            return False  # a person's pick comes next: left as it is
+        if e.asset is not None and (e.asset.asset_type or "music").lower() != "music":
+            if stale:
+                continue  # a station ID among them stays
+            return False
+        if not e.block_id:
+            return False
+        if on is None:
+            on = await _block_on(db, station, at)
+            if on is None:
+                return False
+        if e.block_id == on:
+            break
+        stale.append(e)
+    else:
+        return False  # no song of the block that is on is waiting: nothing to bring forward
+    if not stale:
+        return False
+    from app.services.playout_engine import cued_entry_id, held_entry_ids
+
+    preloaded = cued_entry_id(station.id) if engine else None
+    held = held_entry_ids(station.id) - ({preloaded} if preloaded else set())
+    ahead = (at - now).total_seconds()
+    gone = [
+        e for e in stale
+        if e.id not in held and ahead >= (PRELOADED_FROZEN if e.id == preloaded else FROZEN)
+    ]
+    if len(gone) != len(stale):
+        gone = []  # take out from the front only, or the order would change
+    if not gone:
+        return False
+    for e in gone:
+        await db.delete(e)
+    await db.flush()
+    logger.info(
+        "Station %s: %d song(s) drawn for a block that is no longer on at %s (station time) taken out of the queue",
+        station.id, len(gone), _local(station, at),
+    )
+    return True
+
+
+async def _block_on(db: AsyncSession, station, at: datetime) -> str | None:
+    """The schedule block the fill draws for at `at` (the winner of the station's
+    active schedules), as its id."""
     from sqlalchemy.orm import selectinload
 
     from app.models.schedule import Schedule
@@ -607,8 +721,13 @@ async def _block_on_after(db: AsyncSession, station, hard_at: datetime) -> str |
             .options(selectinload(Schedule.blocks))
         )
     ).scalars().all()
-    ranked = SchedulingService(db).rank_matching_blocks(schedules, hard_at + timedelta(minutes=1), station)
+    ranked = SchedulingService(db).rank_matching_blocks(schedules, at, station)
     return str(ranked[0][1].id) if ranked else None
+
+
+async def _block_on_after(db: AsyncSession, station, hard_at: datetime) -> str | None:
+    """The schedule block the fill draws for a minute after the hard item."""
+    return await _block_on(db, station, hard_at + timedelta(minutes=1))
 
 
 def _artist(entry) -> str | None:

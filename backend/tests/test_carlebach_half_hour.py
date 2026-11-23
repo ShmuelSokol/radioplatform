@@ -296,3 +296,58 @@ async def test_leftovers_go_while_the_song_before_the_hour_is_on_air(db_session:
     await db_session.commit()
     assert await _order(db_session, sid) == ["Night 1", "Night 2"]
     assert redraws == []
+
+
+async def _ended_queue(db_session, on_air_ends, songs):
+    station = await _station(db_session)
+    sid = station.id
+    ids = await _blocks(db_session, station, {"night": (-1, 0), "carlebach": (0, 1)})
+    await _queue(db_session, station, on_air_ends, [(t, s, {"block_id": ids[b]}) for t, s, b in songs])
+    return sid
+
+
+async def _drop_ended(db_session, sid, now):
+    from app.services.hour_fit import drop_songs_of_ended_blocks
+
+    station = await db_session.get(Station, sid, populate_existing=True)
+    changed = await drop_songs_of_ended_blocks(db_session, station, now, force=True)
+    await db_session.commit()
+    return changed
+
+
+@pytest.mark.asyncio
+async def test_night_songs_that_would_start_after_the_carlebach_half_hour_begins_give_way(db_session):
+    """Simulator 2026-11-23: two Night Chill songs aired at 12:30:43 and 12:37:13."""
+    sid = await _ended_queue(db_session, HOUR + timedelta(seconds=40), [
+        ("Night A", 390.0, "night"), ("Night B", 240.0, "night"),
+        ("Carlebach 1", 260.0, "carlebach"), ("Carlebach 2", 260.0, "carlebach"),
+    ])
+    assert await _drop_ended(db_session, sid, HOUR - timedelta(minutes=4))
+    assert await _order(db_session, sid) == ["Carlebach 1", "Carlebach 2"]
+
+
+@pytest.mark.asyncio
+async def test_the_song_that_starts_before_the_block_change_stays(db_session):
+    sid = await _ended_queue(db_session, HOUR - timedelta(seconds=60), [
+        ("Night A", 240.0, "night"), ("Carlebach 1", 260.0, "carlebach"),
+    ])
+    assert not await _drop_ended(db_session, sid, HOUR - timedelta(minutes=4))
+    assert await _order(db_session, sid) == ["Night A", "Carlebach 1"]
+
+
+@pytest.mark.asyncio
+async def test_nothing_goes_without_a_song_of_the_block_that_is_on(db_session):
+    sid = await _ended_queue(db_session, HOUR + timedelta(seconds=40), [
+        ("Night A", 240.0, "night"), ("Night B", 240.0, "night"),
+    ])
+    assert not await _drop_ended(db_session, sid, HOUR - timedelta(minutes=4))
+    assert await _order(db_session, sid) == ["Night A", "Night B"]
+
+
+@pytest.mark.asyncio
+async def test_a_song_about_to_start_is_left_alone(db_session):
+    sid = await _ended_queue(db_session, HOUR + timedelta(seconds=40), [
+        ("Night A", 240.0, "night"), ("Carlebach 1", 260.0, "carlebach"),
+    ])
+    assert not await _drop_ended(db_session, sid, HOUR + timedelta(seconds=30))
+    assert await _order(db_session, sid) == ["Night A", "Carlebach 1"]
