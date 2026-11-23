@@ -45,6 +45,8 @@ def _asset(a: dict):
                            category=a.get("category"), duration=a.get("duration"), metadata_extra=meta)
 
 
+# Items that are said, not sung: one of them twice in a row is a fault
+SPOKEN_TYPES = {"spot", "jingle", "sweeper", "station_id", "time", "weather", "psa", "announcement", "zmanim"}
 HOLE_SECONDS = 1800.0  # nothing logged for this long: the log was off, not dead air
 
 
@@ -63,7 +65,7 @@ def check_export(export: dict, since: datetime | None = None, station: str | Non
     logs = list(export.get("play_logs") or [])
     for p in export.get("play_logs_main_0030_0215Z") or []:
         logs.append({**p, "station_id": MAIN})
-    rows = []
+    rows, doubled = [], []
     for p in logs:
         sid = p["station_id"]
         if sid not in stations or not p.get("end_utc") or (station and sid != station):
@@ -73,6 +75,12 @@ def check_export(export: dict, since: datetime | None = None, station: str | Non
         a = assets.get(p.get("asset_id") or "")
         begun, ended = _dt(p["start_utc"]).timestamp(), _dt(p["end_utc"]).timestamp()
         if a is not None and a.duration:
+            # A spoken item's row about twice its length: the engine played it twice back
+            # to back and the log merged the plays into one row (Main TEST SPONSOR 45,
+            # 2026-11-20 14:19Z: one entry handed twice, 29 s apart, logged as 42.6 s)
+            if (a.asset_type in SPOKEN_TYPES and float(a.duration) >= 5.0
+                    and ended - begun >= 1.8 * float(a.duration)):
+                doubled.append((sid, begun, a.title, ended - begun, float(a.duration)))
             # a row closed late (after a restart) did not air past the item's own length
             ended = min(ended, begun + float(a.duration) + 5.0)
         rows.append(checks.Row(
@@ -115,6 +123,13 @@ def check_export(export: dict, since: datetime | None = None, station: str | Non
     ctx = checks.Context(sim, stations, {}, assets, spot_station)
     for check in REAL_CHECKS:
         check(res, ctx)
+    name = "spoken item not played twice in a row"
+    res.checks_run[name] = sum(1 for r in rows if r.kind in SPOKEN_TYPES)
+    for sid, begun, title, seconds, length in doubled:
+        tz = ZoneInfo(stations[sid].timezone or "America/New_York")
+        res.findings.append(checks.Finding(
+            name, sid, datetime.fromtimestamp(begun, UTC).astimezone(tz).strftime("%a %H:%M:%S"),
+            f"{title!r} logged for {seconds:.1f} s, its length is {length:.1f} s: played twice back to back"))
     name = "stretches with nothing logged (over 30 min)"
     res.checks_run[name] = sum(len(v) for v in holes.values())
     for sid, spans in holes.items():

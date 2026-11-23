@@ -134,6 +134,25 @@ async def seed(db, export: dict, start: datetime, days: int = 2, stations: set[s
                      file_path=f"https://cdn.example.com/audio/{a['id']}.mp3",
                      metadata_extra=({"audio_analysis": a["analysis"]} if a.get("analysis") else None)))
     await db.flush()
+    # Extra categories ("Also in"): newer exports carry {asset_id, category name} rows.
+    # Main's 3 AM instrumental block draws on a category that exists only as an extra tag.
+    known_assets = {a["id"] for a in export["assets"]}
+    extra_rows = [r for r in export.get("asset_categories") or [] if r.get("asset_id") in known_assets]
+    if extra_rows:
+        from sqlalchemy import insert
+
+        from app.models.asset import asset_categories
+        from app.models.category import Category
+
+        cat_ids = {}
+        for name in sorted({r["category"] for r in extra_rows if r.get("category")}):
+            cat_ids[name] = uuid.uuid4()
+            db.add(Category(id=cat_ids[name], name=name))
+        await db.flush()
+        await db.execute(insert(asset_categories), [
+            {"asset_id": uuid.UUID(r["asset_id"]), "category_id": cat_ids[r["category"]]}
+            for r in extra_rows if r.get("category") in cat_ids])
+        await db.flush()
     from app.models.holiday_music import HolidayItem
 
     for h in holiday_items or []:
