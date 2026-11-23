@@ -3023,5 +3023,27 @@
   "block_names": "Highest Frequncy",
   "items": "Highest Frequncy",
   "next_item": "Aslan Rav - Segulah   Hafkeid Alav"
+ },
+ {
+  "start_utc": "2026-11-23T08:30:51Z",
+  "start_et": "2026-11-23 03:30:51",
+  "hour_et": "2026-11-23 03:00",
+  "spots": 1,
+  "total_seconds": 13,
+  "spot_seconds": "13",
+  "block_names": "Night Mix ID",
+  "items": "Night Mix ID",
+  "next_item": "3:31\tEyal Sela - Troll In The Desert"
+ },
+ {
+  "start_utc": "2026-11-23T09:01:36Z",
+  "start_et": "2026-11-23 04:01:36",
+  "hour_et": "2026-11-23 04:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Highest Frequncy",
+  "items": "Highest Frequncy",
+  "next_item": "Yair Dalal - Arrarat"
  }
 ]
