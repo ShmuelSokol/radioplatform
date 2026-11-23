@@ -522,3 +522,4 @@ UPDATE 2026-11-23 hourly-slots.md leftover/misplaced checks also run while the s
 UPDATE 2026-11-23 hourly-slots.md drop_songs_of_ended_blocks: songs of a block that has ended give way at air time to the waiting songs of the block on (Main's 12:30 start)
 INGEST 2026-11-23 deploys.md sentry-sdk 3.0.0 (released 2026-11-22/23) breaks sentry_sdk.init; pinned <3. It failed main CI on PR 499, so that merge was not deployed
 UPDATE 2026-11-23 spot-schedules.md a soft sponsorship break the song on air carries into quiet hours is skipped (missed play), no longer cut for at 12:35
+INGEST 2026-11-23 station-simulator.md real play-log check: paused shiur or story resumed and reached its end (the simulator's engine always resumes)

@@ -50,6 +50,60 @@ SPOKEN_TYPES = {"spot", "jingle", "sweeper", "station_id", "time", "weather", "p
 HOLE_SECONDS = 1800.0  # nothing logged for this long: the log was off, not dead air
 
 
+# A shiur or story whose last part stops this far before its end did not finish
+NOT_FINISHED_SECONDS = 120.0
+RESUME_WITHIN_SECONDS = 3 * 3600
+
+
+def _paused_items_finish(res, rows, assets, blackouts, stations):
+    """Every shiur or story that stopped early came back and played to its end (KBR
+    Jerusalem 2026-11-23 5:30 AM: the Daf Yomi paused for the time check never resumed and
+    lost its last 4 minutes; the simulator's engine always resumes, so only the real log
+    shows it). A part that stops at candle lighting, or is the last row of the log (still on
+    air), is not a finding. An operator who skipped the item shows here too."""
+    name = "paused shiur or story resumed and reached its end"
+    res.checks_run.setdefault(name, 0)
+    last_row = {}
+    for r in rows:
+        last_row[r.station] = r
+    by_item = defaultdict(list)
+    for r in rows:
+        if r.is_long and r.asset_id:
+            by_item[(r.station, r.asset_id)].append(r)
+    for (sid, aid), parts in by_item.items():
+        a = assets.get(aid)
+        if a is None or not a.duration:
+            continue
+        # split into airings: a part more than 3 h after the last one is a new airing
+        airings, cur = [], [parts[0]]
+        for p in parts[1:]:
+            if p.start - cur[-1].end < RESUME_WITHIN_SECONDS:
+                cur.append(p)
+            else:
+                airings.append(cur)
+                cur = [p]
+        airings.append(cur)
+        for airing in airings:
+            final = airing[-1]
+            if final is last_row.get(sid):
+                continue
+            left = float(a.duration) - (final.cue_in + final.seconds)
+            if len(airing) == 1 and left <= NOT_FINISHED_SECONDS:
+                continue  # an ordinary airing, start to end
+            res.checks_run[name] += 1
+            if left <= NOT_FINISHED_SECONDS:
+                continue
+            at_candles = any(abs(w["start"].timestamp() - final.end) < 60 for w in blackouts
+                             if not w["stations"] or sid in w["stations"])
+            if at_candles:
+                continue
+            tz = ZoneInfo(stations[sid].timezone or "America/New_York")
+            when = datetime.fromtimestamp(final.end, UTC).astimezone(tz).strftime("%a %H:%M:%S")
+            how = "never resumed" if len(airing) == 1 else f"resumed {len(airing) - 1} time(s) but stopped again"
+            res.findings.append(checks.Finding(
+                name, sid, when, f"{a.title!r} stopped with {left / 60:.1f} min left and {how}"))
+
+
 def check_export(export: dict, since: datetime | None = None, station: str | None = None) -> checks.Result:
     assets = {a["id"]: _asset(a) for a in export["assets"]}
     stations = {}
@@ -130,6 +184,7 @@ def check_export(export: dict, since: datetime | None = None, station: str | Non
         res.findings.append(checks.Finding(
             name, sid, datetime.fromtimestamp(begun, UTC).astimezone(tz).strftime("%a %H:%M:%S"),
             f"{title!r} logged for {seconds:.1f} s, its length is {length:.1f} s: played twice back to back"))
+    _paused_items_finish(res, rows, assets, blackouts, stations)
     name = "stretches with nothing logged (over 30 min)"
     res.checks_run[name] = sum(len(v) for v in holes.values())
     for sid, spans in holes.items():
