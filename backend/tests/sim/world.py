@@ -67,7 +67,8 @@ class Simulator:
         self.passes = 0
         self.restarts: list = []
         # What the queue page showed (estimated_start), every SNAPSHOT_EVERY simulated
-        # seconds: (when, station, {entry id: estimated start}) for the hour after
+        # seconds: (when, station, {entry id: (estimated start, firm)}) for the hour
+        # after; firm=False is shown "≈"
         self.snapshots: list = []
         self._next_snapshot = self.t
 
@@ -349,7 +350,7 @@ class Simulator:
                     continue
                 ts = datetime.fromisoformat(d["estimated_start"]).timestamp()
                 if self.t < ts <= self.t + SNAPSHOT_AHEAD:
-                    est[d["id"]] = ts
+                    est[d["id"]] = (ts, d.get("estimate_firm", True))
             self.snapshots.append((self.t, sid, est))
 
     async def run_until(self, end: datetime, on_step=None):

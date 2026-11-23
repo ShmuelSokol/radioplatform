@@ -11,6 +11,7 @@ export interface QueueRow {
   position: number;
   status: string;
   estimated_start?: string | null;
+  estimate_firm?: boolean;       // false: past the run-up to the next hard break; shown "≈"
   source?: string | null;
   preempt_at?: string | null;
   hard_timed?: boolean;          // starts on the second: the song on air fades
@@ -242,6 +243,7 @@ function QueuePanel(p: Props) {
           const isArmed = p.insertBeforeId === entry.id;
           const isDragOver = dragOverId === entry.id && dragId !== entry.id;
           const start = fmtStart(entry.estimated_start, today, p.stationTz);
+          const approx = !isCur && entry.estimate_firm === false && !!start.time;
           const isSilence = a?.asset_type === 'silence';
           const isSponsor = isSponsorSpot(entry.source, a);
           const title = isSilence && entry.blackout_name
@@ -305,9 +307,14 @@ function QueuePanel(p: Props) {
                   </button>
                 )}
 
-                <span className="w-[62px] lg:w-auto lg:px-1 shrink-0 tabular-nums text-[13px] leading-tight lg:whitespace-nowrap lg:overflow-hidden" data-testid="air-time" data-col="time" style={col('time')}>
+                <span
+                  className={`w-[62px] lg:w-auto lg:px-1 shrink-0 tabular-nums text-[13px] leading-tight lg:whitespace-nowrap lg:overflow-hidden${approx ? ' italic opacity-60' : ''}`}
+                  data-testid="air-time" data-col="time" data-approx={approx ? 'true' : undefined} style={col('time')}
+                  title={approx ? 'About this time: the songs before the next timed break may still be reordered to end on time' : undefined}
+                >
+                  {approx && <span className="sr-only">about </span>}
                   {start.time}
-                  <span className="block lg:inline lg:ml-1 text-[10px] opacity-70 whitespace-nowrap">{start.sub}</span>
+                  <span className="block lg:inline lg:ml-1 text-[10px] opacity-70 whitespace-nowrap">{approx && <span className="lg:hidden" aria-hidden="true">≈ </span>}{start.sub}</span>
                 </span>
                 <span className="hidden lg:block px-1 shrink-0 tabular-nums text-[13px] overflow-hidden whitespace-nowrap" data-col="len" style={col('len')}>{fmtDur(a?.duration)}</span>
 

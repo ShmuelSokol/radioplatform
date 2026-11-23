@@ -647,6 +647,8 @@ router = APIRouter(
 
 # Item types that must never be used to keep a station on the air
 # A timed item due within this many seconds of a song change starts at the change
+# Songs starting within this of the next hard break may still be swapped by the fit
+FIRM_BEFORE_BREAK = timedelta(minutes=15)
 TIMED_EARLY_START_SECONDS = 8.0
 
 _NOT_FILLER_TYPES = ("silence", "spot", "jingle", "sweeper", "station_id", "time", "weather")
@@ -1813,6 +1815,27 @@ async def _get_queue_impl(station_id, limit, db):
         meta = meta if isinstance(meta, dict) else None
         return _on_air(getattr(asset, "duration", None) or DEFAULT_DURATION, meta)
 
+    # Each item counted the way the players hand over (hour_fit._seconds: on the stream
+    # server from the analysed start to the analysed end less the station's own
+    # crossfade). A fixed 3 s off every item put the last song before a break about
+    # 20 s early, so the page showed one more song starting (and cut) before the break
+    # than really aired, and everything after the break a song early (simulator, Main
+    # 2026-11-19: shown 01:00:43, aired 01:07:05).
+    from app.services import hour_fit as _fit
+
+    _engine = settings.engine_drives(station_id)
+
+    def _entry_air(e) -> float:
+        asset = e.asset
+        if asset is None or getattr(asset, "asset_type", None) == "silence":
+            return _air(asset)
+        seconds = _fit._seconds(e, _engine)
+        if seconds is None:
+            return float(DEFAULT_DURATION)
+        if not _engine or e.preempt_at is not None:
+            seconds = max(1.0, seconds - resume_offset(e))  # a paused shiur's remainder
+        return seconds
+
     try:
         now_utc_sort = datetime.now(timezone.utc)
         _np_sa = now_playing_entry.started_at if now_playing_entry and now_playing_entry.started_at else None
@@ -1820,9 +1843,11 @@ async def _get_queue_impl(station_id, limit, db):
             _np_sa = _np_sa.replace(tzinfo=timezone.utc)
 
         if _np_sa:
-            _ad = _air(now_playing_entry.asset)
-            _el = (now_utc_sort - _np_sa).total_seconds()
-            _cursor = now_utc_sort + timedelta(seconds=max(0, (_ad or DEFAULT_DURATION) - _el))
+            _until = _fit.on_air_until(now_playing_entry, _engine)
+            if _until is None:
+                _ad = _air(now_playing_entry.asset)
+                _until = _np_sa + timedelta(seconds=_ad or DEFAULT_DURATION)
+            _cursor = max(now_utc_sort, _until)
         else:
             _cursor = now_utc_sort
 
@@ -1849,7 +1874,9 @@ async def _get_queue_impl(station_id, limit, db):
             _est_map[e.id] = _np_sa or now_utc_sort
 
         ri, hi, si = 0, 0, 0
-        _timed_end = now_utc_sort  # end of the last timed item placed
+        # end of the last timed item placed: the one on air, when it is timed (the
+        # weather after the time check on air was shown at the check's own start)
+        _timed_end = _cursor if now_playing_entry is not None and now_playing_entry.preempt_at else now_utc_sort
         _safety = len(entries) * 3  # prevent infinite loops
 
         # A soft item due while a shiur or story has more than 5 minutes left pauses
@@ -1861,6 +1888,24 @@ async def _get_queue_impl(station_id, limit, db):
 
         _st = await db.get(_Station, station_id)
         _long_policy = _long.policy(_st) if _st is not None and _hs_on(_st) else "wait"
+        # Sponsorships alone wait for a talk's end on a station that says so (as
+        # _pause_long_for_soft does): a sponsorship shown at 00:30:08 aired at 00:40:11
+        # after a 12-minute track (simulator, Main 2026-11-23)
+        _sponsor_wait: set = set()
+        if _st is not None and _long.sponsorships_wait(_st) and soft_preempts:
+            from app.models.spot_schedule import SpotSchedule as _SpotSchedule
+
+            _contract = set((await db.execute(
+                select(_SpotSchedule.asset_id).where(_SpotSchedule.asset_id.in_({e.asset_id for e in soft_preempts}))
+            )).scalars().all())
+            _only: dict = {}
+            for _e in soft_preempts:
+                _k = _tz(_e.preempt_at)
+                _sp = _e.source == "ad_slot" or _e.asset_id in _contract or getattr(_e.asset, "sponsor_id", None) is not None
+                _only[_k] = _only.get(_k, True) and _sp
+            for _e in hard_preempts:  # a time check or weather in the group pauses it anyway
+                _only[_tz(_e.preempt_at)] = False
+            _sponsor_wait = {k for k, v in _only.items() if v}
 
         def _soft_into_long(asset, start, end):
             """Place the soft items that will pause the long item playing start..end;
@@ -1872,7 +1917,9 @@ async def _get_queue_impl(station_id, limit, db):
                 due = max(_tz(soft_preempts[si].preempt_at), start)
                 if due >= end or (end - due).total_seconds() <= _long.SOFT_PAUSE_MIN_LEFT_SECONDS:
                     break
-                _d = _air(soft_preempts[si].asset)
+                if _tz(soft_preempts[si].preempt_at) in _sponsor_wait:
+                    break
+                _d = _entry_air(soft_preempts[si])
                 _est_map[soft_preempts[si].id] = due
                 # paused: it carries on afterwards; cut: the air is free after the item
                 end = end + timedelta(seconds=_d) if _long_policy == "pause" else due + timedelta(seconds=_d)
@@ -1881,23 +1928,54 @@ async def _get_queue_impl(station_id, limit, db):
                     break
             return end
 
+        # A hard item due during a shiur or story (long_items): on a "pause" station the
+        # rest of it carries on after the timed items (_carry: asset, seconds); on a
+        # "wait" station the hard item waits for its end (_waited). Counting it as cut
+        # showed everything behind a 55-minute shiur 43 minutes early (simulator, Main
+        # 2026-11-19).
+        _carry = None
+        _waited = now_utc_sort
+
+        def _crossed_long(asset, end, hard_at, hard_item):
+            """A hard item at hard_at falls inside the long item ending at end: what
+            the station does. Returns True when the item plays on to its end ("wait")."""
+            nonlocal _carry, _waited
+            if not _long.is_long_form(asset) or _long_policy == "cut":
+                return False
+            if getattr(hard_item.asset, "asset_type", None) == "silence":
+                return False  # Shabbos or Yom Tov: the air goes silent, nothing carries on
+            if _long_policy == "wait":
+                _waited = max(_waited, end)
+                return True
+            left = (end - hard_at).total_seconds()
+            if left >= _long.MIN_REMAINING_TO_RESUME:
+                _carry = (asset, left + _long.RESUME_REWIND_SECONDS)
+            return False
+
         if now_playing_entry is not None and _np_sa:
             _cursor = _soft_into_long(now_playing_entry.asset, now_utc_sort, _cursor)
+            if hard_preempts and _tz(hard_preempts[0].preempt_at) < _cursor:
+                _crossed_long(
+                    now_playing_entry.asset, _cursor, max(_tz(hard_preempts[0].preempt_at), now_utc_sort),
+                    hard_preempts[0],
+                )
 
         while (ri < len(regulars) or hi < len(hard_preempts) or si < len(soft_preempts)) and _safety > 0:
             _safety -= 1
             # 1. Fire hard preempt if its time has arrived
             if hi < len(hard_preempts):
                 hp_pa = _tz(hard_preempts[hi].preempt_at)
-                if hp_pa <= _cursor:
+                # due within a few seconds of the end of the item on air: it starts at
+                # once (TIMED_EARLY_START_SECONDS), no song is started for those seconds
+                if hp_pa <= _cursor + timedelta(seconds=TIMED_EARLY_START_SECONDS):
                     # A hard item cuts the song under it, but never another timed item
                     # or the past: a group sharing one time (a blackout's silence, all
                     # due at its start) plays one after another. Jumping back to hp_pa
                     # gave all 311 of KBR Jerusalem's Shabbos silences the same start,
                     # and everything after them showed Friday times.
-                    _cursor = max(hp_pa, _timed_end)
+                    _cursor = max(min(hp_pa, _cursor), _timed_end, _waited)
                     _est_map[hard_preempts[hi].id] = _cursor
-                    _dur = _air(hard_preempts[hi].asset)
+                    _dur = _entry_air(hard_preempts[hi])
                     _cursor = _soft_into_long(
                         hard_preempts[hi].asset, _cursor, _cursor + timedelta(seconds=_dur or DEFAULT_DURATION)
                     )
@@ -1910,31 +1988,36 @@ async def _get_queue_impl(station_id, limit, db):
                 sp_pa = _tz(soft_preempts[si].preempt_at)
                 if sp_pa <= _cursor:
                     _est_map[soft_preempts[si].id] = _cursor
-                    _dur = _air(soft_preempts[si].asset)
+                    _dur = _entry_air(soft_preempts[si])
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     _timed_end = _cursor
                     si += 1
                     continue
 
-            # 3. Play next regular song
-            if ri < len(regulars):
-                song = regulars[ri]
-                song_dur = _air(song.asset)
-                song_dur = max(1.0, song_dur - resume_offset(song))  # a paused shiur's remainder
+            # 3. Play next regular song (first the rest of a paused shiur)
+            if _carry is not None or ri < len(regulars):
+                if _carry is not None:
+                    song, (song_asset, song_dur) = None, _carry
+                    _carry = None
+                else:
+                    song = regulars[ri]
+                    song_asset = song.asset
+                    song_dur = _entry_air(song)
+                    _est_map[song.id] = _cursor
+                    ri += 1
                 song_end = _cursor + timedelta(seconds=song_dur)
 
                 # Check if hard preempt fires during this song
                 if hi < len(hard_preempts):
                     hp_pa = _tz(hard_preempts[hi].preempt_at)
                     if hp_pa < song_end:
-                        _est_map[song.id] = _cursor
-                        _cursor = hp_pa  # preempt will fire next iteration
-                        ri += 1
+                        if _crossed_long(song_asset, song_end, hp_pa, hard_preempts[hi]):
+                            _cursor = song_end  # it plays on; the hard item follows it
+                        else:
+                            _cursor = hp_pa  # preempt will fire next iteration
                         continue
 
-                _est_map[song.id] = _cursor
-                _cursor = _soft_into_long(song.asset, _cursor, _cursor + timedelta(seconds=song_dur))
-                ri += 1
+                _cursor = _soft_into_long(song_asset, _cursor, song_end)
             else:
                 # No regular songs left — process remaining preempts by time
                 next_hp = _tz(hard_preempts[hi].preempt_at) if hi < len(hard_preempts) else None
@@ -1942,14 +2025,14 @@ async def _get_queue_impl(station_id, limit, db):
                 if next_hp and (not next_sp or next_hp <= next_sp):
                     _cursor = max(_cursor, next_hp)
                     _est_map[hard_preempts[hi].id] = _cursor
-                    _dur = _air(hard_preempts[hi].asset)
+                    _dur = _entry_air(hard_preempts[hi])
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     _timed_end = _cursor
                     hi += 1
                 elif next_sp:
                     _cursor = max(_cursor, next_sp)
                     _est_map[soft_preempts[si].id] = _cursor
-                    _dur = _air(soft_preempts[si].asset)
+                    _dur = _entry_air(soft_preempts[si])
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     _timed_end = _cursor
                     si += 1
@@ -2031,6 +2114,16 @@ async def _get_queue_impl(station_id, limit, db):
     except Exception:
         logger.exception("Holiday tags failed for station %s", station_id)
 
+    # Times past the run-up to the next hard break can still move: the fit reorders the
+    # songs before a break until it starts (hour_fit), by a song or two. The page marks
+    # them "≈"; the ones before stay as shown (simulator, 2026-11-23)
+    _next_hard = min(
+        (_aware(e.preempt_at) for e in entries
+         if e.status == "pending" and e.preempt_at and not is_soft_timed(e) and _aware(e.preempt_at) > now_utc),
+        default=None,
+    )
+    firm_until = _next_hard - FIRM_BEFORE_BREAK if _next_hard is not None else None
+
     entries_data = []
     queue_duration = 0.0
     in_silence_block = False
@@ -2094,6 +2187,11 @@ async def _get_queue_impl(station_id, limit, db):
             "position": e.position,
             "status": e.status,
             "estimated_start": est_start,
+            # False: shown "≈", the fit before the next break may still move it
+            "estimate_firm": bool(
+                is_now or (e.preempt_at and not is_soft_timed(e)) or firm_until is None
+                or (e.id in _est_map and _aware(_est_map[e.id]) < firm_until)
+            ),
             "source": e.source,
             "preempt_at": e.preempt_at.isoformat() if e.preempt_at else None,
             # The control-room player fades the song only for these (controlroom/timing.ts)
