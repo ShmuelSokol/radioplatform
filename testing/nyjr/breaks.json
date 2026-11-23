@@ -3001,5 +3001,27 @@
   "block_names": "Highest Frequncy",
   "items": "Highest Frequncy",
   "next_item": "WEBER  KORBAN - OD YOSEF CHAI"
+ },
+ {
+  "start_utc": "2026-11-23T07:31:47Z",
+  "start_et": "2026-11-23 02:31:47",
+  "hour_et": "2026-11-23 02:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Night Mix ID",
+  "items": "Night Mix ID",
+  "next_item": "2:32\tLand of Your Soul - Reb Shlomo's Nigun"
+ },
+ {
+  "start_utc": "2026-11-23T08:03:12Z",
+  "start_et": "2026-11-23 03:03:12",
+  "hour_et": "2026-11-23 03:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Highest Frequncy",
+  "items": "Highest Frequncy",
+  "next_item": "Aslan Rav - Segulah   Hafkeid Alav"
  }
 ]
