@@ -340,8 +340,11 @@ def no_dead_air(res: Result, ctx: Context):
 
 
 def nothing_inside_a_shiur(res: Result, ctx: Context):
-    """A shiur or story paused for a hard item resumes after it, and no sponsorship or
-    soft item airs inside it (only hard time-check groups may pause it)."""
+    """A shiur or story paused for a timed item resumes after it, and a sponsorship airs inside
+    it only where the station's rule allows: a "pause" station without sponsorships_wait_for_talks,
+    and for a soft sponsorship only when more than 5 min of the shiur was left."""
+    from app.services import long_items
+
     check = "no sponsorship inside a shiur or story"
     res.checks_run.setdefault(check, 0)
     for sid, rows in _per_station(res.rows).items():
@@ -360,12 +363,29 @@ def nothing_inside_a_shiur(res: Result, ctx: Context):
                 if left > 120 and not at_candles:
                     _add(res, check, r, r.local_end, f"{r.title!r} cut with {left / 60:.0f} min left and never resumed")
                 continue
+            # Shmuel's rule (2026-11-17, long_items.py): on a "pause" station a sponsorship due
+            # while the shiur has more than 5 min left pauses it, and it resumes. Flag only what
+            # the station's settings do not allow.
+            cfg = ctx.config(sid) or {}
+            sponsors_wait = cfg.get(long_items.SPONSORSHIPS_WAIT) is True
+            pol = str(cfg.get(long_items.SETTING) or long_items.DEFAULT_POLICY).lower()
+            dur = (ctx.assets[r.asset_id].duration or 0) if r.asset_id in ctx.assets else 0
+            left_at_cut = dur - (r.cue_in + r.seconds) if dur else None
             for x in inside:
-                if x.is_sponsorship:
-                    _add(res, check, x, x.local_start,
-                         f"sponsorship {x.title!r} ({x.timing_mode}, due "
-                         f"{x.preempt_at.astimezone(x.tz):%H:%M} ) inside {r.title!r}" if x.preempt_at else
-                         f"sponsorship {x.title!r} inside {r.title!r}")
+                if not x.is_sponsorship:
+                    continue
+                due = f" due {x.preempt_at.astimezone(x.tz):%H:%M}" if x.preempt_at else ""
+                if sponsors_wait:
+                    why = "the station has sponsorships wait for talks"
+                elif pol != "pause":
+                    why = f"the station's rule is {pol!r}, not pause"
+                elif (x.timing_mode == "soft" and left_at_cut is not None
+                      and left_at_cut <= long_items.SOFT_PAUSE_MIN_LEFT_SECONDS):
+                    why = f"only {left_at_cut / 60:.1f} min of it was left, so the sponsorship should wait"
+                else:
+                    continue
+                _add(res, check, x, x.local_start,
+                     f"sponsorship {x.title!r} ({x.timing_mode}{due}) inside {r.title!r}: {why}")
             gap_resume = rows[back].cue_in - (r.cue_in + r.seconds)
             if gap_resume > 30:
                 _add(res, check, rows[back], rows[back].local_start,
@@ -753,6 +773,11 @@ def one_resume_per_pause(res: Result, ctx: Context):
             _count(res, check)
             nxt = parts[0]
             stopped = r.cue_in + r.seconds
+            # a fresh airing of the same item from its start (not a resume entry): the cut part
+            # had too little left to resume (long_items.MIN_REMAINING_TO_RESUME), and short
+            # rotations (Stories' three "talking" pieces) bring it back later on its own
+            if nxt.cue_in < 1.0 and not (nxt.source or "").startswith("resume@"):
+                continue
             if not (-6.0 <= nxt.cue_in - stopped <= 1.0):
                 _add(res, check, nxt, nxt.local_start,
                      f"{r.title!r} stopped at {stopped:.0f} s and carried on from {nxt.cue_in:.0f} s")
