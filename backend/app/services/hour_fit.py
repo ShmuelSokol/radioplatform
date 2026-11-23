@@ -526,6 +526,8 @@ async def _drop_block_leftovers(
 
 # station -> (hard item, first song after it) a redraw was asked for, so it is asked once
 _redraw_asked: dict[str, tuple] = {}
+_redraw_at: dict[str, float] = {}  # station -> monotonic time of its last redraw from here
+REDRAW_EVERY = 1800.0
 
 
 def request_redraw(station_id) -> None:
@@ -554,9 +556,15 @@ async def _redraw_if_misplaced(db: AsyncSession, station, hard_at: datetime, las
     mark = (hard_at, first.id)
     if _redraw_asked.get(key) == mark:
         return False
+    # At most one redraw per station in REDRAW_EVERY, whatever happens: a fill that
+    # kept disagreeing with this check must never redraw the queue on every look
+    tick = _time.monotonic()
+    if tick - _redraw_at.get(key, -REDRAW_EVERY) < REDRAW_EVERY:
+        return False
     if await _block_on_after(db, station, hard_at) == first.block_id:
         return False
     _redraw_asked[key] = mark
+    _redraw_at[key] = tick
     logger.warning(
         "Station %s: the songs after the %s hard item were drawn for another block; drawing them again",
         station.id, hard_at.strftime("%H:%M:%S"),

@@ -176,6 +176,12 @@ async def test_songs_drawn_for_a_later_block_after_the_break_are_drawn_again(db_
     await fit_before_hard_item(db_session, sid, on_air_ends - timedelta(minutes=2))
     await fit_before_hard_item(db_session, sid, on_air_ends - timedelta(minutes=2))
     assert redraws == [str(sid)]
+    # a fill that still disagreed would not bring a second redraw within 30 minutes
+    from app.services import hour_fit
+
+    hour_fit._redraw_asked.pop(str(sid), None)
+    await fit_before_hard_item(db_session, sid, on_air_ends - timedelta(minutes=2))
+    assert redraws == [str(sid)]
     # nothing taken out by the hour fit itself
     assert await _order(db_session, sid) == ["Instr 1", "Instr 2", "Morning 1", "Morning 2"]
 
