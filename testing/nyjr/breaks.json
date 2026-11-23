@@ -2869,5 +2869,49 @@
   "block_names": "Krias Shema Al HaMitah",
   "items": "Krias Shema Al HaMitah | Krias Shema Al HaMitah | Krias Shema Al HaMitah",
   "next_item": "Cohen Rabbi Mordchai - Krias Shma al Hamitah"
+ },
+ {
+  "start_utc": "2026-11-23T00:09:50Z",
+  "start_et": "2026-11-22 19:09:50",
+  "hour_et": "2026-11-22 19:00",
+  "spots": 3,
+  "total_seconds": 75,
+  "spot_seconds": "11 29 35",
+  "block_names": "Krias Shema Al HaMitah | More Stories for Kids",
+  "items": "Krias Shema Al HaMitah | Krias Shema Al HaMitah | More Stories for Kids",
+  "next_item": "Rebbi Hill - Daniel 1"
+ },
+ {
+  "start_utc": "2026-11-23T00:38:06Z",
+  "start_et": "2026-11-22 19:38:06",
+  "hour_et": "2026-11-22 19:00",
+  "spots": 1,
+  "total_seconds": 50,
+  "spot_seconds": "50",
+  "block_names": "More Stories for Kids",
+  "items": "More Stories for Kids",
+  "next_item": "Kosman R. Mishna - Shabbos 23"
+ },
+ {
+  "start_utc": "2026-11-23T00:47:20Z",
+  "start_et": "2026-11-22 19:47:20",
+  "hour_et": "2026-11-22 19:00",
+  "spots": 3,
+  "total_seconds": 80,
+  "spot_seconds": "11 37 32",
+  "block_names": "More Stories for Kids | Kol B'Ramah Sponsors",
+  "items": "More Stories for Kids | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Childrens Songs 2 - Thank You"
+ },
+ {
+  "start_utc": "2026-11-23T00:59:59Z",
+  "start_et": "2026-11-22 19:59:59",
+  "hour_et": "2026-11-22 19:00",
+  "spots": 2,
+  "total_seconds": 111,
+  "spot_seconds": "69 42",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH    CHANUKAH AND PURIM"
  }
 ]
