@@ -2913,5 +2913,16 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH    CHANUKAH AND PURIM"
+ },
+ {
+  "start_utc": "2026-11-23T01:06:54Z",
+  "start_et": "2026-11-22 20:06:54",
+  "hour_et": "2026-11-22 20:00",
+  "spots": 1,
+  "total_seconds": null,
+  "spot_seconds": "?",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": ""
  }
 ]
