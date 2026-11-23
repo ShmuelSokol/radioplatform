@@ -3177,5 +3177,49 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
   "next_item": "Pliskin  My Father My King - 101 Embarassment"
+ },
+ {
+  "start_utc": "2026-11-23T14:07:05Z",
+  "start_et": "2026-11-23 09:07:05",
+  "hour_et": "2026-11-23 09:00",
+  "spots": 1,
+  "total_seconds": 5,
+  "spot_seconds": "5",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  YAAKOV"
+ },
+ {
+  "start_utc": "2026-11-23T14:08:34Z",
+  "start_et": "2026-11-23 09:08:34",
+  "hour_et": "2026-11-23 09:00",
+  "spots": 2,
+  "total_seconds": 84,
+  "spot_seconds": "55 29",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Miami Boys Chanukah - Al Hanisim"
+ },
+ {
+  "start_utc": "2026-11-23T14:36:07Z",
+  "start_et": "2026-11-23 09:36:07",
+  "hour_et": "2026-11-23 09:00",
+  "spots": 3,
+  "total_seconds": 191,
+  "spot_seconds": "70 54 67",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Beri Weber 10 Neginas - Halleluka"
+ },
+ {
+  "start_utc": "2026-11-23T15:02:41Z",
+  "start_et": "2026-11-23 10:02:41",
+  "hour_et": "2026-11-23 10:00",
+  "spots": 3,
+  "total_seconds": null,
+  "spot_seconds": "48 49 ?",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
+  "next_item": ""
  }
 ]
