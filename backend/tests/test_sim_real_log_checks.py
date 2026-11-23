@@ -53,3 +53,44 @@ def test_a_spot_logged_at_twice_its_length_is_a_double_play():
     res = check_export(export)
     found = [f for f in res.findings if f.check == "spoken item not played twice in a row"]
     assert len(found) == 1 and "played twice" in found[0].text
+
+
+def _shiur_export(resume: bool):
+    """KBR Jerusalem 2026-11-23 5:30 AM: the Daf Yomi paused for the :30 time check and,
+    with resume, carried on to its end; without, the next song followed."""
+    export = _export(None)
+    export["assets"] += [
+        {"id": "daf", "title": "Succah 50", "asset_type": "daf_yomi", "category": "daf_yomi", "duration": 1500.0},
+        {"id": "tc", "title": "Time Announcement - 05:30", "asset_type": "time", "category": "time_announcement",
+         "duration": 6.0}]
+    t = datetime.fromisoformat(export["play_logs"][-1]["end_utc"])
+    rows = [("daf", 1260.0), ("tc", 6.0)]
+    rows += [("daf", 240.0)] if resume else []
+    rows += [("song", 240.0), ("song", 240.0)]
+    for aid, length in rows:
+        export["play_logs"].append({"station_id": SID, "asset_id": aid, "start_utc": t.isoformat(),
+                                    "end_utc": (t + timedelta(seconds=length)).isoformat()})
+        t += timedelta(seconds=length)
+    return export
+
+
+def test_a_paused_shiur_that_never_resumed_is_found():
+    res = check_export(_shiur_export(resume=False))
+    found = [f for f in res.findings if f.check == "paused shiur or story resumed and reached its end"]
+    assert len(found) == 1 and "never resumed" in found[0].text and "4.0 min left" in found[0].text
+
+
+def test_a_paused_shiur_that_resumed_to_its_end_passes():
+    res = check_export(_shiur_export(resume=True))
+    assert res.checks_run["paused shiur or story resumed and reached its end"] == 1
+    assert not [f for f in res.findings if f.check == "paused shiur or story resumed and reached its end"]
+
+
+def test_a_shiur_that_may_have_begun_before_the_log_is_not_judged():
+    """2026-11-23 export: the log starts at 12:00Z, the Daf began at 11:53Z; its parts in the
+    log add up short only because the first part is missing."""
+    export = _shiur_export(resume=False)
+    first_daf = next(i for i, p in enumerate(export["play_logs"]) if p["asset_id"] == "daf")
+    export["play_logs"] = export["play_logs"][first_daf:]
+    res = check_export(export)
+    assert not [f for f in res.findings if f.check == "paused shiur or story resumed and reached its end"]
