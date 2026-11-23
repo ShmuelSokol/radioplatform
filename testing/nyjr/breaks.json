@@ -3111,5 +3111,38 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors",
   "next_item": "Kosman R. Mishna - Eruvin 2"
+ },
+ {
+  "start_utc": "2026-11-23T12:11:22Z",
+  "start_et": "2026-11-23 07:11:22",
+  "hour_et": "2026-11-23 07:00",
+  "spots": 1,
+  "total_seconds": 42,
+  "spot_seconds": "42",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "BARUCH LEVINE Lev Chodosh - Standing Next To Me"
+ },
+ {
+  "start_utc": "2026-11-23T12:19:15Z",
+  "start_et": "2026-11-23 07:19:15",
+  "hour_et": "2026-11-23 07:00",
+  "spots": 1,
+  "total_seconds": 37,
+  "spot_seconds": "37",
+  "block_names": "Weather",
+  "items": "Weather",
+  "next_item": "7:19\tRechnitz\tHinei Hinei - Benny Friedman"
+ },
+ {
+  "start_utc": "2026-11-23T12:59:57Z",
+  "start_et": "2026-11-23 07:59:57",
+  "hour_et": "2026-11-23 07:00",
+  "spots": 2,
+  "total_seconds": 101,
+  "spot_seconds": "69 32",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH   Hip Chanukah"
  }
 ]
