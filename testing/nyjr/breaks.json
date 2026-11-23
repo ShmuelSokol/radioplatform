@@ -3144,5 +3144,16 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH   Hip Chanukah"
+ },
+ {
+  "start_utc": "2026-11-23T13:06:15Z",
+  "start_et": "2026-11-23 08:06:15",
+  "hour_et": "2026-11-23 08:00",
+  "spots": 1,
+  "total_seconds": null,
+  "spot_seconds": "?",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": ""
  }
 ]
