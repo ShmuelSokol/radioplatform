@@ -86,57 +86,117 @@ async def test_a_mixed_playlist_still_gets_the_holiday_mix(db_session: AsyncSess
     assert sum(1 for p in plan.picks if p.asset_id in chanukah) >= 10
 
 
+async def _blocks(db: AsyncSession, station, spans: dict[str, tuple[int, int]]) -> dict[str, str]:
+    """Schedule blocks around HOUR on the station's clock: name -> (first hour, last
+    hour) counted from HOUR's hour. Returns name -> block id (what songs carry)."""
+    local = HOUR.astimezone(ZoneInfo(station.timezone))
+    schedule = Schedule(id=uuid.uuid4(), station_id=station.id, name="Daily", is_active=True)
+    db.add(schedule)
+    await db.flush()
+    ids = {}
+    for name, (a, b) in spans.items():
+        block = ScheduleBlock(
+            id=uuid.uuid4(), schedule_id=schedule.id, name=name, recurrence_type=RecurrenceType.DAILY,
+            start_time=time((local.hour + a) % 24), end_time=time((local.hour + b) % 24),
+            created_at=HOUR - timedelta(days=3),
+        )
+        db.add(block)
+        ids[name] = str(block.id)
+    await db.flush()
+    return ids
+
+
+@pytest.fixture
+def redraws(monkeypatch):
+    from app.services import hour_fit
+
+    asked = []
+    monkeypatch.setattr(hour_fit, "request_redraw", lambda station_id: asked.append(str(station_id)))
+    return asked
+
+
 @pytest.mark.asyncio
-async def test_songs_of_a_block_that_ends_at_the_hard_break_do_not_air_after_it(db_session: AsyncSession):
-    """The run-up fills the time before the hour; a Carlebach song the queue now puts
-    after the 1 AM break, before the night block's songs, is taken out."""
+async def test_songs_of_a_block_that_ends_at_the_hard_break_do_not_air_after_it(db_session: AsyncSession, redraws):
+    """Carlebach ends at the hour: a Carlebach song the queue now puts after the
+    break, before the night block's songs, is taken out."""
     station = await _station(db_session)
+    sid = station.id
+    ids = await _blocks(db_session, station, {"carlebach": (-1, 0), "night": (0, 3)})
     on_air_ends = HOUR - timedelta(minutes=8)
     await _queue(db_session, station, on_air_ends, [
-        ("Carlebach 1", 240.0, {"block_id": "carlebach"}),
-        ("Carlebach 2", 260.0, {"block_id": "carlebach"}),  # on air at the hour, loses ~14 s
-        ("Carlebach 3", 200.0, {"block_id": "carlebach"}),  # would air at 1:01
-        ("Night 1", 240.0, {"block_id": "night"}),
-        ("Night 2", 240.0, {"block_id": "night"}),
+        ("Carlebach 1", 240.0, {"block_id": ids["carlebach"]}),
+        ("Carlebach 2", 260.0, {"block_id": ids["carlebach"]}),  # on air at the hour, loses ~14 s
+        ("Carlebach 3", 200.0, {"block_id": ids["carlebach"]}),  # would air at 1:01
+        ("Night 1", 240.0, {"block_id": ids["night"]}),
+        ("Night 2", 240.0, {"block_id": ids["night"]}),
     ])
-    sid = station.id
     assert await fit_before_hard_item(db_session, sid, on_air_ends - timedelta(minutes=2))
     await db_session.commit()
     assert await _order(db_session, sid) == ["Carlebach 1", "Carlebach 2", "Night 1", "Night 2"]
-    # nothing more to do on the next look
+    # nothing more to do on the next look, and no redraw: the night songs are right
     assert not await fit_before_hard_item(db_session, sid, on_air_ends - timedelta(minutes=2))
+    assert redraws == []
 
 
 @pytest.mark.asyncio
-async def test_a_block_that_goes_on_past_the_hour_keeps_its_songs(db_session: AsyncSession):
+async def test_a_block_that_goes_on_past_the_hour_keeps_its_songs(db_session: AsyncSession, redraws):
+    """Live 2026-11-23 4 AM: Night instrumental runs to 6 AM and the 6 AM block's songs
+    sat within the look. Every 4-6 AM song was taken out; now none is."""
     station = await _station(db_session)
+    sid = station.id
+    ids = await _blocks(db_session, station, {"instrumental": (-1, 2), "morning": (2, 5)})
+    on_air_ends = HOUR - timedelta(minutes=8)
+    songs = [("Instr 1", 240.0), ("Instr 2", 260.0)] + [(f"Instr {i}", 240.0) for i in range(3, 33)]
+    await _queue(db_session, station, on_air_ends, [
+        *[(t, s, {"block_id": ids["instrumental"]}) for t, s in songs],
+        ("Morning 1", 240.0, {"block_id": ids["morning"]}),
+        ("Morning 2", 240.0, {"block_id": ids["morning"]}),
+    ])
+    for look in range(3):
+        await fit_before_hard_item(db_session, sid, on_air_ends - timedelta(minutes=2))
+        await db_session.commit()
+    assert await _order(db_session, sid) == [t for t, _ in songs] + ["Morning 1", "Morning 2"]
+    assert redraws == []
+
+
+@pytest.mark.asyncio
+async def test_songs_drawn_for_a_later_block_after_the_break_are_drawn_again(db_session: AsyncSession, redraws):
+    """The queue Main was left with on 2026-11-23: the 6 AM block's songs right after
+    the 4 AM break. The station's automatic songs are drawn again, once."""
+    station = await _station(db_session)
+    sid = station.id
+    ids = await _blocks(db_session, station, {"instrumental": (-1, 2), "morning": (2, 5)})
     on_air_ends = HOUR - timedelta(minutes=8)
     await _queue(db_session, station, on_air_ends, [
-        ("Top 1", 240.0, {"block_id": "day"}),
-        ("Top 2", 260.0, {"block_id": "day"}),
-        ("Top 3", 200.0, {"block_id": "day"}),
-        ("Top 4", 240.0, {"block_id": "day"}),
+        ("Instr 1", 240.0, {"block_id": ids["instrumental"]}),
+        ("Instr 2", 260.0, {"block_id": ids["instrumental"]}),
+        ("Morning 1", 240.0, {"block_id": ids["morning"]}),
+        ("Morning 2", 240.0, {"block_id": ids["morning"]}),
     ])
+    await fit_before_hard_item(db_session, sid, on_air_ends - timedelta(minutes=2))
+    await fit_before_hard_item(db_session, sid, on_air_ends - timedelta(minutes=2))
+    assert redraws == [str(sid)]
+    # nothing taken out by the hour fit itself
+    assert await _order(db_session, sid) == ["Instr 1", "Instr 2", "Morning 1", "Morning 2"]
+
+
+@pytest.mark.asyncio
+async def test_a_persons_pick_after_the_break_is_never_taken_out(db_session: AsyncSession, redraws):
+    station = await _station(db_session)
     sid = station.id
+    ids = await _blocks(db_session, station, {"carlebach": (-1, 0), "night": (0, 3)})
+    on_air_ends = HOUR - timedelta(minutes=8)
+    await _queue(db_session, station, on_air_ends, [
+        ("Carlebach 1", 240.0, {"block_id": ids["carlebach"]}),
+        ("Carlebach 2", 260.0, {"block_id": ids["carlebach"]}),
+        ("Requested", 200.0, {"source": "manual"}),
+        ("Carlebach 3", 200.0, {"block_id": ids["carlebach"]}),
+        ("Night 1", 240.0, {"block_id": ids["night"]}),
+    ])
     await fit_before_hard_item(db_session, sid, on_air_ends - timedelta(minutes=2))
     await db_session.commit()
-    assert await _order(db_session, sid) == ["Top 1", "Top 2", "Top 3", "Top 4"]
-
-
-@pytest.mark.asyncio
-async def test_a_persons_pick_after_the_break_is_never_taken_out(db_session: AsyncSession):
-    station = await _station(db_session)
-    on_air_ends = HOUR - timedelta(minutes=8)
-    await _queue(db_session, station, on_air_ends, [
-        ("Carlebach 1", 240.0, {"block_id": "carlebach"}),
-        ("Carlebach 2", 260.0, {"block_id": "carlebach"}),
-        ("Requested", 200.0, {"source": "manual"}),
-        ("Carlebach 3", 200.0, {"block_id": "carlebach"}),
-        ("Night 1", 240.0, {"block_id": "night"}),
-    ])
-    await fit_before_hard_item(db_session, station.id, on_air_ends - timedelta(minutes=2))
-    await db_session.commit()
-    assert "Requested" in await _order(db_session, station.id)
+    assert "Requested" in await _order(db_session, sid)
+    assert redraws == []
 
 
 async def _sponsor_station(db: AsyncSession):

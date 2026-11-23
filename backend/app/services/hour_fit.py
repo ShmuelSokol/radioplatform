@@ -329,8 +329,13 @@ async def _fit_one(db: AsyncSession, station, now: datetime, hard_at: datetime, 
     # Songs drawn for a block that ends at this hard item but pushed past it (a fit
     # moved them, or songs ran longer than planned) would air in the next block: Main
     # 2026-11-23 aired a Carlebach song at 1:01 after its half hour ended at 1:00
-    if await _drop_block_leftovers(db, station, now, last, songs, engine):
+    if await _drop_block_leftovers(db, station, now, hard_at, last, songs, engine):
         return True
+    # Songs after the hard item drawn for a block that is not on then (they moved up
+    # when songs before them were taken out): the station's automatic songs are drawn
+    # again from now, as after a schedule change
+    if await _redraw_if_misplaced(db, station, hard_at, last, songs, key):
+        return False
     # A song's end point is only known once it is analysed, and the players analyse
     # a song just before it airs: 20 minutes ahead the fit would plan on file lengths
     # (the 02:00Z song had no analysis yet when it was chosen). Ask for the songs
@@ -468,7 +473,9 @@ async def _fit_one(db: AsyncSession, station, now: datetime, hard_at: datetime, 
     return True
 
 
-async def _drop_block_leftovers(db: AsyncSession, station, now: datetime, last, after: list, engine: bool) -> bool:
+async def _drop_block_leftovers(
+    db: AsyncSession, station, now: datetime, hard_at: datetime, last, after: list, engine: bool
+) -> bool:
     """Take out the automatic songs of the run-up's block that the queue now puts
     after the hard item, when the songs after them come from another block: the
     block ends there, so they would air in the wrong block. The next block's songs
@@ -490,6 +497,11 @@ async def _drop_block_leftovers(db: AsyncSession, station, now: datetime, last, 
         break
     if not ended or not leftovers:
         return False
+    # Only when the block really ends at this hard item: a later block in the queue
+    # is not enough (live 2026-11-23 4 AM: Main's Night instrumental runs to 6 AM,
+    # the 6 AM block's songs were within the look, and every 4-6 AM song was taken out)
+    if await _block_on_after(db, station, hard_at) == block:
+        return False
     from app.services.playout_engine import cued_entry_id, held_entry_ids
 
     preloaded = cued_entry_id(station.id) if engine else None
@@ -510,6 +522,66 @@ async def _drop_block_leftovers(db: AsyncSession, station, now: datetime, last, 
         station.id, len(gone), last.start.strftime("%H:%M:%S"),
     )
     return True
+
+
+# station -> (hard item, first song after it) a redraw was asked for, so it is asked once
+_redraw_asked: dict[str, tuple] = {}
+
+
+def request_redraw(station_id) -> None:
+    """Draw the station's unplayed automatic songs again shortly, in the background
+    (the rebuild a schedule edit uses). Tests replace it."""
+    from app.api.v1.playlists import _schedule_refresh
+
+    _schedule_refresh(station_id)
+
+
+async def _redraw_if_misplaced(db: AsyncSession, station, hard_at: datetime, last, after: list, key: str) -> bool:
+    """The first automatic song after the hard item was drawn for a block that is
+    neither the run-up's nor the one on after the hard item (live 2026-11-23: the 6 AM
+    block's songs waiting at 4:01 in Main's Night instrumental). Asks for a redraw
+    once per hard item and song; returns True when it did."""
+    first = None
+    for e in after:
+        if e.source != "auto" or e.preempt_at is not None:
+            return False
+        if e.asset is not None and (e.asset.asset_type or "music").lower() != "music":
+            continue
+        first = e
+        break
+    if first is None or not first.block_id or first.block_id == last.entry.block_id:
+        return False
+    mark = (hard_at, first.id)
+    if _redraw_asked.get(key) == mark:
+        return False
+    if await _block_on_after(db, station, hard_at) == first.block_id:
+        return False
+    _redraw_asked[key] = mark
+    logger.warning(
+        "Station %s: the songs after the %s hard item were drawn for another block; drawing them again",
+        station.id, hard_at.strftime("%H:%M:%S"),
+    )
+    request_redraw(station.id)
+    return True
+
+
+async def _block_on_after(db: AsyncSession, station, hard_at: datetime) -> str | None:
+    """The schedule block the fill draws for a minute after the hard item (the
+    winner of the station's active schedules), as its id."""
+    from sqlalchemy.orm import selectinload
+
+    from app.models.schedule import Schedule
+    from app.services.scheduling import SchedulingService
+
+    schedules = (
+        await db.execute(
+            select(Schedule)
+            .where(Schedule.station_id == station.id, Schedule.is_active.is_(True))
+            .options(selectinload(Schedule.blocks))
+        )
+    ).scalars().all()
+    ranked = SchedulingService(db).rank_matching_blocks(schedules, hard_at + timedelta(minutes=1), station)
+    return str(ranked[0][1].id) if ranked else None
 
 
 def _artist(entry) -> str | None:
