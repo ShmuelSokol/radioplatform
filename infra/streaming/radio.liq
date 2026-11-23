@@ -280,20 +280,53 @@ def rec ask_backend() =
     ""
   end
 end
+# Asks on their way (each with its download). Only one at a time: a flush while another
+# lane is on air starts an ask of its own, and with two the one whose file came first
+# was queued first, out of order (harness flush_during_download_timed, 2026-11-23)
+fetching = ref(0)
 def next_request() =
   def ask() = ask_backend() end
-  if time() < ask_after() or following() then
+  if time() < ask_after() or following() or fetching() > 0 then
     null()
   else
+    fetching := fetching() + 1
     try
-      uri = ref(ask())
+      # The file is downloaded here, not left to the music lane: a flush only empties
+      # the lane's queue, and a download still on its way was added after it and aired.
+      # The entry was forgotten by the flush on both sides, so the backend handed it out
+      # again and it aired twice (a sponsorship on Main, 14:19Z 2026-11-20, while the
+      # droplet was overloaded and downloads took 28 s). A download the queue changed
+      # under is dropped and the backend asked again for what is next now.
+      def fetch() =
+        before = flush_count()
+        uri = ask()
+        if uri == "" or uri == "stale" then
+          (uri, null())
+        else
+          r = request.create(uri)
+          if not request.resolve(timeout=120., r) then
+            log.important("next: the file of #{request_entry(r)} could not be fetched")
+            request.destroy(r)
+            ("", null())
+          elsif before != flush_count() then
+            log.important("next: the queue changed while #{request_entry(r)} downloaded; dropped, asking again")
+            request.destroy(r)
+            ("stale", null())
+          else
+            (uri, r)
+          end
+        end
+      end
+      got = ref(fetch())
       tries = ref(1)
-      while uri() == "stale" and tries() < 3 do
-        uri := ask()
+      while fst(got()) == "stale" and tries() < 3 do
+        got := fetch()
         tries := tries() + 1
       end
-      if uri() == "" or uri() == "stale" then null() else request.create(uri()) end
+      fetching := fetching() - 1
+      snd(got())
     catch err do
+      fetching := fetching() - 1
       log.important("next: backend unreachable: #{err}")
       ask_after := time() + 2.
       null()

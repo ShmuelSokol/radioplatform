@@ -47,6 +47,21 @@ def test_main_lane_request_settings():
     assert "?given=#{handed}" in liq
 
 
+
+def test_a_flush_drops_a_download_on_its_way():
+    """Main 14:19Z 2026-11-20: a flush emptied the music lane's queue while the next item
+    was still downloading; the download landed after it and the backend handed the same
+    entry again, so it aired twice. The ask downloads the file itself, drops it when a
+    flush came meanwhile, and only one ask runs at a time (harness flush_during_download*)."""
+    liq = _liq()
+    body = liq[liq.index("def next_request()"):liq.index("request.dynamic(")]
+    assert "fetching() > 0" in body
+    assert "request.resolve(timeout=120., r)" in body
+    assert "before != flush_count()" in body
+    assert "request.destroy(r)" in body
+    # the counter goes back down on every path, an unreachable backend too
+    assert body.count("fetching := fetching() - 1") == 2
+
 def test_levels_and_output_processing():
     """V1-4/V1-6/V1-7: per-track gain on main and overlay; compressor and limiter; 320 kbps."""
     liq = _liq()

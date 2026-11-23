@@ -325,6 +325,87 @@ async def _drop_timed_inside(db: AsyncSession, station_id, silence_id, start, en
     return len(ids)
 
 
+async def release_blackout(db: AsyncSession, start: datetime, end: datetime, affected) -> int:
+    """A blackout window was deleted or moved: its silence still waiting in the queue
+    leaves it, on every station it covered, unless another blackout covers that time.
+
+    A coming blackout's silence is queued at its start as hard timed items and handed to
+    the engine's timed lane ahead of time, so a window deleted minutes before it began
+    still aired its first silence in the middle of a story (KBR Jerusalem 14:15Z
+    2026-11-22, a test window deleted at 14:12:39Z). Those already in the engine's timed
+    lane are dropped there too, and engine stations fetch their blackout windows again
+    (the engine mutes everything but silence inside a window it knows). Silence on air
+    now is left to the playout tick, which ends it once no blackout covers the station.
+    Returns how many rows left the queue."""
+    from app.models.station import Station
+    from app.services import playout_engine
+    from app.services.station_service import window_covers_station
+
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    ids = affected.get("station_ids") if isinstance(affected, dict) else None
+    if ids is None:
+        station_ids = list((await db.execute(select(Station.id).where(Station.is_active == True))).scalars().all())  # noqa: E712
+    else:
+        station_ids = []
+        for raw in ids:
+            try:
+                station_ids.append(uuid.UUID(str(raw)))
+            except ValueError:
+                continue
+    others = list((await db.execute(
+        select(HolidayWindow).where(
+            HolidayWindow.is_blackout == True,  # noqa: E712
+            HolidayWindow.end_datetime > start - timedelta(minutes=2),
+            HolidayWindow.start_datetime < end,
+        )
+    )).scalars().all())
+    any_silence = select(Asset.id).where(Asset.asset_type == "silence")
+    total = 0
+    for station_id in station_ids:
+        rows = (await db.execute(
+            select(QueueEntry).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.asset_id.in_(any_silence),
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at >= start - timedelta(minutes=2),
+                QueueEntry.preempt_at < end,
+            )
+        )).scalars().all()
+
+        def still_covered(at: datetime) -> bool:
+            at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+            for w in others:
+                ws = w.start_datetime if w.start_datetime.tzinfo else w.start_datetime.replace(tzinfo=timezone.utc)
+                we = w.end_datetime if w.end_datetime.tzinfo else w.end_datetime.replace(tzinfo=timezone.utc)
+                if window_covers_station(w, station_id) and ws - timedelta(minutes=2) <= at < we:
+                    return True
+            return False
+
+        gone = [r for r in rows if not still_covered(r.preempt_at)]
+        for r in gone:
+            r.status = "played"
+        if gone:
+            await db.commit()
+            logger.info("Station %s: blackout from %s removed or moved; %d silence row(s) left the queue",
+                        station_id, start, len(gone))
+        total += len(gone)
+        if settings.engine_drives(station_id):
+            # All of them, not only those we remember handing over: a backend restart
+            # forgets that, and the engine ignores ids it does not hold
+            try:
+                if gone:
+                    await playout_engine.take_back_timed(station_id, [str(r.id) for r in gone])
+                await playout_engine.engine_refresh_blackouts(station_id)
+            except Exception as e:
+                logger.warning("Station %s: telling the engine about the removed blackout failed: %s",
+                               station_id, e)
+    return total
+
+
 # An active blackout's refill on an engine station: when it last ran (monotonic), per station
 ACTIVE_REFILL_EVERY = 600.0
 _active_refill_at: dict[str, float] = {}
