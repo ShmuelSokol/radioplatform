@@ -137,11 +137,16 @@ export function startLiveStream(audio: HTMLAudioElement, url: string, onFail: ()
     onFail();
   };
 
+  // Each play() call; a refusal of an older one is not this attempt's (2026-11-20: the
+  // MSE attempt's play(), interrupted by the plain element's new load when the stream
+  // has no CORS, was read as the plain element failing, and the page gave up the stream)
+  let playGen = 0;
   const tryPlay = (first: boolean) => {
+    const gen = ++playGen;
     let p: Promise<void> | undefined;
     try { p = audio.play(); } catch (e) { p = Promise.reject(e); }
     Promise.resolve(p).catch((e) => {
-      if (stopped) return;
+      if (stopped || gen !== playGen) return;
       if (!everPlayed && first && mode !== 'mse') { fail(); return; }
       // The browser wants a tap: say so and wait for the page to start us again
       if (refused(e)) { setState(audio, 'blocked'); clearTimeout(retryTimer); retryTimer = undefined; return; }

@@ -250,6 +250,12 @@ async function forms(browser) {
   await page.getByRole('button', { name: 'Login' }).click();
   await page.getByText('Welcome, Test Listener!').waitFor({ timeout: 3000 }).catch(() => {});
   check(`${tag}: right PIN logs in`, await page.getByText('Welcome, Test Listener!').count() === 1 && await page.getByText('Kumzitz lover', { exact: false }).count() === 1);
+  // No rating while a live show is on (PR 413: the now-playing record still names the
+  // last song, which nobody is hearing); once the show ends, the stars come back
+  check(`${tag}: no rating stars during the live show`, await page.getByRole('button', { name: 'Rate 4 stars' }).count() === 0);
+  station.live.shows.find((x) => x.id === 'ls9').status = 'ended';
+  const gone = await timeUntil(page, `() => !document.body.innerText.includes('LIVE: Motzei Shabbos Live')`, 17000);
+  check(`${tag}: live banner goes within one 15 s poll after the show ends`, gone >= 0 && gone <= 16000, `${gone} ms`);
   // Rate the song on air and favourite it; counts refresh
   await page.getByRole('button', { name: 'Rate 4 stars' }).click();
   await page.getByText('1 songs rated').waitFor({ timeout: 3000 }).catch(() => {});
@@ -1312,6 +1318,8 @@ async function streamRetry(browser, stream) {
     const station = makeStation();
     const base = station.nowPlaying;
     station.nowPlaying = (extra) => { const d = base(extra); return d && { ...d, stream_url: stream.noCorsUrl(station.SID) }; };
+    // A server-stream station: the page plays the stream only when playout-status says so
+    station.playout = { stations: { [station.SID]: { mode: 'server', engine: true, engine_ok: true, in_sync: true } }, default: { mode: 'browser' } };
     const { ctx } = await listenContext(browser, DESK, station);
     const { page, errors } = await openListen(ctx, station.SID);
     await page.getByText('On Air', { exact: true }).waitFor();
