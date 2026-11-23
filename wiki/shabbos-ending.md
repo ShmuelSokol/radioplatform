@@ -42,6 +42,12 @@ silence (candle lighting to shekia + 72).
   **Same item every week**: `candle_every_week` (+ `candle_every_week_title`), for a recording with no
   times in it (Shmuel 2026-11-22 chose the short sign-off "A gut Shabbos to our entire Kol B'ramah
   family..."), so nobody re-approves it weekly. A dated `candle_items` entry wins for its week.
+- **Nothing runs into it** (`_nothing_runs_into`, every pass from 30 min before the song until
+  it starts; KBR Jerusalem 2026-11-20 3:51:47 PM: a 7.3-min story started 4.5 min before the song
+  and was cut after 52 s): on the queue's own timeline, a waiting untimed non-song item that would
+  still be on air at the song's start (8 s margin) trades places with a later item that fits (a song
+  first, the longest that fits); with none it is skipped. Songs just fade (hour_fit). A pre-loaded
+  moved item is flushed from the engine.
 - **Windows**: Shabbos = reason "Shabbos", or a Yom Tov window starting on a Friday (station
   time). Erev Yom Tov only with `yom_tov`. Manual windows never.
 - **Tests**: `tests/test_shabbos_ending.py`; simulator `tests/test_station_sim.py -k good_shabbos`

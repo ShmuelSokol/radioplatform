@@ -234,7 +234,9 @@ async def reconcile(db: AsyncSession, station, now: datetime | None = None) -> d
         _analyse_soon(candle)
         wanted = plan(window.start_datetime, song, after, candle)
         if wanted and wanted[0][1] <= settle:
-            # The ending is already handed over (or about to be): leave it as it is
+            # The ending is already handed over (or about to be): leave it as it is,
+            # but still let nothing start that the song would cut
+            await _nothing_runs_into(db, station.id, wanted[0][1], now)
             return changed
 
     # Entries that no longer match what is wanted go (a changed setting, a new song
@@ -286,6 +288,7 @@ async def reconcile(db: AsyncSession, station, now: datetime | None = None) -> d
     changed["removed"] += await _song_not_earlier(db, station.id, cfg["song_asset_id"])
     changed["cleared"] = await _clear_the_way(db, station.id, song_at, window_start, now)
     await _after_item_first(db, station.id, window_start)
+    await _nothing_runs_into(db, station.id, song_at, now)
     if any(changed.values()):
         await db.commit()
         logger.info(
@@ -326,6 +329,93 @@ async def _song_not_earlier(db: AsyncSession, station_id, song_id: str) -> int:
     if removed:
         await db.flush()
     return removed
+
+
+# Untimed items are checked against the song's start from this long before it
+FIT_LOOKAHEAD = timedelta(minutes=30)
+# An item must end this long before the song to stay where it is (the queue's timeline
+# runs a few seconds early, as at the blackout: queue.SPOT_CUT_MARGIN)
+FIT_MARGIN = 8.0
+FIT_ROUNDS = 8
+
+
+async def _nothing_runs_into(db: AsyncSession, station_id, song_at: datetime, now: datetime) -> int:
+    """Nothing that cannot finish starts before the ending. KBR Jerusalem, Friday
+    2026-11-20 3:51:47 PM: the story "Rebbe Mendele Vorka" (7.3 min) started 4.5 min before
+    the back-timed song and was cut after 52 s (review thread's play-log check).
+
+    On the queue's own timeline, a waiting untimed item other than a song (a story,
+    shiur, sponsorship, jingle...) that would still be on air when the song starts trades
+    places with a later waiting item that fits in the room left (a song first, the longest
+    that fits); with none, it leaves the queue. A song that runs into it just fades, as
+    before any hard item (hour_fit moves songs). Every scheduler pass looks again, until
+    the song starts. Returns how many it moved or took out."""
+    if song_at - now > FIT_LOOKAHEAD or song_at <= now:
+        return 0
+    from app.api.v1.queue import _get_queue_impl
+    from app.services.long_items import is_long_form
+
+    done = 0
+    for _ in range(FIT_ROUNDS):
+        data = await _get_queue_impl(station_id, 500, db)
+        rows = []
+        for d in data.get("entries", []):
+            if d.get("status") != "pending" or d.get("preempt_at") or not d.get("estimated_start"):
+                continue
+            est = _aware(datetime.fromisoformat(d["estimated_start"]))
+            asset = d.get("asset") or {}
+            rows.append((est, float(asset.get("duration") or 0.0), d))
+        rows.sort(key=lambda r: r[0])
+
+        def is_song(d) -> bool:
+            asset = d.get("asset") or {}
+            kind = (asset.get("asset_type") or "").lower()
+            stub = type("A", (), {"asset_type": kind, "duration": asset.get("duration")})
+            return kind == "music" and not is_long_form(stub)
+
+        crossing = next(
+            (r for r in rows if r[0] < song_at and r[0] + timedelta(seconds=r[1] + FIT_MARGIN) > song_at
+             and (r[2].get("asset") or {}).get("asset_type") != "silence" and not is_song(r[2])),
+            None,
+        )
+        if crossing is None:
+            break
+        est, _length_s, d = crossing
+        room = (song_at - est).total_seconds() - FIT_MARGIN
+        later = [r for r in rows if r[0] > est and 0 < r[1] <= room
+                 and (r[2].get("asset") or {}).get("asset_type") != "silence"]
+        later.sort(key=lambda r: (not is_song(r[2]), -r[1]))
+        x = await db.get(QueueEntry, uuid.UUID(d["id"]))
+        if x is None:
+            break
+        if later:
+            y = await db.get(QueueEntry, uuid.UUID(later[0][2]["id"]))
+            x.position, y.position = y.position, x.position
+            logger.info("Shabbos ending on station %s: %s swapped with %s, it would run into the song at %s",
+                        station_id, d.get("asset", {}).get("title"), later[0][2].get("asset", {}).get("title"),
+                        song_at.isoformat())
+        else:
+            x.status = "skipped"
+            logger.warning("Shabbos ending on station %s: %s left the queue, it would run into the song at %s "
+                           "and nothing fits before it", station_id, d.get("asset", {}).get("title"),
+                           song_at.isoformat())
+        done += 1
+        await db.commit()
+        await _flush_if_held(station_id, {x.id})
+    return done
+
+
+async def _flush_if_held(station_id, ids: set) -> None:
+    """The engine already pre-loaded a moved item: it asks again for the next one."""
+    from app.config import settings
+
+    if not settings.engine_drives(station_id):
+        return
+    from app.services import playout_engine
+
+    held = {str(h) for h in playout_engine.held_entry_ids(station_id)}
+    if held & {str(i) for i in ids}:
+        await playout_engine.engine_flush(station_id)
 
 
 def _length(entry: QueueEntry) -> float:
