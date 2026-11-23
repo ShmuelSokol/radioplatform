@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import time_machine
 from sqlalchemy import select
 
 from app.models.asset import Asset
@@ -298,3 +299,67 @@ async def test_same_item_every_week(db_session):
     await shabbos_ending.reconcile(db_session, station, NOW + timedelta(minutes=1))
     mine = sorted([e for e in await _pending(db_session, station.id) if e.source == shabbos_ending.SOURCE], key=_at)
     assert [e.asset_id for e in mine] == [song.id, dated.id]
+
+
+async def _untimed(db, station, rows):
+    """rows: (title, asset_type, seconds) in queue order; returns their entries."""
+    out = []
+    for i, (title, kind, secs) in enumerate(rows):
+        a = Asset(id=uuid.uuid4(), title=title, asset_type=kind, category="x", duration=secs, file_path=f"{i}.mp3")
+        db.add(a)
+        await db.flush()
+        e = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=a.id, position=1 + i, status="pending",
+                       source="auto")
+        db.add(e)
+        out.append(e)
+    await db.commit()
+    return out
+
+
+SONG_AT = CANDLES - timedelta(seconds=276.29)
+
+
+@pytest.mark.asyncio
+async def test_story_that_would_run_into_the_song_trades_places_with_one_that_fits(db_session):
+    """KBR Jerusalem 2026-11-20: a 7.3-min story started 4.5 min before the song and was cut."""
+    station, _, song, _, _ = await _setup(db_session, after=False)
+    await shabbos_ending.reconcile(db_session, station, NOW)
+    story, tune, other = await _untimed(db_session, station, [
+        ("Rebbe Mendele Vorka", "story", 438.0), ("A song", "music", 200.0), ("Another story", "story", 500.0),
+    ])
+    with time_machine.travel(SONG_AT - timedelta(seconds=270), tick=False):
+        moved = await shabbos_ending._nothing_runs_into(
+            db_session, station.id, SONG_AT, SONG_AT - timedelta(seconds=270))
+    assert moved >= 1
+    for e in (story, tune, other):
+        await db_session.refresh(e)
+    assert tune.position < story.position, "the song that fits goes first"
+    assert tune.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_story_with_nothing_that_fits_leaves_the_queue(db_session):
+    station, _, song, _, _ = await _setup(db_session, after=False)
+    await shabbos_ending.reconcile(db_session, station, NOW)
+    (story, long2) = await _untimed(db_session, station, [("Story", "story", 438.0), ("Shiur", "shiur", 3000.0)])
+    with time_machine.travel(SONG_AT - timedelta(seconds=270), tick=False):
+        await shabbos_ending._nothing_runs_into(db_session, station.id, SONG_AT, SONG_AT - timedelta(seconds=270))
+    await db_session.refresh(story)
+    await db_session.refresh(long2)
+    assert story.status == "skipped" and long2.status == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_items_that_fit_and_songs_are_left_alone(db_session):
+    station, _, song, _, _ = await _setup(db_session, after=False)
+    await shabbos_ending.reconcile(db_session, station, NOW)
+    rows = await _untimed(db_session, station, [("Short story", "story", 120.0), ("Song", "music", 240.0)])
+    before = [(e.position, e.status) for e in rows]
+    with time_machine.travel(SONG_AT - timedelta(seconds=270), tick=False):
+        assert await shabbos_ending._nothing_runs_into(
+            db_session, station.id, SONG_AT, SONG_AT - timedelta(seconds=270)) == 0
+    for e in rows:
+        await db_session.refresh(e)
+    assert [(e.position, e.status) for e in rows] == before
+    # and far ahead of the song nothing is looked at
+    assert await shabbos_ending._nothing_runs_into(db_session, station.id, SONG_AT, SONG_AT - timedelta(hours=2)) == 0
