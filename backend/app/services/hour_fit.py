@@ -26,21 +26,35 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.models.queue_entry import QueueEntry, hard_timed
+from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed
+from app.services import long_items
 
 logger = logging.getLogger(__name__)
 
-# How far ahead of a hard item the run-up is planned
-HORIZON = timedelta(minutes=20)
+# How far ahead of a hard item the run-up is planned. The queue page shows times an
+# hour ahead: planned only 20 minutes ahead, every fit moved songs the page had already
+# shown, by 4 to 10 minutes after each break (simulator, Main 2026-11-19). Every hard
+# item in the next 70 minutes is planned, in time order; nearer the time, a fit is
+# only made again if the run-up has drifted (rarely, and then by one song).
+HORIZON = timedelta(minutes=70)
 # Queue entries looked at (the run-up itself and the songs that may replace it)
 LOOK = 60
 # A song that loses no more than this to the fade is left alone
 ACCEPTABLE_CUT = 15.0
+# Planned further ahead than REPLAN, a fit aims at this instead: song lengths drift by
+# a few seconds before the break, and a run-up planned to lose 15 s lost 19 by then and
+# was fitted again, which moved every song after the break that the queue page had
+# already shown (simulator, Main 2026-11-19)
+EARLY_TARGET = 8.0
+REPLAN = timedelta(minutes=20)
 # A swap must save at least this much, or the queue is left as it is
 WORTH_IT = 20.0
 # ...except one that brings the loss within ACCEPTABLE_CUT: that needs to save only
 # this much (a song losing 19 s could never be saved 20 s; Main 15:28Z 2026-11-19)
 WORTH_IT_INTO_ACCEPTABLE = 5.0
+# A fit losing at most this much more than the best one (or within ACCEPTABLE_CUT) is
+# as good: the one whose songs come from nearest in the queue is taken
+NEAR_ENOUGH = 5.0
 # A timed item due within this of a song's end starts at once (queue.TIMED_EARLY_START_SECONDS)
 EARLY_START = 8.0
 # Songs overlap by about this much at a change when a song has no measured
@@ -69,6 +83,13 @@ CONFIG_KEY = "fit_before_hard_items"  # automation_config: false switches it off
 
 _last_look: dict[str, float] = {}
 _said_nothing: dict[str, tuple] = {}
+# Hard items whose run-up has been planned once, per station. After that the run-up is
+# only fitted again if it drifts past ACCEPTABLE_CUT: sponsor entries kept in step by the
+# planner and measured end points move it by a few seconds, and fitting again at
+# EARLY_TARGET each time reordered songs three or four times an hour, every time moving
+# songs the queue page had shown (simulator, Main Friday 2026-11-27: songs shown at 7:48
+# aired at 8:01)
+_planned: dict[str, set[datetime]] = {}
 
 
 @dataclass
@@ -198,7 +219,7 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
         _last_look[key] = tick
     now = now or datetime.now(timezone.utc)
 
-    hard = (
+    hard_times = (
         await db.execute(
             select(QueueEntry.preempt_at)
             .where(
@@ -208,13 +229,21 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
                 QueueEntry.preempt_at <= now + HORIZON,
                 hard_timed(),
             )
+            .distinct()
             .order_by(QueueEntry.preempt_at)
-            .limit(1)
         )
-    ).scalar_one_or_none()
-    if hard is None:
-        return False
-    hard_at = _aware(hard)
+    ).scalars().all()
+    changed = False
+    planned = _planned.setdefault(key, set())
+    planned.intersection_update({_aware(t) for t in hard_times})
+    for hard in sorted({_aware(t) for t in hard_times}):
+        if await _fit_one(db, station, now, hard, key):
+            changed = True
+    return changed
+
+
+async def _fit_one(db: AsyncSession, station, now: datetime, hard_at: datetime, key: str) -> bool:
+    """The fit for one hard item: the songs before it, after any earlier timed items."""
 
     def _read(*where, limit):
         return (
@@ -232,13 +261,14 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
         (await db.execute(_read(QueueEntry.status == "pending", QueueEntry.preempt_at.is_(None), limit=LOOK)))
         .unique().scalars().all()
     )
+    queue_order = list(songs)  # `songs` is used up below
     timed = list(
         (
             await db.execute(
                 _read(
                     QueueEntry.status == "pending",
                     QueueEntry.preempt_at.isnot(None),
-                    QueueEntry.preempt_at < hard,
+                    QueueEntry.preempt_at < hard_at,
                     limit=LOOK,
                 )
             )
@@ -279,6 +309,17 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
         length = secs(entry)
         if length is None:
             return False
+        # An earlier hard item falls inside it: a song is cut there (its own fit has
+        # placed it); a shiur pauses or waits, which is planned when that item is next
+        crossed = next(
+            (e for e in timed if not is_soft_timed(e) and at < _aware(e.preempt_at) < at + timedelta(seconds=length)),
+            None,
+        )
+        if crossed is not None:
+            if entry.asset is not None and long_items.is_long_form(entry.asset):
+                return False
+            at = _aware(crossed.preempt_at)
+            continue
         slots.append(_Slot(entry, at, length))
         at += timedelta(seconds=length)
     if not slots:
@@ -302,7 +343,11 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
     loses = _cut(last.seconds, room)
     if loses is None:
         loses = last.seconds - room
-    if loses <= ACCEPTABLE_CUT:
+    planned = _planned.setdefault(key, set())
+    first_plan = hard_at not in planned and hard_at - now > REPLAN
+    target = EARLY_TARGET if first_plan else ACCEPTABLE_CUT
+    if loses <= target:
+        planned.add(hard_at)
         return False
 
     from app.services.playout_engine import cued_entry_id, held_entry_ids
@@ -346,12 +391,13 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
     else:
         unmeasured = []
 
+    # Every way to fill the run-up again: (seconds lost, the songs that go there)
+    options: list[tuple[float, tuple]] = []
     # One song in the last place...
-    best_cut, best = loses, None
     for cand in spare:
         cut = _cut(secs(cand), room)
-        if cut is not None and cut < best_cut:
-            best_cut, best = cut, (cand,)
+        if cut is not None and cut < loses:
+            options.append((cut, (cand,)))
     # ...or the last two places filled again (one long song, or a pair)
     before = slots[-2] if len(slots) > 1 else None
     if before is not None and movable(before.entry, before.start) and before.entry.block_id == block:
@@ -359,19 +405,35 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
         pool = [before.entry, last.entry, *spare]
         for a in pool:
             cut = _cut(secs(a), room2)
-            if cut is not None and cut < best_cut and a is not before.entry:
-                best_cut, best = cut, (a, None)
+            if cut is not None and cut < loses and a is not before.entry:
+                options.append((cut, (a, None)))
             for b in pool:
                 if b is a or (a is before.entry and b is last.entry):
                     continue
                 if _artist(a) and _artist(a) == _artist(b):
                     continue
                 cut = _cut(secs(a) + secs(b), room2)
-                if cut is not None and cut < best_cut:
-                    best_cut, best = cut, (a, b)
+                if cut is not None and cut < loses:
+                    options.append((cut, (a, b)))
+    best_cut, best = loses, None
+    if options:
+        least = min(cut for cut, _ in options)
+        # Of the fits about as good as the best, the one taken from nearest in the
+        # queue: the song pulled in airs earlier than the queue page showed and the
+        # one it replaces later, by as far as they were apart (simulator, Main
+        # 2026-11-19: a song shown at 00:57 aired at 02:13)
+        good_enough = max(target, least + NEAR_ENOUGH)
+
+        def reach(option) -> tuple:
+            cut, pick = option
+            return (max(e.position for e in pick if e is not None), cut)
+
+        best_cut, best = min((o for o in options if o[0] <= good_enough), key=reach)
     saves = loses - best_cut if best is not None else 0.0
     worth = saves >= WORTH_IT or (best_cut <= ACCEPTABLE_CUT and saves >= WORTH_IT_INTO_ACCEPTABLE)
     if best is None or not worth:
+        if loses <= ACCEPTABLE_CUT:
+            planned.add(hard_at)  # good enough as it is: not reordered later for a few seconds
         # Said once per hard item, so a live report can tell "looked and found nothing"
         # from "did not look"
         # (and again when songs to choose from appear: the first look often has none
@@ -387,14 +449,11 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
         return False
 
     if len(best) == 1:
-        _swap(last.entry, best[0])
+        _bring_forward(queue_order, last.entry, [best[0]])
     else:
-        first, second = best
-        if second is None:
-            # One song runs to the hard item; the two it replaces follow it
-            _swap(before.entry, first)
-        else:
-            _place([before.entry, last.entry], [first, second])
+        # One song runs to the hard item (the two it replaces follow it), or a pair
+        _bring_forward(queue_order, before.entry, [e for e in best if e is not None])
+    planned.add(hard_at)
     await db.flush()
     logger.info(
         "Station %s: songs before the %s hard item reordered (the song on air then loses %.0f s instead of %.0f s)",
@@ -408,18 +467,18 @@ def _artist(entry) -> str | None:
     return artist.strip().lower() if artist else None
 
 
-def _swap(a: QueueEntry, b: QueueEntry) -> None:
-    if a is not b:
-        a.position, b.position = b.position, a.position
+def _bring_forward(order: list[QueueEntry], first_place: QueueEntry, wanted: list[QueueEntry]) -> None:
+    """Put `wanted` (in that order) at `first_place` and the places after it; the songs
+    they pass each move one or two places on, keeping their order.
 
-
-def _place(places: list[QueueEntry], wanted: list[QueueEntry]) -> None:
-    """Put `wanted` at the queue positions of `places`, in order; entries pushed
-    out take the positions the incoming ones leave."""
-    positions = [e.position for e in places]
-    freed = [e.position for e in wanted if e not in places]
-    for entry, position in zip(wanted, positions):
+    Before, the song pushed out took the incoming one's old place: a song shown at
+    00:29 went to where its replacement had been and aired at 02:37 (simulator, Main
+    2026-11-19). Now it airs straight after the hard item, and the songs between
+    move by a song's length at most."""
+    start = order.index(first_place)
+    end = max(order.index(e) for e in wanted)
+    run = order[start:end + 1]
+    positions = sorted(e.position for e in run)
+    new = [*wanted, *(e for e in run if e not in wanted)]
+    for entry, position in zip(new, positions):
         entry.position = position
-    for entry in places:
-        if entry not in wanted:
-            entry.position = freed.pop(0)
