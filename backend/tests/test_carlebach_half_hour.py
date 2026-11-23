@@ -5,14 +5,14 @@ should not have:
    whose playlist plays only Carlebach;
 2. a Carlebach song at 1:01, after the block ended at the 1 AM hard break;
 3. its 12:30 sponsorships waited for the song on air, which a long song could carry
-   past 12:35, when the quiet hours start.
+   past 12:35, when the quiet hours start. PR 498 faded the song at 12:35 for them,
+   which cut a 7:45 Carlebach song mid-way; now such a break is skipped instead.
 """
 import uuid
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset
@@ -25,7 +25,7 @@ from app.models.sponsor import Sponsor
 from app.models.spot_schedule import SpotSchedule
 from app.models.station import Station
 from app.services.playlist_generator_service import generate
-from app.services.spot_schedule_service import cap_sponsor_waits
+from app.services.spot_schedule_service import clear_sponsor_wait_caps, skip_sponsors_past_quiet
 from tests.test_hour_fit import HOUR, _order, _queue, _station, fit_before_hard_item
 
 NY = ZoneInfo("America/New_York")
@@ -218,57 +218,95 @@ async def _sponsor_station(db: AsyncSession):
     return station, spot, other
 
 
-@pytest.mark.asyncio
-async def test_a_soft_sponsorship_break_waits_no_later_than_the_quiet_hours(db_session: AsyncSession):
-    station, spot, other = await _sponsor_station(db_session)
+def _night_local(h, m, s=0):
     night = (datetime.now(NY) + timedelta(days=1)).date()
+    return datetime(night.year, night.month, night.day, h, m, s, tzinfo=NY).astimezone(UTC)
 
-    def local(h, m):
-        return datetime(night.year, night.month, night.day, h, m, tzinfo=NY).astimezone(UTC)
 
+async def _break_after_song(db: AsyncSession, station, spot, other, song_seconds: float):
+    """A song on air from 12:29 and the 12:30 soft break waiting for it: a sponsorship
+    and a promo, plus a sponsorship break at 12:45 (in the quiet hours already)."""
+    song = _asset("Long Carlebach", category="Carlebach", duration=song_seconds)
+    db.add(song)
+    await db.flush()
     rows = {
-        "12:30 sponsor": QueueEntry(asset_id=spot.id, preempt_at=local(0, 30), source="block", timing_mode="soft"),
-        "12:30 limit 3": QueueEntry(asset_id=spot.id, preempt_at=local(0, 30), source="block", timing_mode="soft",
-                                    hard_by=local(0, 33)),
-        "12:00 sponsor": QueueEntry(asset_id=spot.id, preempt_at=local(0, 0), source="block", timing_mode="soft"),
-        "12:15 promo": QueueEntry(asset_id=other.id, preempt_at=local(0, 15), source="block", timing_mode="soft"),
-        "12:20 hard": QueueEntry(asset_id=spot.id, preempt_at=local(0, 20), source="block", timing_mode="hard"),
+        "song": QueueEntry(asset_id=song.id, status="playing", started_at=_night_local(0, 29), source="auto"),
+        "12:30 sponsor": QueueEntry(asset_id=spot.id, preempt_at=_night_local(0, 30), source="block",
+                                    timing_mode="soft"),
+        "12:30 promo": QueueEntry(asset_id=other.id, preempt_at=_night_local(0, 30), source="block",
+                                  timing_mode="soft"),
+        "1:00 hard": QueueEntry(asset_id=spot.id, preempt_at=_night_local(1, 0), source="block", timing_mode="hard"),
+    }
+    for i, entry in enumerate(rows.values()):
+        entry.id, entry.station_id, entry.position = uuid.uuid4(), station.id, i + 1
+        entry.status = entry.status or "pending"
+        db.add(entry)
+    await db.flush()
+    return {k: e.id for k, e in rows.items()}
+
+
+async def _statuses(db: AsyncSession, ids):
+    db.expire_all()
+    return {k: (await db.get(QueueEntry, i)).status for k, i in ids.items()}
+
+
+@pytest.mark.asyncio
+async def test_a_sponsorship_break_the_song_carries_into_the_quiet_hours_is_skipped_not_cut(db_session: AsyncSession):
+    """Main 2026-11-23 12:35 AM: the 12:30 sponsorships waited for a 7:45 Carlebach song
+    and then cut it at 12:35. Now the song plays to its end and the break's
+    sponsorships are skipped (missed plays); the promo still plays after the song."""
+    station, spot, other = await _sponsor_station(db_session)
+    sid = station.id
+    ids = await _break_after_song(db_session, station, spot, other, 465.0)  # ends 12:36:45
+    assert await skip_sponsors_past_quiet(db_session, station, _night_local(0, 31)) == 1
+    got = await _statuses(db_session, ids)
+    assert got == {"song": "playing", "12:30 sponsor": "cancelled", "12:30 promo": "pending",
+                   "1:00 hard": "pending"}
+    for i in ids.values():
+        assert (await db_session.get(QueueEntry, i)).hard_by is None  # nothing is cut
+    station = await db_session.get(Station, sid)
+    assert await skip_sponsors_past_quiet(db_session, station, _night_local(0, 32)) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_break_that_starts_before_the_quiet_hours_airs(db_session: AsyncSession):
+    station, spot, other = await _sponsor_station(db_session)
+    ids = await _break_after_song(db_session, station, spot, other, 300.0)  # ends 12:34
+    assert await skip_sponsors_past_quiet(db_session, station, _night_local(0, 31)) == 0
+    assert (await _statuses(db_session, ids))["12:30 sponsor"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_no_quiet_hours_no_skip(db_session: AsyncSession):
+    station, spot, other = await _sponsor_station(db_session)
+    station.automation_config = {}
+    ids = await _break_after_song(db_session, station, spot, other, 465.0)
+    assert await skip_sponsors_past_quiet(db_session, station, _night_local(0, 31)) == 0
+    assert (await _statuses(db_session, ids))["12:30 sponsor"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_the_old_fade_limit_at_the_quiet_hours_is_taken_off(db_session: AsyncSession):
+    """Entries queued while PR 498's cap was live carry hard_by = 12:35; that comes off,
+    a block's own earlier limit stays."""
+    station, spot, other = await _sponsor_station(db_session)
+    now = datetime.now(UTC)
+    rows = {
+        "capped": QueueEntry(asset_id=spot.id, preempt_at=_night_local(0, 30), source="block", timing_mode="soft",
+                             hard_by=_night_local(0, 35)),
+        "own limit": QueueEntry(asset_id=spot.id, preempt_at=_night_local(0, 30), source="block",
+                                timing_mode="soft", hard_by=_night_local(0, 33)),
     }
     for i, entry in enumerate(rows.values()):
         entry.id, entry.station_id, entry.position, entry.status = uuid.uuid4(), station.id, i + 1, "pending"
         db_session.add(entry)
     await db_session.flush()
-
-    sid = station.id
     ids = {k: e.id for k, e in rows.items()}
-    assert await cap_sponsor_waits(db_session, station, datetime.now(UTC)) == 1
+    assert await clear_sponsor_wait_caps(db_session, station, now) == 1
     db_session.expire_all()
-    station = await db_session.get(Station, sid)
     got = {k: (await db_session.get(QueueEntry, i)).hard_by for k, i in ids.items()}
-
-    def as_utc(dt):
-        return dt.replace(tzinfo=UTC) if dt is not None and dt.tzinfo is None else dt
-
-    assert as_utc(got["12:30 sponsor"]) == local(0, 35)  # faded at 12:35 at the latest
-    assert as_utc(got["12:30 limit 3"]) == local(0, 33)  # an earlier limit stays
-    assert got["12:00 sponsor"] is None  # 35 min before: not near enough to matter
-    assert got["12:15 promo"] is None  # no sponsorship in it
-    assert got["12:20 hard"] is None  # hard: it never waits
-    # and a second pass changes nothing
-    assert await cap_sponsor_waits(db_session, station, datetime.now(UTC)) == 0
-
-
-@pytest.mark.asyncio
-async def test_no_quiet_hours_no_cap(db_session: AsyncSession):
-    station, spot, _ = await _sponsor_station(db_session)
-    station.automation_config = {}
-    at = (datetime.now(UTC) + timedelta(days=1)).replace(second=0, microsecond=0)
-    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=spot.id, position=1,
-                              status="pending", source="block", preempt_at=at, timing_mode="soft"))
-    await db_session.flush()
-    assert await cap_sponsor_waits(db_session, station, datetime.now(UTC)) == 0
-    rows = (await db_session.execute(select(QueueEntry.hard_by).where(QueueEntry.station_id == station.id))).all()
-    assert rows == [(None,)]
+    assert got["capped"] is None
+    assert got["own limit"].replace(tzinfo=UTC) == _night_local(0, 33)
 
 
 @pytest.mark.asyncio
