@@ -2858,5 +2858,16 @@
   "block_names": "Childrens Hour",
   "items": "Childrens Hour | Childrens Hour | Childrens Hour | Childrens Hour",
   "next_item": "Reb Alter  Chanukah - Dreidel 3"
+ },
+ {
+  "start_utc": "2026-11-23T00:00:33Z",
+  "start_et": "2026-11-22 19:00:33",
+  "hour_et": "2026-11-22 19:00",
+  "spots": 3,
+  "total_seconds": 136,
+  "spot_seconds": "62 34 40",
+  "block_names": "Krias Shema Al HaMitah",
+  "items": "Krias Shema Al HaMitah | Krias Shema Al HaMitah | Krias Shema Al HaMitah",
+  "next_item": "Cohen Rabbi Mordchai - Krias Shma al Hamitah"
  }
 ]
