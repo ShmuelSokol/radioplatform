@@ -62,6 +62,22 @@ def test_a_flush_drops_a_download_on_its_way():
     # the counter goes back down on every path, an unreachable backend too
     assert body.count("fetching := fetching() - 1") == 2
 
+
+def test_back_to_music_never_skips_the_item_after_the_interrupted_one():
+    """KBR Jerusalem 10:30Z 2026-11-23: after the time check the interrupted shiur was
+    skipped; its resume was still downloading, "no song change yet" was taken for the old
+    song staying, and the second skip hit the resume as it arrived. The skip is given
+    again only while the interrupted entry is still the music lane's current item; and
+    while the lane is fetching its next item the hold lane keeps the stream quiet instead
+    of the emergency music (harness resume_arrives_after_time_check)."""
+    liq = _liq()
+    back = liq[liq.index("interrupted = entry"):liq.index("thread.run(delay=0.5, {check(0)})")]
+    assert "main_current_entry() == interrupted" in back
+    assert "main_requests_current_ref := fun () -> main_requests.current()" in liq
+    hold = liq[liq.index("def hold_open()"):liq.index('hold = switch(id="hold_gate"')]
+    assert "fetching_now()" in hold
+    assert "fetch_began := time()" in liq
+
 def test_levels_and_output_processing():
     """V1-4/V1-6/V1-7: per-track gain on main and overlay; compressor and limiter; 320 kbps."""
     liq = _liq()
@@ -295,7 +311,7 @@ def test_the_engine_holds_quiet_before_a_hard_item_instead_of_emergency_music():
     # hard item, the emergency lane must not fill in. The hold lane sits above it, is
     # open only while a timed item is loaded and due within 8 s, and is not reported.
     liq = (INFRA / "radio.liq").read_text()
-    assert "[on_air_quiet, timed, main, hold, blackout_quiet, emergency]" in liq
+    assert "[on_air_quiet, timed_heard, main_heard, hold, blackout_quiet, emergency]" in liq
     assert "(timed_pending() > 0 and left < 8. and left > -2.)" in liq
     assert 'elsif hold_open() then "hold"' in liq and 'elsif blackout_on() then "blackout" else "emergency" end' in liq
     assert "engine_proto = 6" in liq
@@ -502,7 +518,7 @@ def test_the_skip_back_to_music_is_checked_and_never_leaves_the_lane_muted():
     assert back.count("main.skip()") == 2
     assert 'main_interrupted() and on_air_lane() == "main" and main_changed_at() < asked' in back
     # not over an item already being read; and in the end sound rather than silence
-    assert "if main_fetched_at() < asked then" in back
+    assert "if main_fetched_at() < asked and main_current_entry() == interrupted then" in back
     give_up = back[back.index("would not go"):]
     assert "main_gain := 1." in give_up and "main_interrupted := false" in give_up
 
