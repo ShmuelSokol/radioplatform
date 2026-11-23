@@ -134,6 +134,15 @@ async def collect(sim) -> Result:
         for s in (await db.execute(select(SpotSchedule))).scalars().all():
             spot_sponsor[str(s.asset_id)] = str(s.sponsor_id)
             spot_station[str(s.asset_id)].add(str(s.station_id) if s.station_id else None)
+        from sqlalchemy.orm import selectinload
+
+        from app.models.schedule import Schedule
+
+        schedules = defaultdict(list)
+        for sc in (await db.execute(
+            select(Schedule).where(Schedule.is_active.is_(True)).options(selectinload(Schedule.blocks))
+        )).scalars().all():
+            schedules[str(sc.station_id)].append(sc)
     rows = []
     # Items a local FM box handed out that are not queue rows (tests/sim/offline.py):
     # timed items it worked out for the days past its queue, songs it drew, resumes
@@ -154,7 +163,7 @@ async def collect(sim) -> Result:
         ))
     rows.sort(key=lambda r: (r.station, r.start))
     res = Result(rows, names={k: v.name for k, v in stations.items()}, errors=list(sim.errors))
-    ctx = Context(sim, stations, entries, assets, spot_station, play_logs)
+    ctx = Context(sim, stations, entries, assets, spot_station, play_logs, schedules)
     for check in ALL_CHECKS:
         check(res, ctx)
     return res
@@ -187,6 +196,8 @@ class Context:
     assets: dict
     spot_station: dict
     play_logs: list = field(default_factory=list)
+    # station -> its active schedules with their blocks (songs_in_their_block)
+    schedules: dict = field(default_factory=dict)
 
     def window(self):
         return self.sim.start_dt.timestamp(), self.sim.t
@@ -832,6 +843,42 @@ def estimates_hold(res: Result, ctx: Context):
              f"{r.title!r} shown at {mark}{shown} (queue read {read}), aired {off / 60:+.1f} min off")
 
 
+SONG_BLOCK_SLACK_SECONDS = 180.0
+
+
+def songs_in_their_block(res: Result, ctx: Context):
+    """Each automatic song airs while the schedule block it was drawn for is on (Main
+    2026-11-23: a clean-up took the Night instrumental songs out at 2:59 AM and the
+    6 AM block's Top 500 songs aired from 4:01). A song may start up to
+    SONG_BLOCK_SLACK_SECONDS from its block's edges (song changes drift; the last
+    song of a block runs on into the next)."""
+    from app.services.scheduling import SchedulingService
+
+    check = "songs air in the schedule block they were drawn for"
+    res.checks_run.setdefault(check, 0)
+    svc = SchedulingService(None)
+    for r in res.rows:
+        if r.source != "auto" or not r.block_id or r.preempt_at is not None or r.lane == "emergency":
+            continue
+        if (r.kind or "music").lower() != "music" or ctx.in_show(r.station, r.start):
+            continue
+        st = ctx.stations[r.station]
+        schedules = ctx.schedules.get(r.station) or []
+
+        def on(t):
+            ranked = svc.rank_matching_blocks(schedules, datetime.fromtimestamp(t, UTC), st)
+            return ranked[0][1] if ranked else None
+
+        _count(res, check)
+        times = (r.start, r.start - SONG_BLOCK_SLACK_SECONDS, r.start + SONG_BLOCK_SLACK_SECONDS)
+        winners = [on(t) for t in times]
+        if any(b is not None and str(b.id) == str(r.block_id) for b in winners):
+            continue
+        drawn = next((b.name for sc in schedules for b in sc.blocks if str(b.id) == str(r.block_id)), r.block_id)
+        now = winners[0].name if winners[0] is not None else "no block"
+        _add(res, check, r, r.local_start, f"{r.title!r} drawn for {drawn!r} aired in {now!r}")
+
+
 def omer_count(res: Result, ctx: Context):
     """Sefiras HaOmer (Shmuel 2026-11-19): every hh:00 on the air during the count, the
     count airs right after the time check and before anything else of the hour, and says
@@ -900,4 +947,4 @@ def live_shows(res: Result, ctx: Context):
 
 ALL_CHECKS = [live_shows, estimates_hold, site_log_matches_air, one_resume_per_pause, shabbos_silence, shabbos_ending, hard_items_on_time, time_checks_on_the_hour, no_dead_air, nothing_inside_a_shiur,
               sponsor_spacing, station_ids, station_isolation, time_check_says_the_hour, weather_is_todays,
-              soft_items_wait_for_the_song, nothing_twice, omer_count]
+              soft_items_wait_for_the_song, nothing_twice, omer_count, songs_in_their_block]

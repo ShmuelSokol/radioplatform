@@ -156,3 +156,5 @@ CI: `tests/test_station_sim.py` runs in its own job, `backend-sim`, beside `back
 - Station-ID spacing (12-20 min, not next to a spot) applies only when `station_ids.placement` is `between_songs`; the default `hourly` puts IDs in the breaks.
 - A spoken item (spot, ID, time, weather...) logged at 1.8x its length or more was played twice back to back: the play log merges the two plays into one row, so "same sponsor within 20 min" cannot see it.
 - Exports carry `asset_categories` (Library > Also in, by category name); the simulator loads them, so a block on a category that exists only as an extra tag (Main's 3 AM instrumentals) finds its songs.
+
+Check "songs air in the schedule block they were drawn for" (2026-11-23): each automatic song's `block_id` must be the block the schedule has on at its start (±3 min for drift and a last song running on). Main 2026-11-23: PR 498's clean-up took the Night instrumental songs out and the 6 AM block's Top 500 songs aired from 4:01; on the code before PR 499 this check finds 37 such songs in a night, on main none (all three stations, a day each).
