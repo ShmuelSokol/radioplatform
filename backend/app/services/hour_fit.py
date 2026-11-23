@@ -292,7 +292,16 @@ async def _fit_one(db: AsyncSession, station, now: datetime, hard_at: datetime, 
         at = max(now, until)
     last_start = hard_at - timedelta(seconds=EARLY_START)
     if at >= last_start:
-        return False  # the item on air runs to the hard item
+        # The item on air runs to the hard item, so every waiting song comes after it.
+        # The clean-up of a block that ends there still applies: it is when the song
+        # before the hour is on air that a fit's swap or a redraw has left the last
+        # songs of the block behind it (simulator 2026-11-23: a Carlebach song at 1:00:54)
+        if playing is not None and playing.started_at is not None:
+            on = _Slot(playing, _aware(playing.started_at), 0.0)
+            if await _drop_block_leftovers(db, station, now, hard_at, on, songs, engine):
+                return True
+            await _redraw_if_misplaced(db, station, hard_at, on, songs, key)
+        return False
 
     # Play the queue forward to the hard item, the way the next item is picked:
     # a timed item whose time has come first, otherwise by position
@@ -507,7 +516,7 @@ async def _drop_block_leftovers(
     preloaded = cued_entry_id(station.id) if engine else None
     held = held_entry_ids(station.id) - ({preloaded} if preloaded else set())
     # Each one starts after the hard item at the earliest
-    soon = (last.start - now).total_seconds()
+    soon = (hard_at - now).total_seconds()
     gone = [
         e for e in leftovers
         if e.id not in held and soon >= (PRELOADED_FROZEN if e.id == preloaded else FROZEN)
@@ -518,8 +527,9 @@ async def _drop_block_leftovers(
         await db.delete(e)
     await db.flush()
     logger.info(
-        "Station %s: %d song(s) of a block that ends at the %s hard item taken out of the queue (they would air after it)",
-        station.id, len(gone), last.start.strftime("%H:%M:%S"),
+        "Station %s: %d song(s) of a block that ends at the %s hard item (station time) taken out of the queue "
+        "(they would air after it)",
+        station.id, len(gone), _local(station, hard_at),
     )
     return True
 
@@ -566,11 +576,20 @@ async def _redraw_if_misplaced(db: AsyncSession, station, hard_at: datetime, las
     _redraw_asked[key] = mark
     _redraw_at[key] = tick
     logger.warning(
-        "Station %s: the songs after the %s hard item were drawn for another block; drawing them again",
-        station.id, hard_at.strftime("%H:%M:%S"),
+        "Station %s: the songs after the %s hard item (station time) were drawn for another block; drawing them again",
+        station.id, _local(station, hard_at),
     )
     request_redraw(station.id)
     return True
+
+
+def _local(station, at: datetime) -> str:
+    from zoneinfo import ZoneInfo
+
+    try:
+        return at.astimezone(ZoneInfo(station.timezone or "UTC")).strftime("%H:%M:%S")
+    except Exception:
+        return at.strftime("%H:%M:%S UTC")
 
 
 async def _block_on_after(db: AsyncSession, station, hard_at: datetime) -> str | None:

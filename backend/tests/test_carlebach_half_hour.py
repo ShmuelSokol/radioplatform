@@ -269,3 +269,30 @@ async def test_no_quiet_hours_no_cap(db_session: AsyncSession):
     assert await cap_sponsor_waits(db_session, station, datetime.now(UTC)) == 0
     rows = (await db_session.execute(select(QueueEntry.hard_by).where(QueueEntry.station_id == station.id))).all()
     assert rows == [(None,)]
+
+
+@pytest.mark.asyncio
+async def test_leftovers_go_while_the_song_before_the_hour_is_on_air(db_session: AsyncSession, redraws):
+    """Simulator 2026-11-23: the redraw 15 min before 1 AM and a fit left a Carlebach
+    song behind the 1 AM break, and the look that would take it out stopped because
+    the song on air ran to the hour. It goes then too."""
+    from sqlalchemy import update
+
+    station = await _station(db_session)
+    sid = station.id
+    ids = await _blocks(db_session, station, {"carlebach": (-1, 0), "night": (0, 3)})
+    on_air_ends = HOUR + timedelta(seconds=20)  # the song on air is faded at the hour
+    await _queue(db_session, station, on_air_ends, [
+        ("Carlebach 25", 230.0, {"block_id": ids["carlebach"]}),
+        ("Night 1", 240.0, {"block_id": ids["night"]}),
+        ("Night 2", 240.0, {"block_id": ids["night"]}),
+    ])
+    await db_session.execute(
+        update(QueueEntry).where(QueueEntry.station_id == sid, QueueEntry.status == "playing")
+        .values(block_id=ids["carlebach"])
+    )
+    await db_session.commit()
+    assert await fit_before_hard_item(db_session, sid, HOUR - timedelta(minutes=3))
+    await db_session.commit()
+    assert await _order(db_session, sid) == ["Night 1", "Night 2"]
+    assert redraws == []
