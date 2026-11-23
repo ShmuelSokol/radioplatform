@@ -3056,5 +3056,38 @@
   "block_names": "Night Mix ID",
   "items": "Night Mix ID",
   "next_item": "Uluru - Valley of Winds"
+ },
+ {
+  "start_utc": "2026-11-23T10:06:03Z",
+  "start_et": "2026-11-23 05:06:03",
+  "hour_et": "2026-11-23 05:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Highest Frequncy",
+  "items": "Highest Frequncy",
+  "next_item": "Rainbow - With you in mind"
+ },
+ {
+  "start_utc": "2026-11-23T10:39:07Z",
+  "start_et": "2026-11-23 05:39:07",
+  "hour_et": "2026-11-23 05:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Kol B'Ramah  WMDI  107.9  Lakewood",
+  "items": "Kol B'Ramah  WMDI  107.9  Lakewood",
+  "next_item": "Uluru - Mutitjula Walk."
+ },
+ {
+  "start_utc": "2026-11-23T10:59:58Z",
+  "start_et": "2026-11-23 05:59:58",
+  "hour_et": "2026-11-23 05:00",
+  "spots": 1,
+  "total_seconds": 25,
+  "spot_seconds": "25",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "Sruly Bornstein - Arachin 6"
  }
 ]
