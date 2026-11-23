@@ -145,6 +145,16 @@ airs every night and is paused at the same second each night, so a run over seve
 has one `resume@N` entry per night for the same shiur. Counting them per item reported
 "2 resume entries" on Main's Shabbos/Yom Kippur run (2026-11-19) where each night had one.
 
-Check "queue page times hold" (2026-11-19): every 30 simulated minutes the run reads the queue as the control room does (`_get_queue_impl`) and keeps each waiting item's `estimated_start` for the next hour. Items that air more than 3 min from that time are findings. Automatic station IDs are left out, because they move on purpose. With the stand-in fixed (below), estimates held within about 30 s over an hour on Main.
+Check "queue page times hold" (2026-11-19): every 30 simulated minutes the run reads the queue as the control room does (`_get_queue_impl`) and keeps each waiting item's `estimated_start` for the next hour. Items that air more than 3 min from that time are findings; items the page marks "≈" (`estimate_firm` false, see hourly-slots.md) are held to 10 min in their own check. Automatic station IDs are left out, because they move on purpose. With the stand-in fixed (below), estimates held within about 30 s over an hour on Main.
 
 The stand-in engine now drops a flushed entry from its `given` list as radio.liq does (`/flush`: unless it is on air). Before, the backend took every flushed song for "aired without a start report" and marked it played. That emptied places in the queue: about a quarter of items aired 4 to 7 min off their estimate. The hold rule also counted the flushed song as pre-loaded, which caused the rare 4 to 6 s of emergency music between songs in the Yom Tov runs. Neither happens with the real engine.
+
+CI: `tests/test_station_sim.py` runs in its own job, `backend-sim`, beside `backend-test` (2026-11-22), in two halves (a matrix of two `-k` expressions in `.github/workflows/ci.yml`). In one job the suite reached 22 of its 30 minutes and PR 491 was cut off; the simulator file alone took 17 min on a runner of its own. A new scenario lands in the second half; move names between the halves when one passes about 20 min.
+
+## Real play-log checks (2026-11-23)
+
+- Station-ID spacing (12-20 min, not next to a spot) applies only when `station_ids.placement` is `between_songs`; the default `hourly` puts IDs in the breaks.
+- A spoken item (spot, ID, time, weather...) logged at 1.8x its length or more was played twice back to back: the play log merges the two plays into one row, so "same sponsor within 20 min" cannot see it.
+- Exports carry `asset_categories` (Library > Also in, by category name); the simulator loads them, so a block on a category that exists only as an extra tag (Main's 3 AM instrumentals) finds its songs.
+
+Check "songs air in the schedule block they were drawn for" (2026-11-23): each automatic song's `block_id` must be the block the schedule has on at its start (±3 min for drift and a last song running on). Main 2026-11-23: PR 498's clean-up took the Night instrumental songs out and the 6 AM block's Top 500 songs aired from 4:01; on the code before PR 499 this check finds 37 such songs in a night, on main none (all three stations, a day each).

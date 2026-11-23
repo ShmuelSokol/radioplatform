@@ -424,6 +424,32 @@ class SchedulerEngine:
                 except Exception:
                     logger.warning("Fitting songs before the hour failed for station %s", station_id, exc_info=True)
                     await _safe_rollback(db)
+                # A song drawn for a block that has ended by the time it would start
+                # gives way to the block that is on (hour_fit.drop_songs_of_ended_blocks)
+                from app.services.hour_fit import drop_songs_of_ended_blocks
+                try:
+                    station = await db.get(Station, station_id)
+                    async with advance_lock(station_id):
+                        if await drop_songs_of_ended_blocks(db, station):
+                            await db.commit()
+                except Exception:
+                    logger.warning("Checking songs of ended blocks failed for station %s", station_id, exc_info=True)
+                    await _safe_rollback(db)
+                # A sponsorship break the song on air carries into no-sponsorship time
+                # is skipped, not aired and not cut for (skip_sponsors_past_quiet)
+                from app.services.spot_schedule_service import skip_sponsors_past_quiet
+                try:
+                    station = await db.get(Station, station_id)
+                    async with advance_lock(station_id):
+                        skipped = await skip_sponsors_past_quiet(db, station)
+                        if skipped:
+                            await db.commit()
+                    if skipped and settings.engine_drives(station_id):
+                        from app.services import playout_engine
+                        await playout_engine.take_operator_change(db, station_id)
+                except Exception:
+                    logger.warning("Skipping sponsorships past quiet time failed for station %s", station_id, exc_info=True)
+                    await _safe_rollback(db)
                 station = await db.get(Station, station_id)
                 if settings.engine_drives(station.id):
                     # The playout engine owns the clock for this station: it asks for the

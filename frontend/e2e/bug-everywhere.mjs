@@ -81,6 +81,8 @@ async function emptyLists(ctx, station) {
       body: JSON.stringify({ station_id: 'st-1', timezone: 'America/New_York', days: 7, planned: [], unplaced: [], off_air: [] }) });
     if (path === '/spot-schedules/timing-defaults') return r.fulfill({ contentType: 'application/json',
       body: JSON.stringify({ on_the_hour: 'hard', half_hour: 'soft', other: 'soft', half_hour_time_check: false }) });
+    // A page of archives, not a list (the public Archives page reads .archives and .total)
+    if (path === '/archives') return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ archives: [], total: 0 }) });
     if (path === '/program-blocks/preview') return r.fulfill({ contentType: 'application/json',
       body: JSON.stringify({ timezone: 'America/New_York', hours: 24, occurrences: [] }) });
     if (!path.endsWith('/preview') && data && typeof data === 'object' && !Array.isArray(data) && !Object.keys(data).length) return r.fulfill({ contentType: 'application/json', body: '[]' });

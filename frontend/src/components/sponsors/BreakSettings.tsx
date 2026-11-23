@@ -18,8 +18,12 @@ export default function BreakSettings({ stationId }: { stationId: string }) {
   });
   const save = useMutation({
     mutationFn: (d: TimingDefaults) => setTimingDefaults(stationId, d),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['spot-timing-defaults'] });
+    onSuccess: (saved) => {
+      // The answer is the whole saved setting: put it in place at once. Waiting for the
+      // refetch let a second change made meanwhile send the old values back and undo the
+      // first (quiet hours typed, then "Sponsorships stop" changed: the quiet hours were lost).
+      // (No refetch of it either: a late answer could bring the older values back.)
+      queryClient.setQueryData(['spot-timing-defaults', stationId], saved);
       queryClient.invalidateQueries({ queryKey: ['spot-plan'] });
       queryClient.invalidateQueries({ queryKey: ['slot-room'] });
     },

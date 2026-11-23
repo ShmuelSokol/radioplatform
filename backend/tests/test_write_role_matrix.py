@@ -276,6 +276,7 @@ WRITE_POLICY = {
     ("PATCH", "/users/me/preferences"): ANY_LOGIN,
     ("DELETE", "/users/{user_id}"): ADMIN,
     ("PUT", "/users/{user_id}"): ADMIN,
+    ("POST", "/weather-readouts"): MANAGERS,
     ("POST", "/weather-readouts/"): MANAGERS,
     ("DELETE", "/weather-readouts/{readout_id}"): MANAGERS,
     ("PATCH", "/weather-readouts/{readout_id}"): MANAGERS,

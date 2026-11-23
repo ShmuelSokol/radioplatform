@@ -174,6 +174,8 @@ async def _add_missing_columns(engine):
         "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS until_next BOOLEAN NOT NULL DEFAULT false",
         "ALTER TABLE spot_schedules ADD COLUMN IF NOT EXISTS fixed_times VARCHAR(400)",
         "ALTER TABLE spot_schedules ADD COLUMN IF NOT EXISTS timing_mode VARCHAR(10)",
+        # Widening a VARCHAR changes no stored row; repeating it is harmless
+        "ALTER TABLE spot_schedules ALTER COLUMN dayparts TYPE VARCHAR(255)",
         # Sponsor portal columns
         "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE SET NULL",
         "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255)",

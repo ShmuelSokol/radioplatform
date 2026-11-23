@@ -134,6 +134,15 @@ async def collect(sim) -> Result:
         for s in (await db.execute(select(SpotSchedule))).scalars().all():
             spot_sponsor[str(s.asset_id)] = str(s.sponsor_id)
             spot_station[str(s.asset_id)].add(str(s.station_id) if s.station_id else None)
+        from sqlalchemy.orm import selectinload
+
+        from app.models.schedule import Schedule
+
+        schedules = defaultdict(list)
+        for sc in (await db.execute(
+            select(Schedule).where(Schedule.is_active.is_(True)).options(selectinload(Schedule.blocks))
+        )).scalars().all():
+            schedules[str(sc.station_id)].append(sc)
     rows = []
     # Items a local FM box handed out that are not queue rows (tests/sim/offline.py):
     # timed items it worked out for the days past its queue, songs it drew, resumes
@@ -154,7 +163,7 @@ async def collect(sim) -> Result:
         ))
     rows.sort(key=lambda r: (r.station, r.start))
     res = Result(rows, names={k: v.name for k, v in stations.items()}, errors=list(sim.errors))
-    ctx = Context(sim, stations, entries, assets, spot_station, play_logs)
+    ctx = Context(sim, stations, entries, assets, spot_station, play_logs, schedules)
     for check in ALL_CHECKS:
         check(res, ctx)
     return res
@@ -187,6 +196,8 @@ class Context:
     assets: dict
     spot_station: dict
     play_logs: list = field(default_factory=list)
+    # station -> its active schedules with their blocks (songs_in_their_block)
+    schedules: dict = field(default_factory=dict)
 
     def window(self):
         return self.sim.start_dt.timestamp(), self.sim.t
@@ -379,7 +390,7 @@ def sponsor_spacing(res: Result, ctx: Context):
 
 
 def station_ids(res: Result, ctx: Context):
-    """Station IDs 12 to 20 minutes apart (plus one song), never two spoken items in a
+    """Only the station's own IDs. With placement between_songs, also: 12 to 20 minutes apart (plus one song), never two spoken items in a
     row with an ID, never within the station's clear_minutes (default 3) of a break, and only the station's own IDs."""
     check = "station IDs spaced, own, clear of breaks"
     res.checks_run.setdefault(check, 0)
@@ -388,6 +399,9 @@ def station_ids(res: Result, ctx: Context):
         if not cfg.get("enabled"):
             continue
         own = cfg.get("category") or "station_id"
+        # Since IDs moved into the breaks, spacing and "not next to a spot" apply only when the
+        # station chose placement between_songs; hourly and every_block IDs sit in the break.
+        between_songs = cfg.get("placement") == "between_songs"
         # the station's own clear_minutes (Main and Stories use 1 since 2026-11-19)
         clear = float(cfg.get("clear_minutes", ID_CLEAR_OF_BREAK_MINUTES))
         ids = [r for r in rows if r.is_id and r.timing_mode is None]
@@ -395,6 +409,8 @@ def station_ids(res: Result, ctx: Context):
             _count(res, check)
             if r.category != own:
                 _add(res, check, r, r.local_start, f"ID {r.title!r} is category {r.category}, station uses {own}")
+        if not between_songs:
+            continue
         for a, b in zip(ids, ids[1:]):
             gap = (b.start - a.start) / 60
             if gap < ID_MIN - 0.1:
@@ -782,21 +798,27 @@ def weather_is_todays(res: Result, ctx: Context):
 
 # A start this far from what the queue page showed within the hour before counts as wrong
 ESTIMATE_OFF_SECONDS = 180.0
+ESTIMATE_APPROX_OFF_SECONDS = 600.0
 
 
 def estimates_hold(res: Result, ctx: Context):
     """What the queue page showed is when it airs: each item's estimated start, read
     every 30 minutes for the hour after, against its real start (Main 2026-11-19: a
-    Chanukah song shown at 11:07 aired at 10:28 and Shmuel looked for it in vain)."""
+    Chanukah song shown at 11:07 aired at 10:28 and Shmuel looked for it in vain).
+    A time shown "≈" (past the run-up to the next hard break, which the fit may still
+    reorder) is held to ESTIMATE_APPROX_OFF_SECONDS instead."""
     check = "queue page times hold: items air within 3 min of the time shown"
+    approx = "queue page times shown ≈ air within 10 min"
     res.checks_run.setdefault(check, 0)
+    res.checks_run.setdefault(approx, 0)
     started = {(r.station, r.entry_id): r for r in res.rows if r.entry_id and r.lane != "emergency"}
     # A local FM box offline (tests/sim/offline.py) plays from its own copy: the site's
     # page cannot know what it does until the line is back
     box_off = getattr(ctx.sim, "box_offline", None)
     worst: dict = {}
     for t, sid, est in getattr(ctx.sim, "snapshots", []):
-        for eid, ts in est.items():
+        for eid, shown in est.items():
+            ts, firm = shown if isinstance(shown, tuple) else (shown, True)
             r = started.get((sid, eid))
             # Automatic station IDs move on purpose (station_id_guard.postpone)
             if r is None or r.start < t or r.is_id:
@@ -806,17 +828,55 @@ def estimates_hold(res: Result, ctx: Context):
             # A live show that began after the page was read moves everything behind it
             if any(a < r.start + 1 and b > t for a, b in ctx.shows(sid)):
                 continue
-            _count(res, check)
+            name, limit = (check, ESTIMATE_OFF_SECONDS) if firm else (approx, ESTIMATE_APPROX_OFF_SECONDS)
+            _count(res, name)
             off = r.start - ts
-            if abs(off) > ESTIMATE_OFF_SECONDS:
-                key = (sid, eid)
+            if abs(off) > limit:
+                key = (name, sid, eid)
                 if key not in worst or abs(off) > abs(worst[key][0]):
                     worst[key] = (off, t, ts, r)
-    for (sid, eid), (off, t, ts, r) in worst.items():
+    for (name, sid, eid), (off, t, ts, r) in worst.items():
         shown = datetime.fromtimestamp(ts, UTC).astimezone(r.tz).strftime("%H:%M:%S")
         read = datetime.fromtimestamp(t, UTC).astimezone(r.tz).strftime("%H:%M")
-        _add(res, check, r, r.local_start,
-             f"{r.title!r} shown at {shown} (queue read {read}), aired {off / 60:+.1f} min off")
+        mark = "" if name == check else "≈"
+        _add(res, name, r, r.local_start,
+             f"{r.title!r} shown at {mark}{shown} (queue read {read}), aired {off / 60:+.1f} min off")
+
+
+SONG_BLOCK_SLACK_SECONDS = 180.0
+
+
+def songs_in_their_block(res: Result, ctx: Context):
+    """Each automatic song airs while the schedule block it was drawn for is on (Main
+    2026-11-23: a clean-up took the Night instrumental songs out at 2:59 AM and the
+    6 AM block's Top 500 songs aired from 4:01). A song may start up to
+    SONG_BLOCK_SLACK_SECONDS from its block's edges (song changes drift; the last
+    song of a block runs on into the next)."""
+    from app.services.scheduling import SchedulingService
+
+    check = "songs air in the schedule block they were drawn for"
+    res.checks_run.setdefault(check, 0)
+    svc = SchedulingService(None)
+    for r in res.rows:
+        if r.source != "auto" or not r.block_id or r.preempt_at is not None or r.lane == "emergency":
+            continue
+        if (r.kind or "music").lower() != "music" or ctx.in_show(r.station, r.start):
+            continue
+        st = ctx.stations[r.station]
+        schedules = ctx.schedules.get(r.station) or []
+
+        def on(t):
+            ranked = svc.rank_matching_blocks(schedules, datetime.fromtimestamp(t, UTC), st)
+            return ranked[0][1] if ranked else None
+
+        _count(res, check)
+        times = (r.start, r.start - SONG_BLOCK_SLACK_SECONDS, r.start + SONG_BLOCK_SLACK_SECONDS)
+        winners = [on(t) for t in times]
+        if any(b is not None and str(b.id) == str(r.block_id) for b in winners):
+            continue
+        drawn = next((b.name for sc in schedules for b in sc.blocks if str(b.id) == str(r.block_id)), r.block_id)
+        now = winners[0].name if winners[0] is not None else "no block"
+        _add(res, check, r, r.local_start, f"{r.title!r} drawn for {drawn!r} aired in {now!r}")
 
 
 def omer_count(res: Result, ctx: Context):
@@ -887,4 +947,4 @@ def live_shows(res: Result, ctx: Context):
 
 ALL_CHECKS = [live_shows, estimates_hold, site_log_matches_air, one_resume_per_pause, shabbos_silence, shabbos_ending, hard_items_on_time, time_checks_on_the_hour, no_dead_air, nothing_inside_a_shiur,
               sponsor_spacing, station_ids, station_isolation, time_check_says_the_hour, weather_is_todays,
-              soft_items_wait_for_the_song, nothing_twice, omer_count]
+              soft_items_wait_for_the_song, nothing_twice, omer_count, songs_in_their_block]
