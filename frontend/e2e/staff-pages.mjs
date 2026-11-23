@@ -82,10 +82,10 @@ async function sponsorsMenu(browser) {
     const nav = page.locator('nav');
     const button = nav.getByRole('button', { name: /^Sponsors/ });
     await button.waitFor({ timeout: 8000 }).catch(() => {});
-    const groups = (await nav.locator('div.hidden.md\\:flex > div.relative > button').allInnerTexts()).map((s) => s.trim());
+    const groups = (await nav.locator('div.hidden.lg\\:flex > div.relative > button').allInnerTexts()).map((s) => s.trim());
     check(`V3-83 ${role}: Sponsors is its own top menu, first after Dashboard`, groups[0] === 'Sponsors', groups.join(' | '));
     await button.click().catch(() => {});
-    const links = (await nav.locator('div.hidden.md\\:flex div.absolute a').allInnerTexts()).map((s) => s.trim());
+    const links = (await nav.locator('div.hidden.lg\\:flex div.absolute a').allInnerTexts()).map((s) => s.trim());
     check(`V3-83 ${role}: Sponsors menu shows exactly ${want.join(', ')}`, JSON.stringify(links) === JSON.stringify(want), links.join(' | '));
     if (want.includes('Sponsor requests')) {
       await nav.getByRole('link', { name: 'Sponsor requests' }).click();

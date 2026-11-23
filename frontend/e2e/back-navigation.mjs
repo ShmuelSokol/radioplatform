@@ -97,7 +97,7 @@ for (const [size, device] of SIZES) {
   await page.waitForURL(new RegExp(`/admin/sponsors/${target.id}`));
   await backBar.waitFor();
   const words1 = (await backBar.innerText()).trim();
-  if (!/Back to Sponsors/.test(words1)) fail(`${size} 1: Back line says "${words1}", wanted "Back to Sponsors"`);
+  if (!/Back to Clients/.test(words1)) fail(`${size} 1: Back line says "${words1}", wanted "Back to Clients"`);  // the page is "Clients" since PR 435
   await noSideways('client page');
   await shot('1-client-page');
   await backBar.click();
@@ -183,7 +183,7 @@ for (const [size, device] of SIZES) {
   await page.goto(`${BASE}/admin/sponsors/${target.id}?tab=contracts`);
   await backBar.waitFor();
   const w4 = (await backBar.innerText()).trim();
-  if (!/Back to Sponsors/.test(w4)) fail(`${size} 4: opened from a link, Back says "${w4}"`);
+  if (!/Back to Clients/.test(w4)) fail(`${size} 4: opened from a link, Back says "${w4}"`);
   await backBar.click();
   await page.waitForURL(/\/admin\/sponsors$/);
   await waitLit(new RegExp(target.name), '4 client row after a direct link');

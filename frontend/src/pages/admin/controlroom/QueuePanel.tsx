@@ -60,7 +60,7 @@ interface Props {
 // tight, so Song type and Playing from sit next to the title, not at the far right
 // (Shmuel 2026-11-19: the columns were "pulled so far apart").
 const COLS: ColumnDef[] = [
-  { id: 'time', label: 'Time', width: 104, min: 48 },
+  { id: 'time', label: 'Time', width: 118, min: 48 },  // fits "12:01:17AM Mon" (104 cut the day name at midnight)
   { id: 'len', label: 'Length', width: 48, min: 34 },
   { id: 'title', label: 'Title', width: 440, min: 120, shrink: true },
   { id: 'type', label: 'Song type', width: 96, min: 40,
