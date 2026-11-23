@@ -60,12 +60,14 @@ def _paused_items_finish(res, rows, assets, blackouts, stations):
     Jerusalem 2026-11-23 5:30 AM: the Daf Yomi paused for the time check never resumed and
     lost its last 4 minutes; the simulator's engine always resumes, so only the real log
     shows it). A part that stops at candle lighting, or is the last row of the log (still on
-    air), is not a finding. An operator who skipped the item shows here too."""
+    air), is not a finding, nor one that may have begun before the log starts. An operator who
+    skipped the item shows here too."""
     name = "paused shiur or story resumed and reached its end"
     res.checks_run.setdefault(name, 0)
-    last_row = {}
+    last_row, first_row = {}, {}
     for r in rows:
         last_row[r.station] = r
+        first_row.setdefault(r.station, r)
     by_item = defaultdict(list)
     for r in rows:
         if r.is_long and r.asset_id:
@@ -86,6 +88,10 @@ def _paused_items_finish(res, rows, assets, blackouts, stations):
         for airing in airings:
             final = airing[-1]
             if final is last_row.get(sid):
+                continue
+            # it may have begun before the log does: an earlier part is not in this export
+            # (2026-11-23 export: the Daf from 11:53Z and a story from 11:56Z, log from 12:00Z)
+            if airing[0].start - first_row[sid].start < float(a.duration):
                 continue
             left = float(a.duration) - (final.cue_in + final.seconds)
             if len(airing) == 1 and left <= NOT_FINISHED_SECONDS:

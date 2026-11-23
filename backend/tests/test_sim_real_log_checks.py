@@ -84,3 +84,13 @@ def test_a_paused_shiur_that_resumed_to_its_end_passes():
     res = check_export(_shiur_export(resume=True))
     assert res.checks_run["paused shiur or story resumed and reached its end"] == 1
     assert not [f for f in res.findings if f.check == "paused shiur or story resumed and reached its end"]
+
+
+def test_a_shiur_that_may_have_begun_before_the_log_is_not_judged():
+    """2026-11-23 export: the log starts at 12:00Z, the Daf began at 11:53Z; its parts in the
+    log add up short only because the first part is missing."""
+    export = _shiur_export(resume=False)
+    first_daf = next(i for i, p in enumerate(export["play_logs"]) if p["asset_id"] == "daf")
+    export["play_logs"] = export["play_logs"][first_daf:]
+    res = check_export(export)
+    assert not [f for f in res.findings if f.check == "paused shiur or story resumed and reached its end"]
