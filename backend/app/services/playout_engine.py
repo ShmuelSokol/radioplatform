@@ -434,6 +434,12 @@ async def engine_timed_drop(station_id, entry_ids: list[str]) -> bool:
     return await _command("/timed_drop", {"ids": list(entry_ids)}, station_id=station_id)
 
 
+async def engine_refresh_blackouts(station_id) -> bool:
+    """Make the engine fetch its blackout windows now (one was added, moved or removed);
+    otherwise it learns of the change on its next 30 s fetch."""
+    return await _command("/blackouts", {}, station_id=station_id)
+
+
 async def take_back_timed(station_id, entry_ids: list[str]) -> None:
     """These entries are soft again (they wait for a live show to end): forget that the
     timed lane has them and tell the engine to skip them there. They air from the queue."""

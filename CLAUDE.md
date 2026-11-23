@@ -153,7 +153,7 @@ radioplatform/
 | now_playing | now_playing.py | /now-playing |
 | websocket | websocket.py | /ws |
 | scheduler | scheduler.py | /scheduler |
-| holidays | holidays.py | /holidays |
+| holidays | holidays.py | /holidays (deleting or moving a blackout takes its queued silence out of the queue and the engine, `queue.release_blackout`; see `wiki/streaming-architecture.md`) |
 | sponsors | sponsors.py | /sponsors (CRUD; `/clients`, `/{id}/account`, `/{id}/plays`, `/{id}/missed-plays`: the client database, see `wiki/sponsor-accounts.md`; delete refused with contracts or plays) |
 | channels | channels.py | /channels |
 | icecast | icecast.py | /icecast: retired 2026-11-19 (the backend's own FM source); `GET /status` names the engine's streams, start and stop answer 410. The FM feed is the playout engine's stream |

@@ -64,7 +64,8 @@ def test_main_lane_retries_every_2_s_gives_a_download_120_s_and_preloads_one():
     # 2 s before the next ask (the lane itself asks every frame while a track plays)
     assert "if resp.status_code == 200 then" in nxt
     assert "ask_after := time() + 1.5" in nxt and "catch err do" in nxt
-    assert "if time() < ask_after() or following() then" in nxt
+    # (and none while another ask is still downloading: a flush during one queued two)
+    assert "if time() < ask_after() or following() or fetching() > 0 then" in nxt
 
 
 def test_start_report_dedupe():
