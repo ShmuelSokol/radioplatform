@@ -3089,5 +3089,27 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors",
   "next_item": "Sruly Bornstein - Arachin 6"
+ },
+ {
+  "start_utc": "2026-11-23T11:56:20Z",
+  "start_et": "2026-11-23 06:56:20",
+  "hour_et": "2026-11-23 06:00",
+  "spots": 1,
+  "total_seconds": 6,
+  "spot_seconds": "6",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "Miracles 2 - Heroes"
+ },
+ {
+  "start_utc": "2026-11-23T11:59:58Z",
+  "start_et": "2026-11-23 06:59:58",
+  "hour_et": "2026-11-23 06:00",
+  "spots": 1,
+  "total_seconds": 19,
+  "spot_seconds": "19",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "Kosman R. Mishna - Eruvin 2"
  }
 ]
