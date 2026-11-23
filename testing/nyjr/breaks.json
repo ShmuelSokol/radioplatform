@@ -2946,5 +2946,16 @@
   "block_names": "Mesivta D'Rakia",
   "items": "Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia",
   "next_item": "Krohn R. Pesach - Making Your Days Meaningful"
+ },
+ {
+  "start_utc": "2026-11-23T03:03:46Z",
+  "start_et": "2026-11-22 22:03:46",
+  "hour_et": "2026-11-22 22:00",
+  "spots": 2,
+  "total_seconds": null,
+  "spot_seconds": "35 ?",
+  "block_names": "Mesivta D'Rakia | Kol B'Ramah Sponsors",
+  "items": "Mesivta D'Rakia | Kol B'Ramah Sponsors",
+  "next_item": ""
  }
 ]
