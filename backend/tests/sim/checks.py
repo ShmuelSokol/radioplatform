@@ -379,7 +379,7 @@ def sponsor_spacing(res: Result, ctx: Context):
 
 
 def station_ids(res: Result, ctx: Context):
-    """Station IDs 12 to 20 minutes apart (plus one song), never two spoken items in a
+    """Only the station's own IDs. With placement between_songs, also: 12 to 20 minutes apart (plus one song), never two spoken items in a
     row with an ID, never within the station's clear_minutes (default 3) of a break, and only the station's own IDs."""
     check = "station IDs spaced, own, clear of breaks"
     res.checks_run.setdefault(check, 0)
@@ -388,6 +388,9 @@ def station_ids(res: Result, ctx: Context):
         if not cfg.get("enabled"):
             continue
         own = cfg.get("category") or "station_id"
+        # Since IDs moved into the breaks, spacing and "not next to a spot" apply only when the
+        # station chose placement between_songs; hourly and every_block IDs sit in the break.
+        between_songs = cfg.get("placement") == "between_songs"
         # the station's own clear_minutes (Main and Stories use 1 since 2026-11-19)
         clear = float(cfg.get("clear_minutes", ID_CLEAR_OF_BREAK_MINUTES))
         ids = [r for r in rows if r.is_id and r.timing_mode is None]
@@ -395,6 +398,8 @@ def station_ids(res: Result, ctx: Context):
             _count(res, check)
             if r.category != own:
                 _add(res, check, r, r.local_start, f"ID {r.title!r} is category {r.category}, station uses {own}")
+        if not between_songs:
+            continue
         for a, b in zip(ids, ids[1:]):
             gap = (b.start - a.start) / 60
             if gap < ID_MIN - 0.1:
