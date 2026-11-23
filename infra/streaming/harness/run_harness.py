@@ -1153,6 +1153,105 @@ async def sc_slow_short_item_keeps_its_place(h: Harness) -> None:
     await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
 
 
+async def sc_flush_during_download(h: Harness) -> None:
+    """Main 14:19Z 2026-11-20: a sponsorship aired twice back to back. The engine was
+    handed it and was still downloading it (the droplet was overloaded) when a queue
+    change flushed: the flush emptied the music lane's queue but not the download on its
+    way, and forgot the entry, so the backend handed it out again and both copies aired.
+    Here the file takes 8 s to arrive and an operator's Play next flushes 2 s into it:
+    the slow item airs once, after the Play next item."""
+    name = "flush_during_download"
+    await wait_music(h)
+    # a fresh song on air (40 s), so it is still playing through the 8 s download
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    await asyncio.sleep(3)
+    await h.clear_pending()
+    h.stack.slow_files["song5.mp3"] = 8.0
+    t0 = time.time()
+    try:
+        slow_id, _later = await h.queue([("song5", {}), ("song4", {})])
+        # the engine asks for the new head at once
+        urllib.request.urlopen(urllib.request.Request(
+            f"http://127.0.0.1:{PROXY_PORT}/{STATION_ID}/flush", data=b"{}", method="POST",
+            headers={"X-Playout-Token": TOKEN}), timeout=4).read()
+        await asyncio.sleep(2.5)
+        code, _ = h.api("POST", f"/stations/{STATION_ID}/queue/play-next", {"asset_id": str(h.assets["song6"])})
+        h.check(name, code == 201, "Play next accepted")
+        await asyncio.sleep(9)
+        pressed = time.time()
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        t6 = await h.wait_on_air("song6", 20)
+        await asyncio.sleep(3)
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        t5 = await h.wait_on_air("song5", 20)
+        await asyncio.sleep(3)
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        await asyncio.sleep(8)
+    finally:
+        h.stack.slow_files.pop("song5.mp3", None)
+    heard = h.heard(t0, time.time() - 1)
+    h.print_timeline(heard, pressed)
+    names = [n for _, n in timeline(heard) if n != "silence"]
+    slow = tone_name(TONES["song5"][0])
+    h.check(name, t6 is not None and t5 is not None and t6 < t5,
+            f"the Play next item airs, then the slow one: {names}")
+    after = [n for ts, n in timeline(heard) if ts >= pressed and n != "silence"]
+    h.check(name, after.count(slow) == 1, f"the slow item is heard once after the change: {after}")
+    blog = (h.stack.dir / "backend.log").read_text(errors="replace")
+    starts = blog.count(f"Engine started -> entry={slow_id} ")
+    h.check(name, starts == 1, f"the engine reported the slow item's start once ({starts})")
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+
+
+async def sc_flush_during_download_timed(h: Harness) -> None:
+    """The shape of Main 14:19Z 2026-11-20: a flush came while another lane was on air
+    (the sponsorships went out through the timed lane) and the next item was still
+    downloading. Then the engine asks again at once, the backend hands the same entry
+    again, and the download already on its way lands too: two copies, aired back to back.
+    Here: the slow item is downloading, an item goes on air with Fire now, and a flush
+    (a mode change that changes nothing) follows. The slow item airs exactly once."""
+    name = "flush_during_download_timed"
+    await wait_music(h)
+    # a fresh song on air (40 s), so it is still playing through the 8 s download
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    await asyncio.sleep(3)
+    await h.clear_pending()
+    h.stack.slow_files["song5.mp3"] = 8.0
+    t0 = time.time()
+    try:
+        slow_id, _later = await h.queue([("song5", {}), ("song4", {})])
+        urllib.request.urlopen(urllib.request.Request(
+            f"http://127.0.0.1:{PROXY_PORT}/{STATION_ID}/flush", data=b"{}", method="POST",
+            headers={"X-Playout-Token": TOKEN}), timeout=4).read()
+        await asyncio.sleep(1.0)
+        code, _ = h.api("POST", f"/stations/{STATION_ID}/queue/fire-now", {"asset_id": str(h.assets["song6"])})
+        h.check(name, code == 201, f"Fire now accepted ({code})")
+        await asyncio.sleep(1.5)
+        code, _ = h.api("POST", f"/stations/{STATION_ID}/queue/modes", {"hard_start": True, "spots": True})
+        h.check(name, code == 200, f"mode change accepted ({code})")
+        t6 = await h.wait_on_air("song6", 20)
+        await asyncio.sleep(9)
+        pressed = time.time()
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        t5 = await h.wait_on_air("song5", 20)
+        # the slow item plays to its end (40 s), then whatever follows it
+        await asyncio.sleep(50)
+    finally:
+        h.stack.slow_files.pop("song5.mp3", None)
+    heard = h.heard(t0, time.time() - 1)
+    h.print_timeline(heard, pressed)
+    tl = [(ts, n) for ts, n in timeline(heard) if n != "silence"]
+    slow = tone_name(TONES["song5"][0])
+    h.check(name, t6 is not None and t5 is not None, f"Fire now item, then the slow one aired: {[n for _, n in tl]}")
+    # Two copies back to back sound as one long tone: measure how long it was heard
+    loud = sum(WINDOW for _t, db, f in heard if db >= -45 and tone_name(f) == slow)
+    h.check(name, loud < 45, f"the slow item (40 s) was heard once, not twice in a row ({loud:.0f} s of it)")
+    blog = (h.stack.dir / "backend.log").read_text(errors="replace")
+    starts = blog.count(f"Engine started -> entry={slow_id} ")
+    h.check(name, starts == 1, f"the engine reported the slow item's start once ({starts})")
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+
+
 async def sc_two_sources_same_second(h: Harness) -> None:
     """V3-5: hard items from two sources due on the same second (the hourly time check and
     weather, and a program block's announcement). Each airs once, whole, one after the
@@ -5116,6 +5215,8 @@ SCENARIOS = {
     "play_now_next_before_hard_item": lambda h: sc_play_now_before_hard_item(h, next_during=True),
     "short_item_before_slow_file": sc_short_item_before_slow_file,
     "slow_short_item_keeps_its_place": sc_slow_short_item_keeps_its_place,
+    "flush_during_download": sc_flush_during_download,
+    "flush_during_download_timed": sc_flush_during_download_timed,
     "short_item_6s_before_slow_file": lambda h: sc_short_item_before_slow_file(h, "announce", 9.0),
     "backend_unreachable": sc_backend_unreachable,
     "local_box_commands": sc_local_box_commands,

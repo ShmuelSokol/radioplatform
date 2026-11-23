@@ -9,6 +9,7 @@ export interface QueueEntryLike {
   status: string;
   position: number;
   estimated_start?: string | null;
+  estimate_firm?: boolean;
   preempt_at?: string | null;
   [key: string]: unknown;
 }
@@ -43,7 +44,7 @@ function reslot(entries: QueueEntryLike[], order: QueueEntryLike[]): QueueEntryL
   return order.map((e, i) =>
     e === entries[i]
       ? e
-      : { ...e, position: entries[i].position, estimated_start: entries[i].estimated_start },
+      : { ...e, position: entries[i].position, estimated_start: entries[i].estimated_start, estimate_firm: entries[i].estimate_firm },
   );
 }
 
@@ -115,6 +116,7 @@ export function insertEntry(
   const next = data.entries[idx];
   entry.position = next ? next.position : maxPos + 1;
   entry.estimated_start = next?.estimated_start ?? null;
+  entry.estimate_firm = next?.estimate_firm;
   const entries = data.entries.slice();
   entries.splice(idx, 0, entry);
   return withEntries(data, entries);

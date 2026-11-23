@@ -179,7 +179,7 @@ export default function Navbar() {
               KBR Studio
             </Link>
             {/* Desktop nav - hidden on mobile */}
-            <div className="hidden md:flex items-center gap-3">
+            <div className="hidden lg:flex items-center gap-3">
               {isAuthenticated ? (
                 <>
                   {/* Standalone links */}
@@ -305,7 +305,7 @@ export default function Navbar() {
 
                 <span className="text-[11px] text-gray-500 hidden sm:inline">{user?.email}</span>
                 <button onClick={logout}
-                  className="text-[11px] bg-red-900 hover:bg-red-800 text-red-300 px-2 py-0.5 rounded transition hidden md:inline-block">
+                  className="text-[11px] bg-red-900 hover:bg-red-800 text-red-300 px-2 py-0.5 rounded transition hidden lg:inline-block">
                   Logout
                 </button>
               </>
@@ -318,7 +318,7 @@ export default function Navbar() {
             {/* Hamburger button - shown on mobile (also to visitors: the public links are hidden on phones) */}
             {(
               <button onClick={() => setMenuOpen(!menuOpen)} aria-label="Menu"
-                className="md:hidden inline-flex items-center justify-center min-w-[44px] min-h-[44px] text-gray-400 hover:text-white p-1">
+                className="lg:hidden inline-flex items-center justify-center min-w-[44px] min-h-[44px] text-gray-400 hover:text-white p-1">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   {menuOpen ? (
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -334,7 +334,7 @@ export default function Navbar() {
 
       {/* Mobile dropdown menu */}
       {menuOpen && isAuthenticated && (
-        <div className="md:hidden border-t border-[#2a2a5e] bg-[#0c0c30] max-h-[calc(100dvh-3rem)] overflow-y-auto">
+        <div className="lg:hidden border-t border-[#2a2a5e] bg-[#0c0c30] max-h-[calc(100dvh-3rem)] overflow-y-auto">
           <div className="px-4 py-2 space-y-1">
             {/* Standalone links */}
             {standaloneLinks.map(link => (
@@ -387,7 +387,7 @@ export default function Navbar() {
 
       {/* Mobile menu for visitors who are not signed in */}
       {menuOpen && !isAuthenticated && (
-        <div className="md:hidden border-t border-[#2a2a5e] bg-[#0c0c30]">
+        <div className="lg:hidden border-t border-[#2a2a5e] bg-[#0c0c30]">
           <div className="px-4 py-2 space-y-1">
             {publicLinks.map(link => (
               <Link key={link.to} to={link.to}

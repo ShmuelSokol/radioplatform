@@ -19,8 +19,9 @@ const BASE = process.env.BASE_URL || 'http://localhost:3000';
 const API = (process.env.API || 'http://localhost:8000') + '/api/v1';
 const SHOTS = process.env.SHOTS_DIR || '';
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
-const MAIN = '95358e09-1260-48d5-85b5-f851000773c0';
-const STORIES = '13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e';
+// Main on kbrlive.com; a local stack gives its own (e2e/walkthrough-seed.py prints it)
+const MAIN = process.env.MAIN_STATION_ID || '95358e09-1260-48d5-85b5-f851000773c0';
+const STORIES = process.env.STORIES_STATION_ID || '13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e';
 
 const login = await (await fetch(`${API}/auth/login`, {
   method: 'POST', headers: { 'content-type': 'application/json' },

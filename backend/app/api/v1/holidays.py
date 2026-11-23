@@ -165,22 +165,8 @@ async def create_holiday(
     await db.refresh(record)
 
     # If this blackout is active now or starting soon, fill affected stations with silence
-    from datetime import timezone as _tz
-    now = datetime.now(_tz.utc)
-    rec_end = record.end_datetime.replace(tzinfo=_tz.utc) if record.end_datetime.tzinfo is None else record.end_datetime
-    if record.is_blackout and rec_end > now:
-        try:
-            from app.api.v1.queue import fill_blackout_queue
-            affected = record.affected_stations
-            if affected is None:
-                station_result = await db.execute(select(Station).where(Station.is_active == True))
-                for st in station_result.scalars().all():
-                    await fill_blackout_queue(db, st.id, record)
-            else:
-                for sid in affected.get("station_ids", []):
-                    await fill_blackout_queue(db, sid, record)
-        except Exception as e:
-            logger.warning("Failed to fill blackout queue on holiday create: %s", e)
+    if record.is_blackout:
+        await _fill_silence(db, record)
 
     return record
 
@@ -203,11 +189,21 @@ async def update_holiday(
     await _check_stations(db, _, record.affected_stations)
     if "affected_stations" in changes:
         await _check_stations(db, _, changes["affected_stations"])
+    before = (record.start_datetime, record.end_datetime, record.is_blackout, record.affected_stations)
     for key, value in changes.items():
         setattr(record, key, value)
 
     await db.commit()
     await db.refresh(record)
+    after = (record.start_datetime, record.end_datetime, record.is_blackout, record.affected_stations)
+    if before != after and before[2]:
+        # Moved, shortened, narrowed or no longer a blackout: the old silence leaves the
+        # queue (and the engine), then the window as it is now is filled again
+        await _release_silence(db, before[0], before[1], before[3])
+        if record.is_blackout:
+            await _fill_silence(db, record)
+    elif before != after and record.is_blackout:
+        await _fill_silence(db, record)
     return record
 
 
@@ -225,8 +221,45 @@ async def delete_holiday(
         raise NotFoundError("Holiday window not found")
 
     await _check_stations(db, _, record.affected_stations)
+    was = (record.start_datetime, record.end_datetime, record.is_blackout, record.affected_stations)
     await db.delete(record)
     await db.commit()
+    if was[2]:
+        await _release_silence(db, was[0], was[1], was[3])
+
+
+async def _release_silence(db: AsyncSession, start, end, affected) -> None:
+    """The silence a removed or moved blackout queued leaves the queue and the engine."""
+    try:
+        from app.api.v1.queue import release_blackout
+
+        await release_blackout(db, start, end, affected)
+    except Exception as e:
+        logger.warning("Removing the silence of a removed or moved blackout failed: %s", e)
+        await db.rollback()
+
+
+async def _fill_silence(db: AsyncSession, record: HolidayWindow) -> None:
+    """Fill the stations a blackout covers with its silence, if it has not ended."""
+    from datetime import timezone as _tz
+    now = datetime.now(_tz.utc)
+    rec_end = record.end_datetime.replace(tzinfo=_tz.utc) if record.end_datetime.tzinfo is None else record.end_datetime
+    if rec_end <= now:
+        return
+    try:
+        from app.api.v1.queue import fill_blackout_queue
+        affected = record.affected_stations
+        ids = affected.get("station_ids") if isinstance(affected, dict) else None
+        if ids is None:
+            station_result = await db.execute(select(Station).where(Station.is_active == True))  # noqa: E712
+            ids = [st.id for st in station_result.scalars().all()]
+        for sid in ids:
+            await fill_blackout_queue(db, sid, record)
+            if settings.engine_drives(sid):
+                from app.services import playout_engine
+                await playout_engine.engine_refresh_blackouts(sid)
+    except Exception as e:
+        logger.warning("Failed to fill blackout queue: %s", e)
 
 
 @router.post("/preview")

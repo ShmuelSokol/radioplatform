@@ -58,6 +58,7 @@ provoked(/\b400\b.*\/billing\/invoices\/[0-9a-f-]+\/checkout/, /\/sponsor\/billi
 provoked(/e2e page crash/, null, 'F-GLOBAL: a page is made to crash to see the error page');
 provoked(/\/assets\/(Sponsors|Archives)-[\w-]+\.js|The site was updated while this tab was open/, null, 'a release is published under the open tab to see the reload notice');
 provoked(/\b401\b.*\/api\/v1\/auth\/refresh/, /\/admin\/stations/, 'the session checks use a sign-in that was ended');
+provoked(/warning toast: Your sign-in has expired\. Please sign in again\./, /\/(admin|sponsor)\/login/, 'V2-95 gives a tab a renewal that fails and V2-96 ends a session, to see the sign-in page and this notice');
 provoked(/\b401\b.*\/api\/v1\/auth\/(me|refresh)/, /\/sponsor\/campaigns/, 'the sponsor session checks open the portal with an ended sign-in');
 provoked(/\b429\b.*\/sponsorship\/copy-review/, /\/sponsor\/wording/, 'the wording check is pressed past its limit of 12 a minute');
 const BASE = process.env.BASE_URL || 'http://localhost:4330';
@@ -377,6 +378,7 @@ function adminRoutes() {
     ['/admin/live', ONAIR], [`/admin/live/${FX.show.id}/host`, ONAIR], [`/admin/live/${FX.show.id}/screen`, ONAIR],
     ['/admin/requests', MGR], ['/admin/archives', MGR], [`/admin/audio-enhance/${FX.assets[0].id}`, MGR],
     ['/admin/studio', ONAIR], ['/admin/listeners', MGR], ['/admin/crm', MGR], ['/admin/program-clock', ALL],
+    ['/admin/emergency', ALL],
   ];
 }
 const SPONSOR_ROUTES = ['/sponsor/dashboard', '/sponsor/campaigns', '/sponsor/billing', '/sponsor/wording'];
@@ -385,8 +387,8 @@ const PUBLIC_ROUTES = ['/stations', '/guide', '/hosts', '/archives'];
 const VIEW_ONLY = {
   admin: [],
   manager: ['/admin/rules', '/admin/bug-reports'],   // managers read bug reports; only an admin closes them
-  dj: ['/admin/assets', '/admin/schedules', '/admin/rules', '/admin/program-clock', '/admin/campaigns'],
-  viewer: ['/admin/dashboard', '/admin/assets', '/admin/schedules', '/admin/rules', '/admin/program-clock', '/admin/campaigns'],
+  dj: ['/admin/assets', '/admin/schedules', '/admin/rules', '/admin/program-clock', '/admin/campaigns', '/admin/emergency'],
+  viewer: ['/admin/dashboard', '/admin/assets', '/admin/schedules', '/admin/rules', '/admin/program-clock', '/admin/campaigns', '/admin/emergency'],
 };
 // Words a button that changes something starts with
 const WRITE_WORDS = /^(\+ ?)?(new|add|create|edit|delete|remove|save|upload|update|approve|reject|publish|rename|import|resolve|generate|record|schedule a|duplicate|copy to|move|insert|go next|loop|fade|soft fade|go live|● go live|play now|play next|mix over|next|start|▶ start|end show|panic|generate)\b/i;
@@ -715,7 +717,7 @@ section('shell', async () => {
     Content: [['Library', '/admin/assets'], ['Categories', '/admin/categories'], ['Types', '/admin/asset-types'], ['Playlists', '/admin/playlists'], ['Studio', '/admin/studio'], ['Reviews', '/admin/reviews']],
     Broadcast: [['Schedules', '/admin/schedules'], ['Program Blocks', '/admin/program-blocks'], ['Schedule Check', '/admin/schedule-check'], ['Rules', '/admin/rules'], ['Blackouts', '/admin/holidays'], ['Program Clock', '/admin/program-clock'], ['Live Shows', '/admin/live']],
     Audience: [['Listeners', '/admin/listeners'], ['Analytics', '/admin/analytics'], ['Requests', '/admin/requests'], ['Public Schedule', '/guide'], ['Archives', '/archives'], ['DJs', '/hosts']],
-    Settings: [['Users', '/admin/users'], ['Activity', '/admin/activity'], ['Alerts', '/admin/alerts'], ['Bug Reports', '/admin/bug-reports'], ['Site Updates', '/admin/site-updates'], ['Manage Stations', '/admin/stations'], ['CRM', '/admin/crm']],
+    Settings: [['Users', '/admin/users'], ['Activity', '/admin/activity'], ['Alerts', '/admin/alerts'], ['Emergency Alerts', '/admin/emergency'], ['Bug Reports', '/admin/bug-reports'], ['Site Updates', '/admin/site-updates'], ['Manage Stations', '/admin/stations'], ['CRM', '/admin/crm']],
   };
   const canOpen = (role, p) => {
     p = p.split('?')[0];
@@ -1598,44 +1600,26 @@ section('holidays', async () => {
 
 // ── Sponsors ────────────────────────────────────────────────────────────────
 section('sponsors', async () => {
+  // The Clients page (PR 435): one place per client. Its full flows (contracts, edits,
+  // portal) are e2e/sponsor-clients.mjs; here: the form's check and a save, both sizes.
   for (const view of ['desktop', 'iphone']) {
     const page = await newPage('manager', view);
-    const name = `E2E Ad ${view} ${RUN}`;
-    const form = page.locator('form');
-    const cardS = () => page.locator('div.bg-white.p-4', { hasText: name }).first();
-    await step(`F-SPONSORS-1 ${view}: name and audio path are required (validation)`, async () => {
+    const name = `E2E Client ${view} ${RUN}`;
+    const form = page.getByRole('form', { name: 'New client' });
+    await step(`F-SPONSORS-1 ${view}: New client asks for a name before saving`, async () => {
       await page.goto(`${BASE}/admin/sponsors`);
-      await page.getByRole('button', { name: 'New Sponsor' }).click();
-      await form.getByRole('button', { name: 'Create' }).click();
-      assert(await field(form, 'Name').evaluate(el => el.validationMessage), 'no message on empty name');
+      await page.getByRole('button', { name: 'New client' }).click();
+      await form.getByRole('button', { name: 'Save client' }).click();
+      await form.getByText('Give the client a name.').waitFor();
     }, page);
-    await step(`F-SPONSORS-1 ${view}: create (policy every N songs, hours, max per hour) saves fast`, async () => {
-      await field(form, 'Name').fill(name);
-      await form.getByPlaceholder('sponsors/spot.mp3').fill('sponsors/e2e.mp3');
-      await field(form, 'Length (sec)').fill('20');
-      await field(form, 'Priority').fill('3');
-      await field(form, 'Insertion Policy').selectOption('every_n_songs');
-      await field(form, 'Songs Between').fill('4');
-      await field(form, 'Active Hours (start)').fill('6');
-      await field(form, 'Active Hours (end)').fill('22');
-      await field(form, 'Max per Hour').fill('2');
-      const { ms } = await timedSave(page, 'create sponsor', (m, p) => m === 'POST' && p === '/sponsors', () => form.getByRole('button', { name: 'Create' }).click());
-      await cardS().waitFor();
-      const t = await cardS().innerText();
-      assert(t.includes('20s') && t.includes('Priority 3') && t.includes('every n songs') && t.includes('6:00-22:00') && t.includes('max 2/hr') && t.includes('every 4 songs'), `card "${t.replace(/\s+/g, ' ')}"`);
+    await step(`F-SPONSORS-1 ${view}: a new client saves fast and is listed`, async () => {
+      await form.getByLabel('Name on air (the business)').fill(name);
+      await form.getByLabel('Phone').fill('732-555-0142');
+      const { ms, resp } = await timedSave(page, 'create client', (m, p) => m === 'POST' && p === '/sponsors', () => form.getByRole('button', { name: 'Save client' }).click());
+      const body = await resp.json();
+      await page.getByText(name).first().waitFor();
+      await api('DELETE', `/sponsors/${body.id}`, { token: USERS.admin.token });
       return `saved in ${ms} ms`;
-    }, page);
-    await step(`F-SPONSORS-1 ${view}: Edit saves; Delete (confirm)`, async () => {
-      await cardS().getByRole('button', { name: 'Edit' }).click();
-      await field(form, 'Priority').fill('5');
-      await timedSave(page, 'update sponsor', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/sponsors/'), () => form.getByRole('button', { name: 'Update' }).click());
-      await cardS().filter({ hasText: 'Priority 5' }).waitFor();
-      await timedSave(page, 'delete sponsor', (m, p) => m === 'DELETE' && p.startsWith('/sponsors/'), () => cardS().getByRole('button', { name: 'Delete' }).click());
-      await cardS().waitFor({ state: 'detached' });
-    }, page);
-    await step(`F-SPONSORS-2 ${view}: Client Portal link opens the sponsor login`, async () => {
-      await page.getByRole('link', { name: 'Client Portal' }).click();
-      await waitPath(page, '/sponsor/login');
     }, page);
     await closePage(page);
   }
@@ -1664,7 +1648,7 @@ section('campaigns', async () => {
     assert(body.sponsor_id === FX.sponsor.id && body.budget_cents === 25000, `saved ${JSON.stringify(body).slice(0, 160)}`);
     FX.campaign = body;
     const t = await row(admin).innerText();
-    assert(t.includes(FX.sponsor.name) && t.includes('2027-04-01') && t.includes('$250.00') && t.includes('draft'), `row "${t.replace(/\s+/g, ' ')}"`);
+    assert(t.includes(FX.sponsor.name) && t.includes('Apr 1, 2027') && t.includes('$250.00') && t.includes('draft'), `row "${t.replace(/\s+/g, ' ')}"`);
     return `saved in ${ms} ms`;
   }, admin);
   await step('F-CAMPAIGNS-1 admin: sponsor filter; open it, Save Status (approved), Submit Draft, Send comment', async () => {
@@ -1820,14 +1804,37 @@ section('spot-schedule', async () => {
     }, page);
     await step('F-SPOTSCHED-3 timing defaults per daypart: changing "Spots on the hour play" saves', async () => {
       await page.locator('select', { has: page.locator(`option[value="${FX.station.id}"]`) }).last().selectOption(FX.station.id);
-      const sel = page.locator('label', { hasText: 'Spots on the hour play' }).locator('select');
+      const sel = page.locator('label', { hasText: 'On the hour, time, weather and sponsorships play' }).locator('select');
       const was = await sel.inputValue();
       const to = was === 'hard' ? 'soft' : 'hard';
       await timedSave(page, 'timing default', (m, p) => m !== 'GET' && p.includes('timing'), () => sel.selectOption(to));
       await page.reload();
       await page.locator('select', { has: page.locator(`option[value="${FX.station.id}"]`) }).last().selectOption(FX.station.id);
-      assert(await page.locator('label', { hasText: 'Spots on the hour play' }).locator('select').inputValue() === to, 'not kept');
-      await page.locator('label', { hasText: 'Spots on the hour play' }).locator('select').selectOption(was);
+      assert(await page.locator('label', { hasText: 'On the hour, time, weather and sponsorships play' }).locator('select').inputValue() === to, 'not kept');
+      await page.locator('label', { hasText: 'On the hour, time, weather and sponsorships play' }).locator('select').selectOption(was);
+    }, page);
+    // Main's 107.9 settings (2026-11-22): no half-hour time check, no sponsorships 00:35-06:00,
+    // sponsorships stop before candle lighting. Each must save and stay after a reload.
+    await step('F-SPOTSCHED-3 half-hour time check, quiet hours and stop-before-Shabbos save and stay', async () => {
+      const pick = () => page.locator('select', { has: page.locator(`option[value="${FX.station.id}"]`) }).last().selectOption(FX.station.id);
+      const box = page.getByTestId('half-hour-time-check');
+      const was = await box.isChecked();
+      await timedSave(page, 'half-hour time check', (m, p) => m !== 'GET' && p.includes('timing'), () => box.click());
+      const from = page.getByLabel('No sponsorships from');
+      await from.fill('00:35');
+      await timedSave(page, 'quiet hours', (m, p) => m !== 'GET' && p.includes('timing'), () => from.blur());
+      const stop = page.getByTestId('sponsors-stop-before');
+      await stop.fill('45');
+      await timedSave(page, 'stop before blackout', (m, p) => m !== 'GET' && p.includes('timing'), () => stop.blur());
+      await page.reload();
+      await pick();
+      assert(await page.getByTestId('half-hour-time-check').isChecked() === !was, 'half-hour time check not kept');
+      assert(await page.getByLabel('No sponsorships from').inputValue() === '00:35', 'quiet start not kept');
+      assert(await page.getByLabel('No sponsorships until').inputValue() === '06:00', 'quiet end not filled in as 06:00');
+      assert(await page.getByTestId('sponsors-stop-before').inputValue() === '45', 'stop-before not kept');
+      const t = await api('GET', `/spot-schedules/timing-defaults?station_id=${FX.station.id}`, { token: USERS.admin.token });
+      assert(t.sponsor_quiet_start === '00:35' && t.sponsor_quiet_end === '06:00' && t.sponsors_stop_before_blackout_minutes === 45, `saved ${JSON.stringify(t)}`);
+      await api('PUT', '/spot-schedules/timing-defaults', { token: USERS.admin.token, body: { ...t, station_id: FX.station.id, half_hour_time_check: was, sponsor_quiet_start: '', sponsor_quiet_end: '', sponsors_stop_before_blackout_minutes: 0 } });
     }, page);
     await closePage(page);
   }
@@ -2542,9 +2549,9 @@ section('live', async () => {
       const { ms } = await timedSave(page, 'create show', (m, p) => m === 'POST' && p === '/live-shows', () => dlg.getByRole('button', { name: 'Create' }).click());
       await cardL().waitFor();
       assert((await cardL().innerText()).includes('Calls ON'), 'calls not shown as on');
-      await page.getByRole('button', { name: 'live', exact: true }).click();
+      await page.getByRole('button', { name: 'ended', exact: true }).click();
       await cardL().waitFor({ state: 'detached' });
-      await page.getByRole('button', { name: 'scheduled', exact: true }).click();
+      await page.getByRole('button', { name: 'coming up', exact: true }).click();
       await cardL().waitFor();
       await cardL().getByRole('button', { name: 'Edit' }).click();
       await dlg.getByPlaceholder('Show title').fill(`${title} edited`);
@@ -2568,11 +2575,19 @@ section('live', async () => {
   {
     const page = await newPage('dj');
     const title = `E2E Live Now ${RUN}`;
-    const show = await api('POST', '/live-shows', { token: T, body: { station_id: st.id, title, scheduled_start: new Date(Date.now() - 60e3).toISOString(), scheduled_end: new Date(Date.now() + 2 * 3600e3).toISOString(), calls_enabled: true } });
+    // Made and started by the DJ (a DJ's console only gets show events for a show they host).
+    // GO LIVE itself, with a microphone, is e2e/live-go-live.cjs; the list's "Open studio"
+    // only opens the console since PR 384.
+    const show = await api('POST', '/live-shows', { token: USERS.dj.token, body: { station_id: st.id, title, scheduled_start: new Date(Date.now() - 60e3).toISOString(), scheduled_end: new Date(Date.now() + 2 * 3600e3).toISOString(), calls_enabled: true } });
     const cardL = page.locator('div.bg-\\[\\#12123a\\].rounded-lg', { hasText: title }).first();
-    await step('F-LIVE-2 Go Live saves fast; Host Console and Screener links open', async () => {
+    await step('F-LIVE-2 Open studio opens the console; once live, Host Console and Screener links open', async () => {
       await page.goto(`${BASE}/admin/live`);
-      const { ms } = await timedSave(page, 'go live', (m, p) => m === 'POST' && p.startsWith(`/live-shows/${show.id}`), () => cardL.getByRole('button', { name: 'Go Live' }).click());
+      await cardL.getByTestId('open-studio').click();
+      await waitPath(page, `/admin/live/${show.id}/host`);
+      const t0 = Date.now();
+      await api('POST', `/live-shows/${show.id}/start`, { token: USERS.dj.token });
+      const ms = Date.now() - t0;
+      await page.goto(`${BASE}/admin/live`);
       await cardL.getByRole('link', { name: 'Screener' }).waitFor();
       await cardL.getByRole('link', { name: 'Screener' }).click();
       await waitPath(page, `/admin/live/${show.id}/screen`);
@@ -2596,7 +2611,7 @@ section('live', async () => {
       await screener.goto(`${BASE}/admin/live/${show.id}/screen`);
       await screener.getByText(`E2E Caller ${RUN}`).waitFor();
       await screener.getByRole('button', { name: 'edit', exact: true }).first().click();
-      const box = screener.locator('main input, input').first();
+      const box = screener.getByPlaceholder('Caller name');
       await box.fill('E2E Esc name');
       await box.press('Escape');
       await screener.getByText(`E2E Caller ${RUN}`).waitFor();
@@ -2645,7 +2660,8 @@ section('live', async () => {
         const q = await api('GET', `/stations/${st.id}/queue?limit=5`, { token: T });
         return (q.entries || []).some(e => e.status === 'playing');
       }, 'queue playing after the hard stop', 40_000);
-      await page.getByRole('button', { name: 'Back to Live Shows' }).click();
+      // the SHOW ENDED screen's own button (the site-wide Back button can carry the same words)
+      await page.locator('div.fixed.inset-0').getByRole('button', { name: 'Back to Live Shows' }).click();
       await waitPath(page, '/admin/live');
       return `ended ${Math.round(late / 1000)} s after its end time`;
     }, page);
@@ -3808,7 +3824,8 @@ section('errors', async () => {
       await box.waitFor();
       assert((await box.innerText()).includes('Something went wrong') && (await box.innerText()).includes('e2e page crash'), 'error text not shown');
       await box.getByRole('button', { name: 'Reload Page' }).waitFor();
-      await page.locator('nav').getByRole('link', { name: 'Stations', exact: true }).first().click().catch(async () => { await page.goto(`${BASE}/admin/stations`); });
+      // In-app navigation, no reload (the admin list is "Manage Stations" under Settings)
+      await page.evaluate(() => { window.history.pushState({}, '', '/admin/stations'); window.dispatchEvent(new PopStateEvent('popstate')); });
       await waitPath(page, '/admin/stations');
       await page.getByRole('heading', { name: 'Manage Stations' }).waitFor();
       assert(!(await box.count()), 'error box stayed after moving on');

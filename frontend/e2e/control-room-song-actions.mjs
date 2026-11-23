@@ -366,7 +366,8 @@ async function reach(browser) {
     await row.locator('[draggable=true]').click({ position: { x: 300, y: 8 } });
     await page.mouse.move(5, 5);
     const quick = row.getByTestId('row-quick');
-    check(`${tag}: a selected row shows Song, Move up, Move down, Remove without hover`, await quick.getByRole('button').count() === 4 && await quick.isVisible() && (await quick.evaluate((el) => getComputedStyle(el).pointerEvents)) !== 'none');
+    // Why (its playlist, block and step) joined these buttons after this check was written
+    check(`${tag}: a selected row shows Why, Song, Move up, Move down, Remove without hover`, await quick.getByRole('button').count() === 5 && await quick.isVisible() && (await quick.evaluate((el) => getComputedStyle(el).pointerEvents)) !== 'none');
     await quick.getByRole('button', { name: 'Move up' }).click({ timeout: 3000 });
     await sleep(400);
     check(`${tag}: Move up on the selected row works by plain click`, station.pending()[2].id === p[3].id);

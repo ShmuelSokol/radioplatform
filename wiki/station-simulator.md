@@ -145,10 +145,11 @@ airs every night and is paused at the same second each night, so a run over seve
 has one `resume@N` entry per night for the same shiur. Counting them per item reported
 "2 resume entries" on Main's Shabbos/Yom Kippur run (2026-11-19) where each night had one.
 
-Check "queue page times hold" (2026-11-19): every 30 simulated minutes the run reads the queue as the control room does (`_get_queue_impl`) and keeps each waiting item's `estimated_start` for the next hour. Items that air more than 3 min from that time are findings. Automatic station IDs are left out, because they move on purpose. With the stand-in fixed (below), estimates held within about 30 s over an hour on Main.
+Check "queue page times hold" (2026-11-19): every 30 simulated minutes the run reads the queue as the control room does (`_get_queue_impl`) and keeps each waiting item's `estimated_start` for the next hour. Items that air more than 3 min from that time are findings; items the page marks "≈" (`estimate_firm` false, see hourly-slots.md) are held to 10 min in their own check. Automatic station IDs are left out, because they move on purpose. With the stand-in fixed (below), estimates held within about 30 s over an hour on Main.
 
 The stand-in engine now drops a flushed entry from its `given` list as radio.liq does (`/flush`: unless it is on air). Before, the backend took every flushed song for "aired without a start report" and marked it played. That emptied places in the queue: about a quarter of items aired 4 to 7 min off their estimate. The hold rule also counted the flushed song as pre-loaded, which caused the rare 4 to 6 s of emergency music between songs in the Yom Tov runs. Neither happens with the real engine.
 
+CI: `tests/test_station_sim.py` runs in its own job, `backend-sim`, beside `backend-test` (2026-11-22), in two halves (a matrix of two `-k` expressions in `.github/workflows/ci.yml`). In one job the suite reached 22 of its 30 minutes and PR 491 was cut off; the simulator file alone took 17 min on a runner of its own. A new scenario lands in the second half; move names between the halves when one passes about 20 min.
 
 ## Real play-log checks (2026-11-23)
 

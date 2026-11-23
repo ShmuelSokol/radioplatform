@@ -787,21 +787,27 @@ def weather_is_todays(res: Result, ctx: Context):
 
 # A start this far from what the queue page showed within the hour before counts as wrong
 ESTIMATE_OFF_SECONDS = 180.0
+ESTIMATE_APPROX_OFF_SECONDS = 600.0
 
 
 def estimates_hold(res: Result, ctx: Context):
     """What the queue page showed is when it airs: each item's estimated start, read
     every 30 minutes for the hour after, against its real start (Main 2026-11-19: a
-    Chanukah song shown at 11:07 aired at 10:28 and Shmuel looked for it in vain)."""
+    Chanukah song shown at 11:07 aired at 10:28 and Shmuel looked for it in vain).
+    A time shown "≈" (past the run-up to the next hard break, which the fit may still
+    reorder) is held to ESTIMATE_APPROX_OFF_SECONDS instead."""
     check = "queue page times hold: items air within 3 min of the time shown"
+    approx = "queue page times shown ≈ air within 10 min"
     res.checks_run.setdefault(check, 0)
+    res.checks_run.setdefault(approx, 0)
     started = {(r.station, r.entry_id): r for r in res.rows if r.entry_id and r.lane != "emergency"}
     # A local FM box offline (tests/sim/offline.py) plays from its own copy: the site's
     # page cannot know what it does until the line is back
     box_off = getattr(ctx.sim, "box_offline", None)
     worst: dict = {}
     for t, sid, est in getattr(ctx.sim, "snapshots", []):
-        for eid, ts in est.items():
+        for eid, shown in est.items():
+            ts, firm = shown if isinstance(shown, tuple) else (shown, True)
             r = started.get((sid, eid))
             # Automatic station IDs move on purpose (station_id_guard.postpone)
             if r is None or r.start < t or r.is_id:
@@ -811,17 +817,19 @@ def estimates_hold(res: Result, ctx: Context):
             # A live show that began after the page was read moves everything behind it
             if any(a < r.start + 1 and b > t for a, b in ctx.shows(sid)):
                 continue
-            _count(res, check)
+            name, limit = (check, ESTIMATE_OFF_SECONDS) if firm else (approx, ESTIMATE_APPROX_OFF_SECONDS)
+            _count(res, name)
             off = r.start - ts
-            if abs(off) > ESTIMATE_OFF_SECONDS:
-                key = (sid, eid)
+            if abs(off) > limit:
+                key = (name, sid, eid)
                 if key not in worst or abs(off) > abs(worst[key][0]):
                     worst[key] = (off, t, ts, r)
-    for (sid, eid), (off, t, ts, r) in worst.items():
+    for (name, sid, eid), (off, t, ts, r) in worst.items():
         shown = datetime.fromtimestamp(ts, UTC).astimezone(r.tz).strftime("%H:%M:%S")
         read = datetime.fromtimestamp(t, UTC).astimezone(r.tz).strftime("%H:%M")
-        _add(res, check, r, r.local_start,
-             f"{r.title!r} shown at {shown} (queue read {read}), aired {off / 60:+.1f} min off")
+        mark = "" if name == check else "≈"
+        _add(res, name, r, r.local_start,
+             f"{r.title!r} shown at {mark}{shown} (queue read {read}), aired {off / 60:+.1f} min off")
 
 
 def omer_count(res: Result, ctx: Context):
