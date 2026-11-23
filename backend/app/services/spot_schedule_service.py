@@ -913,55 +913,114 @@ async def load_sponsor_blackouts(
 SPONSOR_WAIT_CAP = timedelta(minutes=30)
 
 
-async def cap_sponsor_waits(db: AsyncSession, station: Station, now: datetime | None = None) -> int:
-    """A soft break waits for the song on air to end. A long song could carry a break
-    planned just before the quiet hours into them (Main 2026-11-23: its 12:30 AM
-    sponsorships aired at 12:33:40, quiet hours from 12:35). Every waiting soft group
-    that holds a sponsorship gets `hard_by` at the start of the next stretch with no
-    sponsorships when that comes within SPONSOR_WAIT_CAP: the song on air is faded
-    there, as for any soft break with a limit, on both players. Returns the entries
-    changed. Does not commit."""
+async def _waiting_sponsor_groups(
+    db: AsyncSession, station: Station, since: datetime, until: datetime
+) -> dict[datetime, list[QueueEntry]]:
+    """Pending soft timed groups due between since and until that hold a sponsorship,
+    by their minute."""
     from app.models.queue_entry import soft_timed
 
-    now = as_utc(now or datetime.now(UTC))
-    end = now + timedelta(days=3)
     rows = (
         await db.execute(
             select(QueueEntry).where(
                 QueueEntry.station_id == station.id,
                 QueueEntry.status == "pending",
                 QueueEntry.preempt_at.isnot(None),
-                QueueEntry.preempt_at > now,
-                QueueEntry.preempt_at <= end,
+                QueueEntry.preempt_at > since,
+                QueueEntry.preempt_at <= until,
                 soft_timed(),
             )
         )
     ).scalars().all()
     if not rows:
-        return 0
+        return {}
     sponsor_assets = {
         str(a) for a in (await db.execute(select(SpotSchedule.asset_id).distinct())).scalars().all() if a
     }
     groups: dict[datetime, list[QueueEntry]] = {}
     for entry in rows:
         groups.setdefault(as_utc(entry.preempt_at).replace(second=0, microsecond=0), []).append(entry)
-    groups = {at: g for at, g in groups.items() if any(str(e.asset_id) in sponsor_assets for e in g)}
+    for at in list(groups):
+        sponsors = [e for e in groups[at] if str(e.asset_id) in sponsor_assets]
+        if sponsors:
+            groups[at] = sponsors
+        else:
+            del groups[at]
+    return groups
+
+
+async def clear_sponsor_wait_caps(db: AsyncSession, station: Station, now: datetime | None = None) -> int:
+    """Undo the fade limit PR 498 gave soft sponsorship breaks at the start of the next
+    no-sponsorship stretch: it cut a song mid-way (Main 2026-11-23 12:35 AM, a 7:45
+    Carlebach song cut for the 12:30 sponsorships). A break that cannot start before that
+    time is skipped instead (`skip_sponsors_past_quiet`). Returns the entries changed.
+    Does not commit."""
+    now = as_utc(now or datetime.now(UTC))
+    end = now + timedelta(days=3)
+    groups = await _waiting_sponsor_groups(db, station, now - SPONSOR_WAIT_CAP, end)
     if not groups:
         return 0
-    windows = await load_sponsor_blackouts(db, station, now - timedelta(days=1), end + SPONSOR_WAIT_CAP)
+    starts = {w.start for w in await load_sponsor_blackouts(db, station, now - timedelta(days=1), end + SPONSOR_WAIT_CAP)}
     changed = 0
-    for at, group in groups.items():
-        cut = min((w.start for w in windows if at < w.start <= at + SPONSOR_WAIT_CAP), default=None)
-        if cut is None:
-            continue
+    for group in groups.values():
         for entry in group:
-            if entry.hard_by is None or as_utc(entry.hard_by) > cut:
-                entry.hard_by = cut
+            if entry.hard_by is not None and as_utc(entry.hard_by) in starts:
+                entry.hard_by = None
                 changed += 1
     if changed:
         await db.flush()
-        logger.info("Station %s: %d soft sponsorship entries may wait only until no-sponsorship time", station.id, changed)
     return changed
+
+
+async def skip_sponsors_past_quiet(db: AsyncSession, station: Station, now: datetime | None = None) -> int:
+    """A soft sponsorship break waits for the song on air to end (107.9: sponsors after
+    the song). When that song ends after the start of a stretch with no sponsorships
+    (the station's quiet hours, the minutes before Shabbos) the break's sponsorships are
+    skipped: status "cancelled", as the Sponsor panel's Skip, so the planner does not
+    put them back and the sponsor's report shows them missed. Nothing is cut (Shmuel
+    2026-11-22: half hour like 107.9, no sponsors overnight). Run on every scheduler
+    pass, both players. Returns the entries skipped. Does not commit."""
+    from app.config import settings
+    from app.services.hour_fit import on_air_until
+
+    now = as_utc(now or datetime.now(UTC))
+    playing = (
+        await db.execute(
+            select(QueueEntry)
+            .where(QueueEntry.station_id == station.id, QueueEntry.status == "playing")
+            .order_by(QueueEntry.position)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if playing is None:
+        return 0
+    if str(playing.asset_id) in {
+        str(a) for a in (await db.execute(select(SpotSchedule.asset_id).distinct())).scalars().all() if a
+    }:
+        return 0  # the break itself is on air
+    until = on_air_until(playing, settings.engine_drives(station.id))
+    if until is None or until <= now:
+        return 0
+    groups = await _waiting_sponsor_groups(db, station, now - SPONSOR_WAIT_CAP, until)
+    if not groups:
+        return 0
+    windows = await load_sponsor_blackouts(db, station, now - timedelta(days=1), until + timedelta(minutes=1))
+    skipped = 0
+    for at, group in groups.items():
+        quiet = min((w.start for w in windows if at < w.start < until), default=None)
+        if quiet is None:
+            continue
+        for entry in group:
+            entry.status = "cancelled"
+            skipped += 1
+        logger.info(
+            "Station %s: %d sponsorships of the %s break skipped: the song on air ends at %s, after "
+            "no-sponsorship time from %s",
+            station.id, len(group), at.isoformat(), until.isoformat(), quiet.isoformat(),
+        )
+    if skipped:
+        await db.flush()
+    return skipped
 
 
 async def plan_for_station(
@@ -1385,7 +1444,7 @@ async def reconcile_spot_slots(
             len(kept),
             len(unplaced),
         )
-    await cap_sponsor_waits(db, station, now)
+    await clear_sponsor_wait_caps(db, station, now)
     return {
         "added": added,
         "removed": removed,
