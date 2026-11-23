@@ -510,3 +510,4 @@ UPDATE 2026-11-22 streaming-architecture.md kbr-engine-watch watches the HLS med
 UPDATE 2026-11-22 program-blocks.md block time/weather items vs kept built-in hourly: one per minute (drop_double_announcements), purge any timing, :30 cleared when switched off (Main aired time+weather twice 11:00 AM ET)
 UPDATE 2026-11-22 shabbos-ending.md weekly candle lighting announcement (candle_items by Friday date) ends at candle lighting, Good Shabbos song before it; missing/off-air week falls back to the song
 UPDATE 2026-11-22 shabbos-ending.md candle_every_week: one approved sign-off ends at candle lighting every Friday; a dated entry wins for its week
+INGEST 2026-11-23 known-gotchas: an API route declared with a trailing slash ("/") makes FastAPI redirect the site's no-slash call to http://, blocked as mixed content on https (weather-readouts, Recording Studio); tests/test_no_slash_redirects.py guards every route
