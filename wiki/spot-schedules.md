@@ -62,6 +62,9 @@ Main follows 107.9: no sponsorships overnight, and none in the last minutes befo
 - `automation_config.sponsors_stop_before_blackout_minutes` (e.g. 45): the minutes before each Shabbos or Yom Tov blackout.
 
 `sponsor_rest_windows` turns them into `Blackout(..., sponsors_only=True)` and `load_sponsor_blackouts` adds them to the real blackouts for the planner (`plan_for_station`), the board (`sponsor_room`) and missed plays (`sponsor_delivery`). Nothing else (time checks, blocks, songs) sees them, so the station stays on the air; a block's sponsor places there simply stay empty. Plays that fall there are reported like Shabbos ones (`blackout` set, "no sponsorships then (quiet hours)"), not as missed. Tests: `tests/test_main_follows_1079.py`.
+
+A soft break waits for the song on air, so a break planned just before the quiet hours could air inside them behind a long song (Main 2026-11-23: the 12:30 AM sponsorships aired at 12:33:40, quiet hours from 12:35). `cap_sponsor_waits` (run at the end of both reconcilers, so on every top-up and edit) gives every waiting soft group that holds a sponsorship `hard_by` at the start of the next stretch with no sponsorships (quiet hours, minutes before Shabbos, Shabbos itself) when it begins within 30 min (`SPONSOR_WAIT_CAP`) of the break's time; an earlier `hard_by` stays. Both players then fade the song there, as for any soft block with a limit. Test: `tests/test_carlebach_half_hour.py`.
+
 ## Exact times and hard / soft timing
 
 A `SpotSchedule` with `fixed_times` ("07:00,13:30", station time) airs at those clock times on its days instead of being spread over dayparts. Exact times are planned first; spread plays skip a slot an exact time already holds, and two schedules asking for the same minute leave the later one unplaced.

@@ -55,6 +55,7 @@ Page: `/admin/holiday-music` (Broadcast menu, "Holiday Music"). Code:
   The Playlists and Schedule blocks pages show `components/holiday/HolidayMixNote.tsx`
   while a mix is in season on a station ("Chanukah items are mixed in ... 1 in N", link to
   the page): the mix sits on top of every playlist, so it is no step in one.
+- **Not in a one-category playlist** (2026-11-23, a Chanukah song aired inside Main's Carlebach half hour): a playlist whose song/shiur steps all name the same single category ("Main - Carlebach half hour", "Main - Night instrumental") plays only that category; `generate` skips the mix there (`themed`). Jingle or spot steps beside it do not count. A mixed playlist (Top 500 Hits: hot_now + top_hits) keeps the mix. Test: `tests/test_carlebach_half_hour.py`.
 - **Never two in a row**: `pick` refuses a holiday item right after one (`prev_holiday`,
   carried over a top-up), `hour_fit` never swaps a holiday item in, and after each top-up
   `space_out` parts two waiting holiday items with the next ordinary song of the same kind
