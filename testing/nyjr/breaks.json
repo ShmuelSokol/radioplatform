@@ -3045,5 +3045,16 @@
   "block_names": "Highest Frequncy",
   "items": "Highest Frequncy",
   "next_item": "Yair Dalal - Arrarat"
+ },
+ {
+  "start_utc": "2026-11-23T09:30:04Z",
+  "start_et": "2026-11-23 04:30:04",
+  "hour_et": "2026-11-23 04:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Night Mix ID",
+  "items": "Night Mix ID",
+  "next_item": "Uluru - Valley of Winds"
  }
 ]
