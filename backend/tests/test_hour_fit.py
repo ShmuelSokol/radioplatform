@@ -220,7 +220,7 @@ async def test_what_is_never_moved(db_session: AsyncSession, monkeypatch, case):
 @pytest.mark.asyncio
 async def test_empty_queue_and_no_hard_item_are_safe(db_session: AsyncSession):
     """F-HOURFIT-4: nothing queued, only the time check queued, or no hard item in
-    the next 20 minutes: nothing happens and nothing fails."""
+    the planning horizon: nothing happens and nothing fails."""
     empty = await _station(db_session)
     empty_id = empty.id
     await db_session.commit()
@@ -235,7 +235,9 @@ async def test_empty_queue_and_no_hard_item_are_safe(db_session: AsyncSession):
     far_id = far.id
     await _queue(db_session, far, ENDS, JERUSALEM)
     order = await _order(db_session, far_id)
-    assert await fit_before_hard_item(db_session, far_id, HOUR - timedelta(minutes=45), force=True) is False
+    assert await fit_before_hard_item(
+        db_session, far_id, HOUR - hour_fit.HORIZON - timedelta(minutes=5), force=True
+    ) is False
     assert await _order(db_session, far_id) == order
 
 
@@ -624,3 +626,123 @@ async def test_a_song_that_would_lose_a_little_more_than_acceptable_is_still_fit
     await db_session.commit()
     title, played, lost = await _lost_at_the_hour(db_session, station_id, ENDS)
     assert lost <= hour_fit.ACCEPTABLE_CUT, (title, played, lost)
+
+
+@pytest.mark.asyncio
+async def test_the_fit_takes_its_song_from_nearest_in_the_queue(db_session: AsyncSession):
+    """Simulator, Main 2026-11-19: the fit pulled a song from far down the queue
+    because it fitted a few seconds better than one close by. Both songs then aired
+    over an hour away from the time the queue page showed (shown 00:57, aired 02:13).
+    Of fits about as good, the nearest is taken."""
+    station = await _station(db_session)
+    station_id = station.id
+    # 'Five minutes' would lose 234 s. 'Close' (two songs on) fits within the
+    # acceptable cut; 'Far away' (far down the queue) fits a few seconds better
+    filler = [(f"Later {i}", 240.0) for i in range(12)]
+    songs = [*JERUSALEM[:3], ("After", 200.0), ("Close", 319.0), *filler, ("Far away", 316.0)]
+    await _queue(db_session, station, ENDS, songs)
+    assert await fit_before_hard_item(db_session, station_id, NOW, force=True) is True
+    await db_session.commit()
+    title, played, lost = await _lost_at_the_hour(db_session, station_id, ENDS)
+    # (counted here without the crossfade, so up to 3 s more than the fit counts)
+    assert lost <= hour_fit.ACCEPTABLE_CUT + hour_fit.CROSSFADE, (title, played, lost)
+    order = await _order(db_session, station_id)
+    assert "Close" in order[:3] and order.index("Far away") == len(order) - 1, order
+    # The song moved out waits a few places on, not far down the queue
+    assert order.index("Five minutes") <= 5, order
+
+
+@pytest.mark.asyncio
+async def test_the_song_moved_out_airs_straight_after_the_hard_item(db_session: AsyncSession):
+    """Simulator, Main 2026-11-19: only a song far down the queue fitted, and the song it
+    replaced took its place there: shown at 00:29, aired at 02:37. The song moved out
+    now airs after the hard item, and the songs between keep their order."""
+    station = await _station(db_session)
+    station_id = station.id
+    filler = [(f"Later {i}", 240.0) for i in range(10)]
+    songs = [*JERUSALEM[:3], *filler, ("Far away", 316.0)]
+    await _queue(db_session, station, ENDS, songs)
+    assert await fit_before_hard_item(db_session, station_id, NOW, force=True) is True
+    await db_session.commit()
+    order = await _order(db_session, station_id)
+    # it runs from where B started to past the hour; B and 'Five minutes' follow it
+    assert order[:4] == ["A", "Far away", "B", "Five minutes"], order
+    assert order[4:] == [f"Later {i}" for i in range(10)], order
+
+
+async def _losses(db: AsyncSession, station_id, on_air_ends: datetime, breaks: list) -> list[float]:
+    """Play the songs forward through hard breaks [(time, seconds)]: what the song on
+    air at each break loses (counted with the fit's own crossfade)."""
+    db.expire_all()
+    rows = (await db.execute(
+        select(Asset.duration)
+        .join(QueueEntry, QueueEntry.asset_id == Asset.id)
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending", QueueEntry.preempt_at.is_(None))
+        .order_by(QueueEntry.position)
+    )).scalars().all()
+    at, lost, todo = on_air_ends, [], list(breaks)
+    for seconds in rows:
+        if not todo:
+            break
+        end = at + timedelta(seconds=seconds - hour_fit.CROSSFADE)
+        hard, length = todo[0]
+        if end >= hard - timedelta(seconds=hour_fit.EARLY_START):
+            lost.append(max(0.0, (end - hard).total_seconds()))
+            at = hard + timedelta(seconds=length)
+            todo.pop(0)
+        else:
+            at = end
+    return lost
+
+
+@pytest.mark.asyncio
+async def test_the_next_hour_of_breaks_is_planned_at_once(db_session: AsyncSession):
+    """Simulator, Main 2026-11-19: the fit was made 20 minutes before each break, after
+    the queue page had shown the songs' times; each fit moved everything after it by
+    4 to 10 minutes. The breaks of the next 70 minutes are planned at once, in order,
+    so the times shown hold."""
+    station = await _station(db_session)
+    station_id = station.id
+    half = HOUR + timedelta(minutes=30)
+    songs = [(f"Song {i}", 180.0 + (i * 37) % 160) for i in range(30)]
+    await _queue(db_session, station, ENDS, songs, timed=[("Half hour", 30.0, half, "hard")])
+    before = await _losses(db_session, station_id, ENDS, [(HOUR, 6.0), (half, 30.0)])
+    assert max(before) > hour_fit.WORTH_IT, before  # both would cut a song badly unplanned
+    assert await fit_before_hard_item(db_session, station_id, NOW, force=True) is True
+    await db_session.commit()
+    after = await _losses(db_session, station_id, ENDS, [(HOUR, 6.0), (half, 30.0)])
+    assert all(x <= hour_fit.ACCEPTABLE_CUT + hour_fit.CROSSFADE for x in after), (before, after)
+    # A look a minute later changes nothing: the plan holds
+    order = await _order(db_session, station_id)
+    assert await fit_before_hard_item(db_session, station_id, NOW + timedelta(minutes=1), force=True) is False
+    assert await _order(db_session, station_id) == order
+
+
+@pytest.mark.asyncio
+async def test_a_planned_run_up_is_not_fitted_again_for_a_few_seconds(db_session: AsyncSession):
+    """Simulator, Main Friday 2026-11-27: a run-up planned an hour ahead drifted from
+    8 s to 12 s and was fitted again, three or four times an hour, each time moving
+    songs the queue page had shown (shown at 7:48, aired at 8:01). Once planned, it is
+    only fitted again past ACCEPTABLE_CUT."""
+    station = await _station(db_session)
+    station_id = station.id
+    # ten songs that hold the air 300 s each; the last ends 6 s past the hour
+    on_air_ends = HOUR - timedelta(seconds=2994)
+    songs = [(f"Song {i}", 303.0) for i in range(10)] + [("Spare", 298.0), ("After", 240.0)]
+    await _queue(db_session, station, on_air_ends, songs)
+    far = HOUR - timedelta(minutes=60)
+    assert await fit_before_hard_item(db_session, station_id, far) is False  # loses 6 s: as planned
+    order = await _order(db_session, station_id)
+
+    # the item on air runs 5 s longer than counted: the last song now loses 11 s
+    playing = (await db_session.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+    )).scalars().one()
+    playing.started_at = playing.started_at + timedelta(seconds=5)
+    await db_session.commit()
+    assert await fit_before_hard_item(db_session, station_id, far + timedelta(minutes=5)) is False
+    assert await _order(db_session, station_id) == order
+
+    # not planned before, the same queue is fitted at once (what the check above guards)
+    hour_fit._planned.pop(str(station_id), None)
+    assert await fit_before_hard_item(db_session, station_id, far + timedelta(minutes=6)) is True

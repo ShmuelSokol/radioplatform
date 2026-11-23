@@ -2460,3 +2460,90 @@ async def test_air_watch_alerts_when_the_engine_output_stops(client, db_session,
     found = await watch.check_station(db_session, station, datetime.now(UTC))
     stopped = [f for f in found if f.kind == "stream_stopped"]
     assert len(stopped) == 1 and "stream_stopped" in air_watch.SERIOUS
+
+
+async def _window_with_silence(client, auth_headers, db_session, station, *, minutes_ahead=3):
+    """A test blackout created through the API a few minutes ahead: its silence is queued."""
+    silence = Asset(id=uuid.uuid4(), title="Silence (5 min)", duration=300.0, asset_type="silence",
+                    file_path="https://cdn.example.com/audio/silence.mp3")
+    db_session.add(silence)
+    await db_session.commit()
+    silence_id = silence.id
+    start = datetime.now(UTC) + timedelta(minutes=minutes_ahead)
+    r = await client.post("/api/v1/holidays", headers=auth_headers, json={
+        "name": "Test window", "is_blackout": True,
+        "start_datetime": start.isoformat(), "end_datetime": (start + timedelta(minutes=10)).isoformat(),
+        "affected_stations": {"station_ids": [str(station.id)]},
+    })
+    assert r.status_code == 201
+    rows = (await db_session.execute(select(QueueEntry).where(
+        QueueEntry.asset_id == silence_id, QueueEntry.status == "pending"))).scalars().all()
+    assert rows, "creating the window queued its silence"
+    return r.json()["id"], silence_id, start, [str(x.id) for x in rows]
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_blackout_takes_its_silence_with_it(client, db_session, eng, auth_headers):
+    """KBR Jerusalem 2026-11-22: a test window for 14:15Z was deleted at 14:12:39Z, yet its
+    first silence aired at 14:15:00 in the middle of a story. Deleting a window removes
+    its waiting silence, takes back any already in the engine's timed lane, and makes the
+    engine fetch its windows again."""
+    station, _, engine, _ = eng
+    sid = station.id
+    wid, silence, start, rows = await _window_with_silence(client, auth_headers, db_session, station)
+    # The first silences were handed to the timed lane ahead of their time
+    playout_engine.get_state(sid).timed_sent.update(rows[:2])
+    engine.sent.clear()
+    r = await client.delete(f"/api/v1/holidays/{wid}", headers=auth_headers)
+    assert r.status_code == 204
+    db_session.expire_all()
+    left = (await db_session.execute(select(QueueEntry).where(
+        QueueEntry.asset_id == silence, QueueEntry.status == "pending"))).scalars().all()
+    assert left == []
+    dropped = [p for path, p in engine.sent if path == "/timed_drop"]
+    assert dropped and set(dropped[0]["ids"]) == set(rows)
+    assert any(path == "/blackouts" for path, _ in engine.sent)
+    assert not (playout_engine.get_state(sid).timed_sent & set(rows))
+    # Nothing of it is handed out any more: the engine's next item is a song
+    await db_session.refresh(station)
+    nxt = await _next(client, station)
+    assert nxt.status_code == 200
+    assert nxt.json()["entry_id"] not in rows
+
+
+@pytest.mark.asyncio
+async def test_a_moved_blackout_queues_its_silence_at_the_new_time(client, db_session, eng, auth_headers):
+    """Moving a window an hour later: the silence queued for the old start leaves, the
+    new start gets its own."""
+    station, _, engine, _ = eng
+    wid, silence, start, rows = await _window_with_silence(client, auth_headers, db_session, station)
+    later = start + timedelta(hours=1)
+    r = await client.put(f"/api/v1/holidays/{wid}", headers=auth_headers, json={
+        "start_datetime": later.isoformat(), "end_datetime": (later + timedelta(minutes=10)).isoformat(),
+    })
+    assert r.status_code == 200
+    db_session.expire_all()
+    pending = (await db_session.execute(select(QueueEntry).where(
+        QueueEntry.asset_id == silence, QueueEntry.status == "pending"))).scalars().all()
+    assert pending
+    for row in pending:
+        at = row.preempt_at if row.preempt_at.tzinfo else row.preempt_at.replace(tzinfo=UTC)
+        assert abs((at - later).total_seconds()) < 120, "only the new start's silence waits"
+    assert any(path == "/blackouts" for path, _ in engine.sent)
+
+
+@pytest.mark.asyncio
+async def test_deleting_one_of_two_overlapping_blackouts_keeps_the_other_silence(client, db_session, eng, auth_headers):
+    """A window removed while another blackout covers the same time: that silence stays."""
+    station, _, _, _ = eng
+    wid, silence, start, rows = await _window_with_silence(client, auth_headers, db_session, station)
+    keep = HolidayWindow(id=uuid.uuid4(), name="Shabbos", is_blackout=True,
+                         start_datetime=start - timedelta(minutes=1), end_datetime=start + timedelta(hours=25),
+                         affected_stations=None)
+    db_session.add(keep)
+    await db_session.commit()
+    assert (await client.delete(f"/api/v1/holidays/{wid}", headers=auth_headers)).status_code == 204
+    db_session.expire_all()
+    left = (await db_session.execute(select(QueueEntry).where(
+        QueueEntry.asset_id == silence, QueueEntry.status == "pending"))).scalars().all()
+    assert len(left) == len(rows)

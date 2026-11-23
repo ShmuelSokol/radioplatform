@@ -15,6 +15,7 @@ import { chromium, checker, sleep, allowEverywhere } from './lib/fake-station.mj
 
 // What this test provokes on purpose (anything else on screen is a finding).
 allowEverywhere(/is not allowed to do that\. Nothing was changed/, 'the refused station write under test (B-ROLE-22)');
+allowEverywhere(/Your sign-in has expired\. Please sign in again\./, 'V2-95 makes renewal fail on purpose: the sign-in page then says why (notice added after this suite)');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4173';
 const { check, done } = checker({});

@@ -357,9 +357,10 @@ def _shown(body, title):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("policy,soft_wait,song_wait", [
-    # each item holds the air to its crossfade point, 3 s before its end (on_air_seconds)
-    (None, 600, 40 * 60 + 30 - 6),      # pause: the item airs on time, the shiur ends 30 s later
-    ("wait", 40 * 60, 40 * 60 + 30 - 6),  # wait: it follows the shiur
+    # each item holds the air to its hand-over point, as the players change items
+    # (queue.handover_seconds: well under a second for a spoken item)
+    (None, 600, 40 * 60 + 30 - 1),      # pause: the item airs on time, the shiur ends 30 s later
+    ("wait", 40 * 60, 40 * 60 + 30 - 1),  # wait: it follows the shiur
 ])
 async def test_queue_shows_a_soft_item_at_the_time_it_will_pause_the_shiur(
         client, auth_headers, db_session, policy, soft_wait, song_wait):

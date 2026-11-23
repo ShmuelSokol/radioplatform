@@ -196,7 +196,7 @@ export function BackBar() {
     // Sticky under the menu (h-12): on a long iPhone page Back is always one tap away.
     <div data-nav-back className="nav-back-bar sticky top-12 z-40 px-4 sm:px-6 lg:px-8 border-b border-[#2a2a5e] bg-[#10103a]">
       <button type="button" onClick={go} data-testid="nav-back"
-        className="inline-flex items-center gap-1.5 min-h-[40px] sm:min-h-[34px] pr-3 text-sm font-semibold text-cyan-300 hover:text-white"
+        className="inline-flex items-center gap-1.5 min-h-[44px] sm:min-h-[34px] pr-3 text-sm font-semibold text-cyan-300 hover:text-white"
         aria-label={`Back to ${words}`}>
         <span aria-hidden="true" className="text-lg leading-none">‹</span>
         <span className="truncate max-w-[70vw]">Back to {words}</span>
