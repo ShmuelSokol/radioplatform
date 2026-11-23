@@ -2919,10 +2919,32 @@
   "start_et": "2026-11-22 20:06:54",
   "hour_et": "2026-11-22 20:00",
   "spots": 1,
-  "total_seconds": null,
-  "spot_seconds": "?",
+  "total_seconds": 30,
+  "spot_seconds": "30",
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors",
-  "next_item": ""
+  "next_item": "EITAN KATZ  TERUMAH - MEKOR CHAIM"
+ },
+ {
+  "start_utc": "2026-11-23T01:34:40Z",
+  "start_et": "2026-11-22 20:34:40",
+  "hour_et": "2026-11-22 20:00",
+  "spots": 3,
+  "total_seconds": 166,
+  "spot_seconds": "29 66 71",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Eitan Katz  Shuvu - Ata Horisa"
+ },
+ {
+  "start_utc": "2026-11-23T01:59:59Z",
+  "start_et": "2026-11-22 20:59:59",
+  "hour_et": "2026-11-22 20:00",
+  "spots": 3,
+  "total_seconds": 148,
+  "spot_seconds": "69 71 8",
+  "block_names": "Mesivta D'Rakia",
+  "items": "Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia",
+  "next_item": "Krohn R. Pesach - Making Your Days Meaningful"
  }
 ]
