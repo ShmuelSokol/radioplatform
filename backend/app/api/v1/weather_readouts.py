@@ -40,7 +40,11 @@ async def _weather_for(station: Station) -> dict:
         raise HTTPException(503, f"The weather service did not answer: {e}")
 
 
-@router.get("/", response_model=WeatherReadoutListResponse)
+# "" as the site calls it: "/" alone made FastAPI answer the site's call with a redirect
+# to an http:// address, which the browser blocked on the https site (Recording Studio,
+# 2026-11-22). The slash form stays for older callers.
+@router.get("", response_model=WeatherReadoutListResponse)
+@router.get("/", response_model=WeatherReadoutListResponse, include_in_schema=False)
 async def list_readouts(
     station_id: uuid.UUID | None = Query(None),
     date_from: date | None = Query(None),
@@ -79,7 +83,8 @@ async def list_readouts(
     )
 
 
-@router.post("/", response_model=WeatherReadoutResponse)
+@router.post("", response_model=WeatherReadoutResponse)
+@router.post("/", response_model=WeatherReadoutResponse, include_in_schema=False)
 async def create_readout(
     body: WeatherReadoutCreate,
     db: AsyncSession = Depends(get_db),

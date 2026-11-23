@@ -29,9 +29,11 @@ class SpotSchedule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # 0=Mon ... 6=Sun (same convention as schedule_rules)
     days_of_week: Mapped[str] = mapped_column(String(20), default="0,1,2,3,4,5,6", nullable=False)
-    # comma-separated: morning,afternoon,evening,overnight
+    # comma-separated names from spot_schedule_service.DAYPARTS (overnight, the six
+    # three-hour slots, morning/afternoon/evening). 60 characters held only four slots:
+    # ticking all six gave "value too long" and a server error on Save (2026-11-23).
     dayparts: Mapped[str] = mapped_column(
-        String(60), default="morning,afternoon,evening", nullable=False
+        String(255), default="morning,afternoon,evening", nullable=False
     )
     plays_per_daypart: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     # Exact clock times in station time, comma-separated "HH:MM". When set, the
