@@ -659,6 +659,24 @@ async def generate(
             duration=float(row.duration or DEFAULT_DURATION),
         )
 
+    themed_cache: dict[str, bool] = {}
+
+    def themed(template) -> bool:
+        """A playlist whose programme steps all name one category (Main's "Carlebach
+        half hour", "Night instrumental") plays only that: the holiday mix leaves it
+        alone. Main 2026-11-23 aired a Chanukah song inside the Carlebach half hour."""
+        key = str(template.id)
+        if key not in themed_cache:
+            from app.services.holiday_music import kind_of
+
+            cats = {
+                (s.category or "").strip().lower()
+                for s in template.slots
+                if kind_of(s.asset_type) is not None
+            }
+            themed_cache[key] = len(cats) == 1 and "" not in cats
+        return themed_cache[key]
+
     async def maybe_station_id() -> None:
         """After a programme item: a station ID when one is due and the air is clear."""
         nonlocal previous_type
@@ -794,7 +812,7 @@ async def generate(
                 misses = 0
                 clock.at = at + SKIP
             continue
-        row, pick = holiday_pick(slot.asset_type, at, key, block.name)
+        row, pick = (None, None) if themed(template) else holiday_pick(slot.asset_type, at, key, block.name)
         if pick is not None:
             misses = 0
             picks.append(pick)

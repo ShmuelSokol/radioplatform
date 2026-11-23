@@ -777,6 +777,10 @@ async def _reconcile_blocks(
         added += 1
     await db.flush()
     removed += await drop_double_announcements(db, station_id, earliest)
+    # A soft sponsorship break never waits into the quiet hours or the time before Shabbos
+    from app.services.spot_schedule_service import cap_sponsor_waits
+
+    await cap_sponsor_waits(db, station, now)
     if added or removed:
         logger.info("Program blocks for station %s: +%d -%d", station_id, added, removed)
     return {

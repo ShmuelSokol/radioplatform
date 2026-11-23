@@ -11,7 +11,8 @@ if most of it would be lost it swaps queue positions so that a song (or a pair
 of songs) that ends close to the hour takes its place. Only the station's own
 automatic songs are moved, only within the same schedule block, and never one
 that is about to start or that the playout engine already holds. Nothing is
-added or removed, so the queue can never run dry because of it, and the hard
+added, and only songs of a block that ends at the hard item but would air after it
+are taken out (the next block's songs follow), so the queue can never run dry because of it, and the hard
 item still starts on its second. Both players pick by position, so the browser
 player and the engine follow the new order alike.
 
@@ -325,6 +326,11 @@ async def _fit_one(db: AsyncSession, station, now: datetime, hard_at: datetime, 
     if not slots:
         return False
     last = slots[-1]
+    # Songs drawn for a block that ends at this hard item but pushed past it (a fit
+    # moved them, or songs ran longer than planned) would air in the next block: Main
+    # 2026-11-23 aired a Carlebach song at 1:01 after its half hour ended at 1:00
+    if await _drop_block_leftovers(db, station, now, last, songs, engine):
+        return True
     # A song's end point is only known once it is analysed, and the players analyse
     # a song just before it airs: 20 minutes ahead the fit would plan on file lengths
     # (the 02:00Z song had no analysis yet when it was chosen). Ask for the songs
@@ -458,6 +464,50 @@ async def _fit_one(db: AsyncSession, station, now: datetime, hard_at: datetime, 
     logger.info(
         "Station %s: songs before the %s hard item reordered (the song on air then loses %.0f s instead of %.0f s)",
         station.id, hard_at.strftime("%H:%M:%S"), best_cut, loses,
+    )
+    return True
+
+
+async def _drop_block_leftovers(db: AsyncSession, station, now: datetime, last, after: list, engine: bool) -> bool:
+    """Take out the automatic songs of the run-up's block that the queue now puts
+    after the hard item, when the songs after them come from another block: the
+    block ends there, so they would air in the wrong block. The next block's songs
+    follow, so nothing runs dry. Returns True when something was taken out."""
+    block = last.entry.block_id
+    if not block or last.entry.source != "auto":
+        return False
+    leftovers: list[QueueEntry] = []
+    ended = False
+    for e in after:
+        if e.source != "auto" or e.preempt_at is not None:
+            break  # a person's pick: the queue after it is left as it is
+        if e.asset is not None and (e.asset.asset_type or "music").lower() != "music":
+            continue  # a station ID stays where it was drawn
+        if e.block_id == block:
+            leftovers.append(e)
+            continue
+        ended = True
+        break
+    if not ended or not leftovers:
+        return False
+    from app.services.playout_engine import cued_entry_id, held_entry_ids
+
+    preloaded = cued_entry_id(station.id) if engine else None
+    held = held_entry_ids(station.id) - ({preloaded} if preloaded else set())
+    # Each one starts after the hard item at the earliest
+    soon = (last.start - now).total_seconds()
+    gone = [
+        e for e in leftovers
+        if e.id not in held and soon >= (PRELOADED_FROZEN if e.id == preloaded else FROZEN)
+    ]
+    if not gone:
+        return False
+    for e in gone:
+        await db.delete(e)
+    await db.flush()
+    logger.info(
+        "Station %s: %d song(s) of a block that ends at the %s hard item taken out of the queue (they would air after it)",
+        station.id, len(gone), last.start.strftime("%H:%M:%S"),
     )
     return True
 

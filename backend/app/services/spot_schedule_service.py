@@ -908,6 +908,62 @@ async def load_sponsor_blackouts(
     return sorted(blackouts + rest, key=lambda b: b.start)
 
 
+# How long after a soft sponsorship break's own time a stretch with no sponsorships
+# (quiet hours, the minutes before Shabbos, Shabbos itself) may start and still cap it
+SPONSOR_WAIT_CAP = timedelta(minutes=30)
+
+
+async def cap_sponsor_waits(db: AsyncSession, station: Station, now: datetime | None = None) -> int:
+    """A soft break waits for the song on air to end. A long song could carry a break
+    planned just before the quiet hours into them (Main 2026-11-23: its 12:30 AM
+    sponsorships aired at 12:33:40, quiet hours from 12:35). Every waiting soft group
+    that holds a sponsorship gets `hard_by` at the start of the next stretch with no
+    sponsorships when that comes within SPONSOR_WAIT_CAP: the song on air is faded
+    there, as for any soft break with a limit, on both players. Returns the entries
+    changed. Does not commit."""
+    from app.models.queue_entry import soft_timed
+
+    now = as_utc(now or datetime.now(UTC))
+    end = now + timedelta(days=3)
+    rows = (
+        await db.execute(
+            select(QueueEntry).where(
+                QueueEntry.station_id == station.id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at > now,
+                QueueEntry.preempt_at <= end,
+                soft_timed(),
+            )
+        )
+    ).scalars().all()
+    if not rows:
+        return 0
+    sponsor_assets = {
+        str(a) for a in (await db.execute(select(SpotSchedule.asset_id).distinct())).scalars().all() if a
+    }
+    groups: dict[datetime, list[QueueEntry]] = {}
+    for entry in rows:
+        groups.setdefault(as_utc(entry.preempt_at).replace(second=0, microsecond=0), []).append(entry)
+    groups = {at: g for at, g in groups.items() if any(str(e.asset_id) in sponsor_assets for e in g)}
+    if not groups:
+        return 0
+    windows = await load_sponsor_blackouts(db, station, now - timedelta(days=1), end + SPONSOR_WAIT_CAP)
+    changed = 0
+    for at, group in groups.items():
+        cut = min((w.start for w in windows if at < w.start <= at + SPONSOR_WAIT_CAP), default=None)
+        if cut is None:
+            continue
+        for entry in group:
+            if entry.hard_by is None or as_utc(entry.hard_by) > cut:
+                entry.hard_by = cut
+                changed += 1
+    if changed:
+        await db.flush()
+        logger.info("Station %s: %d soft sponsorship entries may wait only until no-sponsorship time", station.id, changed)
+    return changed
+
+
 async def plan_for_station(
     db: AsyncSession, station: Station, days: int = HORIZON_DAYS, now: datetime | None = None
 ) -> tuple[list[Placement], list[Unplaced]]:
@@ -1329,6 +1385,7 @@ async def reconcile_spot_slots(
             len(kept),
             len(unplaced),
         )
+    await cap_sponsor_waits(db, station, now)
     return {
         "added": added,
         "removed": removed,
