@@ -205,10 +205,21 @@ following = ref(false)
 add_main = ref(fun (_) -> false)
 # main_requests.queue, likewise
 main_requests_queue = ref(fun () -> [])
+# main_requests.current, likewise
+main_requests_current_ref = ref(fun () -> null())
+def main_requests_current() =
+  f = main_requests_current_ref()
+  f()
+end
 # The entry the music lane last began reading (its on_track, before it is heard)
 main_track_entry = ref("")
 def request_entry(r) =
   list.assoc(default="", 1, r/kbr_entry="([^"]+)"/.exec(request.uri(r)))
+end
+# The entry of the music lane's current item ("" when it has none: skipped, the next not here yet)
+def main_current_entry() =
+  r = main_requests_current()
+  if null.defined(r) then request_entry(null.get(r)) else "" end
 end
 def short_queued(entry) =
   q = main_requests_queue()
@@ -284,12 +295,23 @@ end
 # lane is on air starts an ask of its own, and with two the one whose file came first
 # was queued first, out of order (harness flush_during_download_timed, 2026-11-23)
 fetching = ref(0)
+# When the ask on its way began
+fetch_began = ref(0.)
+# When the timed or the music lane last sent audio (see the fallback below)
+lanes_heard = ref(0.)
+# The music lane is asking for (or downloading) its next item: the hold lane keeps the
+# stream quiet meanwhile, for at most this long after the lanes above it went quiet
+fetch_hold = 6.
+def fetching_now() =
+  fetching() > 0 and time() - lanes_heard() < fetch_hold
+end
 def next_request() =
   def ask() = ask_backend() end
   if time() < ask_after() or following() or fetching() > 0 then
     null()
   else
     fetching := fetching() + 1
+    fetch_began := time()
     try
       # The file is downloaded here, not left to the music lane: a flush only empties
       # the lane's queue, and a download still on its way was added after it and aired.
@@ -339,6 +361,7 @@ end
 main_requests = request.dynamic(id="main", prefetch=1, retry_delay=2., timeout=120., next_request)
 add_main := fun (r) -> main_requests.add(r)
 main_requests_queue := fun () -> main_requests.queue()
+main_requests_current_ref := fun () -> main_requests.current()
 # When the music lane last began reading a new item (before `cross` has buffered its
 # start and called transition()). skip_main() uses it to tell a skip that took (the next
 # item is on its way) from one that only ended a transition.
@@ -635,10 +658,14 @@ def handed_loading() =
   list.hd(default="", given()) != last_main_entry() and list.length(main_requests.queue()) == 0
     and time() - handed_at() < 6.
 end
+# The music lane ran dry and is fetching its next item: quiet meanwhile, for at most
+# fetch_hold seconds. KBR Jerusalem 10:30:06Z 2026-11-23: right after the :30 time check
+# the lane started an item with almost no audio, it ended at once, and while the next
+# one was asked for the emergency music played for a moment.
 def hold_open() =
   left = timed_group_at() - time()
   (timed_pending() > 0 and left < 8. and left > -2.) or time() < live_release() or time() < start_quiet_until()
-    or handed_loading()
+    or handed_loading() or fetching_now()
 end
 hold = switch(id="hold_gate", track_sensitive=false, [(hold_open, blank(id="hold"))])
 
@@ -665,7 +692,9 @@ on_air_quiet = switch(id="host_gate", track_sensitive=false, [
 # In a blackout, quiet instead of the emergency music when nothing else plays
 blackout_quiet = switch(id="blackout_gate", track_sensitive=false, [(blackout_on, blank(id="blackout_blank"))])
 
-radio = fallback(id="radio", track_sensitive=false, [on_air_quiet, timed, main, hold, blackout_quiet, emergency])
+timed_heard = source.on_frame(timed, fun () -> lanes_heard := time())
+main_heard = source.on_frame(main, fun () -> lanes_heard := time())
+radio = fallback(id="radio", track_sensitive=false, [on_air_quiet, timed_heard, main_heard, hold, blackout_quiet, emergency])
 radio = amplify(override=null(), {master_gain()}, radio)
 # What is on air from the lanes above. Start reports and /status read this, so an item
 # mixed over the top (below) never counts as a change of track.
@@ -1096,11 +1125,17 @@ def send_started(m) =
     # 2026-11-18). Before the lane stayed muted this was the "old song comes back after
     # the time check" fault. Given again up to 3 times; if the old song still will not
     # go, it is let through rather than leaving the stream silent.
+    interrupted = entry
     def rec check(n) =
       if main_interrupted() and on_air_lane() == "main" and main_changed_at() < asked then
         if n < 3 then
           # (not over an item that is already being read: see skip_main)
-          if main_fetched_at() < asked then
+          # Only while the interrupted song is still the music lane's current item. When
+          # the first skip took and the next item was still downloading, "no song change
+          # yet" was taken for the old song staying, and the skip again hit the next item
+          # the moment it arrived: KBR Jerusalem 10:30:05Z 2026-11-23, the Daf Yomi's
+          # resume after the time check, its last 4 minutes lost.
+          if main_fetched_at() < asked and main_current_entry() == interrupted then
             log.important("back to music: the interrupted song is still there after the skip; skipping again")
             hard_cut := true
             main.skip()
@@ -1134,6 +1169,8 @@ def send_started(m) =
         log.important("hold: quiet while the next item loads (engine start, Next or end of a live show)")
       elsif handed_loading() then
         log.important("hold: quiet while the next item loads (the item before it was shorter than its download)")
+      elsif fetching_now() then
+        log.important("hold: quiet while the next item is asked for and loads (the music lane ran dry)")
       else
         log.important("hold: quiet until the timed item due in #{left} s")
       end

@@ -198,6 +198,9 @@ class Stack:
 
             def do_GET(self):  # noqa: N802
                 wait = stack.slow_files.get(self.path.strip("/").split("?")[0], 0.0)
+                if wait > 1e9:
+                    # a wall time: the file arrives then, whenever it is asked for
+                    wait = max(0.0, wait - time.time())
                 if wait:
                     time.sleep(wait)
                 super().do_GET()
@@ -1096,6 +1099,10 @@ async def sc_short_item_before_slow_file(h: Harness, item: str = "id2", delay: f
     silence over 1 s."""
     name = f"short_item_before_slow_file[{item}]"
     await wait_music(h)
+    # Let the queue top-up after the last start report finish first: run right after
+    # another scenario's Next, it wrote its songs between ours and the engine was handed
+    # a fill song in place of the slow item (a race in this harness, not the engine)
+    await asyncio.sleep(3)
     await h.clear_pending()
     h.stack.slow_files["story.mp3"] = delay
     try:
@@ -1251,6 +1258,44 @@ async def sc_flush_during_download_timed(h: Harness) -> None:
     h.check(name, starts == 1, f"the engine reported the slow item's start once ({starts})")
     await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
 
+
+async def sc_music_not_ready_after_timed(h: Harness) -> None:
+    """KBR Jerusalem 10:30Z 2026-11-23: right after the :30 time check the music lane
+    started an item with almost no audio left (a resume near its end), it ended at once,
+    and while the lane asked for the next item the emergency music played for a moment.
+    Here: a 6 s time check at +6 s, then a resume of the story 1 s before its end, then a
+    song whose file takes 4 s. The stream is quiet while the song loads: never emergency."""
+    name = "music_not_ready_after_timed"
+    await wait_music(h)
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    await asyncio.sleep(3)
+    h.stack.slow_files["song5.mp3"] = 4.0
+    t0 = time.time()
+    try:
+        due = datetime.now(UTC) + timedelta(seconds=6)
+        await h.queue([
+            ("story", {"source": f"resume@{TONES['story'][1] - 1}"}),
+            ("song5", {}),
+            ("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"}),
+        ])
+        urllib.request.urlopen(urllib.request.Request(
+            f"http://127.0.0.1:{PROXY_PORT}/{STATION_ID}/flush", data=b"{}", method="POST",
+            headers={"X-Playout-Token": TOKEN}), timeout=4).read()
+        t5 = await h.wait_on_air("song5", 60)
+        await asyncio.sleep(4)
+    finally:
+        h.stack.slow_files.pop("song5.mp3", None)
+    heard = h.heard(t0, time.time() - 1)
+    h.print_timeline(heard, t0)
+    names = [n for _, n in timeline(heard) if n != "silence"]
+    timecheck, song = tone_name(TONES["time"][0]), tone_name(TONES["song5"][0])
+    h.check(name, t5 is not None and timecheck in names and song in names
+            and names.index(timecheck) < names.index(song),
+            f"the time check, then the slow song: {names}")
+    h.check(name, "EMERGENCY" not in names, f"no emergency music while the song loads: {names}")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 7.0, f"quiet at most the 4 s download and the ask ({gap:.1f} s)")
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
 
 async def sc_two_sources_same_second(h: Harness) -> None:
     """V3-5: hard items from two sources due on the same second (the hourly time check and
@@ -3625,6 +3670,41 @@ async def sc_resume_position(h: Harness) -> None:
             f"expected about {offset + 2.0:.0f} s")
 
 
+async def sc_resume_arrives_after_time_check(h: Harness) -> None:
+    """KBR Jerusalem 10:30Z 2026-11-23: Daf Yomi paused for the :30 time check; its resume
+    (a 54-minute file) was still downloading when the time check ended. The engine skipped
+    the interrupted shiur, saw no new song yet, took that for "the old song is still
+    there", skipped again, and that second skip hit the resume the moment it arrived: the
+    shiur lost its last 4 minutes and the emergency music played for a moment while the
+    lane asked again. Here the resume's file arrives 1.4 s after the time check ends: the
+    shiur carries on, and nothing but quiet fills the wait."""
+    name = "resume_arrives_after_time_check"
+    await h.set_config(timed_during_long_items="pause")
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("chirp", {}), ("song5", {}), ("song6", {})])
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=fade")
+    start = await h.wait_on_air("chirp", 60)
+    if start is None:
+        h.check(name, False, "the shiur never went on air")
+        return
+    t1 = at(40)
+    try:
+        # the resume is the same file: it is here only 1.4 s after the 6 s time check (KBR_RESUME_LATE)
+        h.stack.slow_files["chirp.mp3"] = t1.timestamp() + TONES["time"][1] + float(os.environ.get("KBR_RESUME_LATE", "1.4"))
+        await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
+        await asyncio.sleep(max(0, t1.timestamp() - time.time()) + 6 + 12)
+    finally:
+        h.stack.slow_files.pop("chirp.mp3", None)
+    starts = [t for t, src in await h.started_times("chirp", start + 1) if src.startswith("resume@")]
+    heard = h.heard(t1.timestamp() - 2, time.time() - 1)
+    h.print_timeline(heard, t1.timestamp())
+    names = [n for _, n in timeline(heard) if n != "silence"]
+    h.check(name, bool(starts), f"the shiur carries on after the time check: {names}")
+    h.check(name, "EMERGENCY" not in names, f"no emergency music while its file arrives: {names}")
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+
+
 async def sc_cue_points(h: Harness) -> None:
     """V1-5: the engine honours the analysed cue points: an item with cue_in 10 s and
     cue_out 40 s starts 10 s into its file and ends at 40 s (the next song follows then)."""
@@ -5217,6 +5297,7 @@ SCENARIOS = {
     "slow_short_item_keeps_its_place": sc_slow_short_item_keeps_its_place,
     "flush_during_download": sc_flush_during_download,
     "flush_during_download_timed": sc_flush_during_download_timed,
+    "music_not_ready_after_timed": sc_music_not_ready_after_timed,
     "short_item_6s_before_slow_file": lambda h: sc_short_item_before_slow_file(h, "announce", 9.0),
     "backend_unreachable": sc_backend_unreachable,
     "local_box_commands": sc_local_box_commands,
@@ -5228,6 +5309,7 @@ SCENARIOS = {
     "slow_timed_file": sc_slow_timed_file,
     "queue_change_drops_preloaded": sc_queue_change_drops_preloaded,
     "resume_position": sc_resume_position,
+    "resume_arrives_after_time_check": sc_resume_arrives_after_time_check,
     "cue_points": sc_cue_points,
     "icecast_output": sc_icecast_output,
     "track_level": sc_track_level,
