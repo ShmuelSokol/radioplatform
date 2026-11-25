@@ -4332,5 +4332,27 @@
   "block_names": "Krias Shema Al HaMitah",
   "items": "Krias Shema Al HaMitah | Krias Shema Al HaMitah | Krias Shema Al HaMitah",
   "next_item": "Cohen Rabbi Mordchai - Krias Shma al Hamitah"
+ },
+ {
+  "start_utc": "2026-11-25T00:08:42Z",
+  "start_et": "2026-11-24 19:08:42",
+  "hour_et": "2026-11-24 19:00",
+  "spots": 4,
+  "total_seconds": 149,
+  "spot_seconds": "22 29 63 35",
+  "block_names": "Krias Shema Al HaMitah | More Stories for Kids",
+  "items": "Krias Shema Al HaMitah | Krias Shema Al HaMitah | More Stories for Kids | More Stories for Kids",
+  "next_item": "Chanuka once upon a story - Chanuka once upon a story  50min"
+ },
+ {
+  "start_utc": "2026-11-25T01:00:44Z",
+  "start_et": "2026-11-24 20:00:44",
+  "hour_et": "2026-11-24 20:00",
+  "spots": 6,
+  "total_seconds": null,
+  "spot_seconds": "43 19 54 33 67 ?",
+  "block_names": "More Stories for Kids | Kol B'Ramah Sponsors | Weather Schedule Sponsors",
+  "items": "More Stories for Kids | More Stories for Kids | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": ""
  }
 ]
