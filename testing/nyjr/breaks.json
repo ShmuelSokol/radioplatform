@@ -5014,5 +5014,38 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH   Hip Chanukah"
+ },
+ {
+  "start_utc": "2026-11-25T22:08:30Z",
+  "start_et": "2026-11-25 17:08:30",
+  "hour_et": "2026-11-25 17:00",
+  "spots": 1,
+  "total_seconds": 55,
+  "spot_seconds": "55",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Miami Boys Choir - Chanukah Lights!"
+ },
+ {
+  "start_utc": "2026-11-25T22:31:27Z",
+  "start_et": "2026-11-25 17:31:27",
+  "hour_et": "2026-11-25 17:00",
+  "spots": 4,
+  "total_seconds": 188,
+  "spot_seconds": "58 65 36 29",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Simcha Leiner 3 - Na'avor"
+ },
+ {
+  "start_utc": "2026-11-25T22:59:57Z",
+  "start_et": "2026-11-25 17:59:57",
+  "hour_et": "2026-11-25 17:00",
+  "spots": 5,
+  "total_seconds": 274,
+  "spot_seconds": "70 59 61 55 29",
+  "block_names": "Childrens Hour",
+  "items": "Childrens Hour | Childrens Hour | Childrens Hour | Childrens Hour | Childrens Hour",
+  "next_item": "UNCLE MOISHY CHANUKAH NEW - FEEL THE SIMCHA"
  }
 ]
