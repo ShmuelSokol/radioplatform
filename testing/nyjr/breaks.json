@@ -4794,5 +4794,49 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  YAAKOV"
+ },
+ {
+  "start_utc": "2026-11-25T17:06:55Z",
+  "start_et": "2026-11-25 12:06:55",
+  "hour_et": "2026-11-25 12:00",
+  "spots": 2,
+  "total_seconds": 84,
+  "spot_seconds": "30 54",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "12:08\tLev Tahor - Shiras Halev"
+ },
+ {
+  "start_utc": "2026-11-25T17:31:41Z",
+  "start_et": "2026-11-25 12:31:41",
+  "hour_et": "2026-11-25 12:00",
+  "spots": 4,
+  "total_seconds": 173,
+  "spot_seconds": "26 60 54 33",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Beri Weber 10 Neginas - L'Duvid Maskil"
+ },
+ {
+  "start_utc": "2026-11-25T17:59:57Z",
+  "start_et": "2026-11-25 12:59:57",
+  "hour_et": "2026-11-25 12:00",
+  "spots": 3,
+  "total_seconds": 165,
+  "spot_seconds": "71 53 41",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "Rabbi Leff Fund - 518 323 0376    ID 64848"
+ },
+ {
+  "start_utc": "2026-11-25T18:04:22Z",
+  "start_et": "2026-11-25 13:04:22",
+  "hour_et": "2026-11-25 13:00",
+  "spots": 1,
+  "total_seconds": 29,
+  "spot_seconds": "29",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Why Concubine"
  }
 ]
