@@ -4629,5 +4629,27 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors",
   "next_item": "8:06\tBENNY FRIEDMAN COMP\tBENNY COMP 50 - 55"
+ },
+ {
+  "start_utc": "2026-11-25T13:33:58Z",
+  "start_et": "2026-11-25 08:33:58",
+  "hour_et": "2026-11-25 08:00",
+  "spots": 4,
+  "total_seconds": 228,
+  "spot_seconds": "60 70 65 33",
+  "block_names": "Sponsors",
+  "items": "Sponsors | Sponsors | Sponsors | Sponsors",
+  "next_item": "Shwekey  Cry No More - Hiney Anochi"
+ },
+ {
+  "start_utc": "2026-11-25T13:59:58Z",
+  "start_et": "2026-11-25 08:59:58",
+  "hour_et": "2026-11-25 08:00",
+  "spots": 3,
+  "total_seconds": 152,
+  "spot_seconds": "70 79 3",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
+  "next_item": "Pliskin My Father My King - 72 Suffering"
  }
 ]
