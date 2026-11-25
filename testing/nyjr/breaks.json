@@ -4475,5 +4475,16 @@
   "block_names": "Tikun Chatzos",
   "items": "Tikun Chatzos",
   "next_item": "Shwekey 3 - Im Eshkochech"
+ },
+ {
+  "start_utc": "2026-11-25T07:02:03Z",
+  "start_et": "2026-11-25 02:02:03",
+  "hour_et": "2026-11-25 02:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Highest Frequncy",
+  "items": "Highest Frequncy",
+  "next_item": "Micha Gamerman - Morabu"
  }
 ]
