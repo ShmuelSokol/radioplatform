@@ -2253,3 +2253,4 @@
 {"start_utc": "2026-11-25T00:00:27Z", "start_epoch": 1795564827, "playlist_time": "19:00", "artist": "", "title": "Krias Shema Al HaMitah", "raw": "19:00\tKrias Shema Al HaMitah", "logged_utc": "2026-11-25T00:01:02Z"}
 {"start_utc": "2026-11-25T00:00:57Z", "start_epoch": 1795564857, "playlist_time": "19:01", "artist": "", "title": "Krias Shema Al HaMitah", "raw": "19:01\tKrias Shema Al HaMitah", "logged_utc": "2026-11-25T00:01:02Z"}
 {"start_utc": "2026-11-25T00:01:37Z", "start_epoch": 1795564897, "playlist_time": "19:01", "artist": "Cohen Rabbi Mordchai", "title": "Krias Shma al Hamitah", "raw": "19:01\tCohen Rabbi Mordchai\tKrias Shma al Hamitah", "logged_utc": "2026-11-25T00:02:03Z"}
+{"start_utc": "2026-11-25T00:06:41Z", "start_epoch": 1795565201, "playlist_time": "19:06", "artist": "613 Hamalach", "title": "Hamalach", "raw": "19:06\t613 Hamalach\tHamalach", "logged_utc": "2026-11-25T00:07:02Z"}
