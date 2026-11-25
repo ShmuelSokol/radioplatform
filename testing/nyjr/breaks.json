@@ -4838,5 +4838,38 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Why Concubine"
+ },
+ {
+  "start_utc": "2026-11-25T18:07:28Z",
+  "start_et": "2026-11-25 13:07:28",
+  "hour_et": "2026-11-25 13:00",
+  "spots": 1,
+  "total_seconds": 54,
+  "spot_seconds": "54",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Yossi Lowenbraun - Eilu Finu"
+ },
+ {
+  "start_utc": "2026-11-25T18:31:09Z",
+  "start_et": "2026-11-25 13:31:09",
+  "hour_et": "2026-11-25 13:00",
+  "spots": 2,
+  "total_seconds": 132,
+  "spot_seconds": "63 69",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "GERTNER  ADEI AD - Hashem Ish Milchama    Yitzy Waldner"
+ },
+ {
+  "start_utc": "2026-11-25T19:02:44Z",
+  "start_et": "2026-11-25 14:02:44",
+  "hour_et": "2026-11-25 14:00",
+  "spots": 3,
+  "total_seconds": null,
+  "spot_seconds": "70 17 ?",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": ""
  }
 ]
