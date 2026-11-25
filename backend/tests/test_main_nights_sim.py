@@ -30,7 +30,12 @@ pytestmark = [
 ]
 
 
-def _night_export(tmp_path: Path) -> Path:
+# Main's real instrumental pool (main-1079/instrumental.json, 2026-11-25): 46 tracks of
+# 3 to 12 minutes, 33 of them by one artist.
+NIGHT_POOL = [["8th Day", 282.1], ["C. Lanzbom", 480.6], ["C. Lanzbom", 365.2], ["C. Lanzbom", 274.4], ["C. Lanzbom", 292.4], ["C. Lanzbom", 408.2], ["C. Lanzbom", 229.1], ["C. Lanzbom", 409.6], ["C. Lanzbom", 317.3], ["Eli Gerstner, The Yosis Orchestra", 658.3], ["Keola Beamer", 193.7], ["Keola Beamer", 291.2], ["Keola Beamer", 209.0], ["Tony O'Connor", 435.5], ["Tony O'Connor", 466.2], ["Tony O'Connor", 602.4], ["Tony O'Connor", 593.9], ["Tony O'Connor", 266.6], ["Tony O'Connor", 400.3], ["Tony O'Connor", 315.7], ["Tony O'Connor", 303.7], ["Tony O'Connor", 446.4], ["Tony O'Connor", 431.8], ["Tony O'Connor", 659.9], ["Tony O'Connor", 526.8], ["Tony O'Connor", 248.6], ["Tony O'Connor", 603.0], ["Tony O'Connor", 307.2], ["Tony O'Connor", 709.8], ["Tony O'Connor", 302.4], ["Tony O'Connor", 335.8], ["Tony O'Connor", 535.4], ["Tony O'Connor", 357.3], ["Tony O'Connor", 408.5], ["Tony O'Connor", 578.2], ["Tony O'Connor", 661.6], ["Tony O'Connor", 457.5], ["Tony O'Connor", 600.1], ["Tony O'Connor", 409.6], ["Tony O'Connor", 694.9], ["Tony O'Connor", 501.8], ["Tony O'Connor", 335.5], ["Tony O'Connor", 497.9], ["Tony O'Connor", 429.0], ["Tony O'Connor", 722.9], ["Tony O'Connor", 626.1]]
+
+
+def _night_export(tmp_path: Path, pool: list | None = None) -> Path:
     """The export with Main's nights as set up on 2026-11-22 (apply_main_nights.py):
     51 instrumental tracks filed under relax and also tagged "instrumental", a Night
     Chill playlist of relax songs, the two new blocks one priority above Night Chill,
@@ -38,13 +43,16 @@ def _night_export(tmp_path: Path) -> Path:
     export = json.loads(EXPORT.read_text())
     stamp = "2026-11-22T15:00:00+00:00"
 
-    def asset(title, category, seconds):
+    def asset(title, category, seconds, artist=None):
         a = {"id": str(uuid.uuid4()), "title": title, "asset_type": "music", "category": category,
-             "duration": seconds, "cues": {}}
+             "duration": seconds, "cues": {}, "artist": artist}
         export["assets"].append(a)
         return a
 
-    instrumental = [asset(f"INSTR {i}", "relax", 240.0 + (i % 7) * 25) for i in range(51)]
+    if pool is None:
+        instrumental = [asset(f"INSTR {i}", "relax", 240.0 + (i % 7) * 25) for i in range(51)]
+    else:
+        instrumental = [asset(f"INSTR {i}", "relax", seconds, artist) for i, (artist, seconds) in enumerate(pool)]
     export["asset_categories"] = [{"asset_id": a["id"], "category": "instrumental"} for a in instrumental]
     for i in range(40):
         asset(f"CARLEBACH {i}", "Carlebach", 230.0 + (i % 5) * 30)
@@ -129,6 +137,42 @@ async def test_main_nights_carlebach_then_three_hours_of_instrumentals(tmp_path)
     assert not wrong, wrong
     # every hour of it
     for hour in (3, 4, 5):
-        assert len(between(hour, 1, hour + 1, 0)) >= 10, hour
+        assert len(between(hour, 1, hour + 1, 0)) >= 8, hour  # about 11, fewer when the fit swaps in longer songs
     assert not any(r.title.startswith("HOLIDAY") for r in between(0, 31, 6, 0))
     assert not any(r.title.startswith("INSTR") for r in between(6, 2, 7, 0)), "instrumental after 6 AM"
+
+
+async def test_main_nights_with_the_real_instrumentals(tmp_path):
+    """The same night with Main's real 46 instrumentals (live 2026-11-25, after PR 507):
+    the Gerstner Medley aired at 3:22, 4:36 and 5:50 and Sweet Lei Mamo twice in 34
+    minutes, as the artist rule (2 songs) kept asking for the 13 tracks not by Tony
+    O'Connor; and with tracks of 3 to 12 minutes no order of the waiting songs ended
+    near the hour (12 s lost at 5:00, 70 s at 6:00)."""
+    export = _night_export(tmp_path, NIGHT_POOL)
+    length = {a["title"]: a["duration"] for a in json.loads(export.read_text())["assets"]}
+    _, result = await simulate(export, datetime(2026, 11, 23, 2, 30, tzinfo=NY), 3.7, ["main"],
+                               tmp_path, quiet_pass=12.0)
+    print(result.report())
+    songs = [r for r in result.rows if r.station == PICK["main"] and r.kind == "music" and r.lane != "timed"]
+    for r in songs:
+        print(f"  {_local(r.start):%H:%M:%S} {r.title}")
+    a = datetime(2026, 11, 23, 3, 1, tzinfo=NY).timestamp()
+    b = datetime(2026, 11, 23, 6, 0, tzinfo=NY).timestamp()
+    night = [r for r in songs if a <= r.start < b and r.title.startswith("INSTR")]
+    assert len(night) >= 20, len(night)
+    # No track twice: the pool (46 tracks, 5.6 hours) is longer than the block
+    titles = [r.title for r in night]
+    twice = sorted({t for t in titles if titles.count(t) > 1})
+    assert not twice, twice
+    # Within the block the hard break on the hour loses little of the song on air
+    # (a reorder, or songs of the block's playlist that end on the hour). The 6 AM
+    # break is printed, not checked: this export still has hard :30 breaks at night,
+    # which Main no longer has, so the run-up to 6:00 is only the half hour after 5:30.
+    for hour in (4, 5, 6):
+        at = datetime(2026, 11, 23, hour, 0, tzinfo=NY).timestamp()
+        for r in songs:
+            if r.start < at <= r.end + 1 and r.cut:
+                lost = (length.get(r.title) or 0) - (r.cue_in + (r.end - r.start))
+                print(f"  {hour}:00 cut {r.title} after {r.end - r.start:.0f} s, {lost:.0f} s lost")
+                if hour < 6:
+                    assert lost <= 25, (hour, r.title, lost)

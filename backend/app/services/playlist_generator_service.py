@@ -43,9 +43,12 @@ from app.services.spot_schedule_service import as_utc, load_blackouts
 CONFIG_KEY = "playlist_generation"
 DEFAULT_HOURS = 6
 DEFAULT_ARTIST_DISTANCE = 2
-# A song waiting in the queue is not drawn again this close to when it airs, even
-# when the artist rule would want it (see _Library.draw)
-REPEAT_GUARD = timedelta(hours=1)
+# A song is not drawn again this soon after it aired (or this close to when it waits
+# to air), even when the artist rule would want it, while a song more rested is there
+# (see _Library.draw). Was 1 hour and for waiting songs only: Main's 46 night
+# instrumentals are 33 by one artist, and the artist rule brought the 13 others back
+# within the hour (Gerstner Medley 3:22, 4:36, 5:50 on 2026-11-25).
+REPEAT_GUARD = timedelta(hours=3)
 # A place in the queue is counted as this long when working out when a waiting song airs
 QUEUED_PLACE_SECONDS = 240.0
 DEFAULT_DURATION = 180.0
@@ -420,8 +423,9 @@ class _Library:
             self.artists[key] = counts
         return self.orders[key]
 
-    async def draw(self, asset_type, category, recent_artists, at: datetime):
-        """Return (row, relaxed) or (None, False) when the type has no songs."""
+    async def draw(self, asset_type, category, recent_artists, at: datetime, last_artist: str | None = None):
+        """Return (row, relaxed) or (None, False) when the type has no songs.
+        `last_artist` is the artist of the song just before (among recent_artists)."""
         if self.last_used is None:
             await self._load_last_used()
         rows = await self.pool(asset_type, category)
@@ -440,20 +444,33 @@ class _Library:
         counts = self.artists[key]
         clear = len(order) - sum(counts.get(a, 0) for a in recent_artists)
         relaxed = clear <= 0
-        if not relaxed and not order[0][0]:
-            # A song not waiting yet exists, but every one clear of the artist rule is
-            # waiting already: the artist rule gives way rather than the song coming
-            # back. Main 2026-11-24: "Kol Birama" aired at 0:34 and 0:52 in the
-            # Carlebach half hour, where most songs share one artist and the few by
-            # others were all queued by the 48-hour fill.
-            # Only for a song that would come back within the hour: further apart, the
-            # studio program's order (artist rule first) stands.
-            first_clear = next((c for c in order if c[4] not in recent_artists), None)
-            if first_clear is not None and first_clear[0] and abs(at - first_clear[1]) < REPEAT_GUARD:
-                relaxed = True
         skip = () if relaxed else recent_artists
+        if not relaxed and not order[0][0]:
+            # ...but not for a song that would come back within REPEAT_GUARD while a
+            # song rested twice as long is there: then the artist rule gives way. It
+            # gives way only as far as needed: first only the artist of the song just
+            # before stays out; if that still leaves only songs that aired lately, that
+            # artist may follow itself (a song again within the hours is worse).
+            # Main 2026-11-24: "Kol Birama" aired at 0:34 and 0:52 in the Carlebach
+            # half hour (most songs share one artist; the few by others were all
+            # queued by the 48-hour fill). Main 2026-11-25: 33 of the 46 night
+            # instrumentals are by one artist, and the 13 others came back within the
+            # hour (Gerstner Medley at 3:22, 4:36 and 5:50).
+            first_clear = next((c for c in order if c[4] not in recent_artists), None)
+            rested = abs(at - first_clear[1]) if first_clear is not None else None
+            if rested is not None and rested < REPEAT_GUARD:
+                last = {last_artist} if last_artist and last_artist in recent_artists else set()
+                for near in ((last, set()) if last else (set(),)):
+                    best = next((c for c in order if c[4] not in near), None)
+                    if best is None or best is first_clear or best[0]:
+                        continue
+                    if first_clear[0] or at - best[1] >= 2 * rested:
+                        relaxed = True
+                        skip = near
+                        clear = len(order) - sum(counts.get(a, 0) for a in near)
+                        break
         # Draw from the most-rested third so the order is not the same every cycle...
-        limit = max(1, math.ceil((len(order) if relaxed else clear) / 3))
+        limit = max(1, math.ceil((len(order) if not skip else clear) / 3))
         window: list[tuple] = []
         first = None
         longest = timedelta(0)
@@ -471,6 +488,9 @@ class _Library:
                 # most rested one. Without this a song that aired an hour ago
                 # could be drawn ahead of one that has never aired, just for
                 # sitting in the same third.
+                break
+            elif abs(at - card[1]) < REPEAT_GUARD:
+                # ...nor one back within REPEAT_GUARD when the first is not
                 break
             window.append(card)
             if len(window) >= limit:
@@ -783,7 +803,8 @@ async def generate(
                 await maybe_station_id()
                 continue
             row, relaxed = await library.draw(
-                "music", None, set(recent) if artist_distance else set(), at
+                "music", None, set(recent) if artist_distance else set(), at,
+                recent[-1] if artist_distance and recent else None,
             )
             if row is None:
                 clock.at = at + SKIP
@@ -838,7 +859,8 @@ async def generate(
             await maybe_station_id()
             continue
         row, relaxed = await library.draw(
-            slot.asset_type, slot.category, set(recent) if artist_distance else set(), at
+            slot.asset_type, slot.category, set(recent) if artist_distance else set(), at,
+            recent[-1] if artist_distance and recent else None,
         )
         if row is None:
             what = f"{slot.asset_type} / {slot.category}" if slot.category else slot.asset_type
