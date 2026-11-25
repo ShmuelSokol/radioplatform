@@ -528,3 +528,4 @@ INGEST 2026-11-23 station-simulator.md real play-log check: paused shiur or stor
 UPDATE 2026-11-23 shabbos-ending.md nothing that cannot finish starts before the back-timed song (swap with an item that fits, else skip); Jerusalem story cut 11-20
 UPDATE 2026-11-25 hourly-slots.md playlist-generation.md fit keeps the old block's songs until the run-up is fitted (Main 0:59:30 and 5:59:44 cuts); a waiting song is not re-drawn within the hour for the artist rule (Kol Birama twice); last_played re-reads 3 h (plays are logged at their end)
 INGEST 2026-11-25 streaming-architecture.md engine proto 7: proto rides on every levels post so a restarted backend knows it within a second (Main live_on_stream false 42 min after a deploy, 2026-11-24)
+UPDATE 2026-11-25 hourly-slots.md the block on with no songs waiting (control-room presses cut its last songs) gets its songs drawn again

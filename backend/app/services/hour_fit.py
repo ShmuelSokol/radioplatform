@@ -615,6 +615,16 @@ def _local(station, at: datetime) -> str:
 
 # station -> monotonic time of the last look for songs of a block that has ended
 _ended_look: dict[str, float] = {}
+_ended_redraw: dict[str, float] = {}  # station -> monotonic time of its last redraw from here
+ENDED_REDRAW_EVERY = 300.0
+
+
+def _ended_redraw_due(key: str) -> bool:
+    tick = _time.monotonic()
+    if tick - _ended_redraw.get(key, -1e9) < ENDED_REDRAW_EVERY:
+        return False
+    _ended_redraw[key] = tick
+    return True
 
 
 async def drop_songs_of_ended_blocks(db: AsyncSession, station, now: datetime | None = None, *,
@@ -701,7 +711,18 @@ async def drop_songs_of_ended_blocks(db: AsyncSession, station, now: datetime | 
             break
         stale.append(e)
     else:
-        return False  # no song of the block that is on is waiting: nothing to bring forward
+        # No song of the block that is on waits: the next songs were drawn for another
+        # block's time. Main 2026-11-25 12:49: operator presses cut the last Carlebach
+        # songs of the half hour, and the Night Chill songs drawn for 1 AM came on at
+        # 12:49. The station's automatic songs are drawn again from now, once in a while.
+        if stale and _ended_redraw_due(key):
+            logger.info(
+                "Station %s: the next songs were drawn for another block than the one on at %s (station time): "
+                "drawing them again",
+                station.id, _local(station, at),
+            )
+            request_redraw(station.id)
+        return False
     if not stale:
         return False
     from app.services.playout_engine import cued_entry_id, held_entry_ids

@@ -404,12 +404,32 @@ async def test_the_song_that_starts_before_the_block_change_stays(db_session):
 
 
 @pytest.mark.asyncio
-async def test_nothing_goes_without_a_song_of_the_block_that_is_on(db_session):
+async def test_nothing_goes_without_a_song_of_the_block_that_is_on(db_session, redraws):
     sid = await _ended_queue(db_session, HOUR + timedelta(seconds=40), [
         ("Night A", 240.0, "night"), ("Night B", 240.0, "night"),
     ])
     assert not await _drop_ended(db_session, sid, HOUR - timedelta(minutes=4))
     assert await _order(db_session, sid) == ["Night A", "Night B"]
+
+
+@pytest.mark.asyncio
+async def test_the_block_on_ran_out_of_songs_so_they_are_drawn_again(db_session, redraws):
+    """Main 2026-11-25 12:49: presses in the control room cut the last Carlebach songs,
+    and the Night Chill songs drawn for 1 AM came on with 11 minutes of the half hour
+    left. With no song of the block on waiting, the songs are drawn again (once in five
+    minutes), and nothing is taken out meanwhile."""
+    from app.services import hour_fit
+
+    sid = await _ended_queue(db_session, HOUR + timedelta(minutes=19), [
+        ("Night A", 240.0, "night"), ("Night B", 240.0, "night"),
+    ])
+    hour_fit._ended_redraw.pop(str(sid), None)
+    # the night block before: the next song would start in Carlebach's time
+    assert not await _drop_ended(db_session, sid, HOUR + timedelta(minutes=17))
+    assert redraws == [str(sid)]
+    assert await _order(db_session, sid) == ["Night A", "Night B"]
+    assert not await _drop_ended(db_session, sid, HOUR + timedelta(minutes=18))
+    assert redraws == [str(sid)]  # not again within five minutes
 
 
 @pytest.mark.asyncio
