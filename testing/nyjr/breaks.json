@@ -4871,5 +4871,60 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  613 SHAMARTI"
+ },
+ {
+  "start_utc": "2026-11-25T19:10:38Z",
+  "start_et": "2026-11-25 14:10:38",
+  "hour_et": "2026-11-25 14:00",
+  "spots": 2,
+  "total_seconds": 84,
+  "spot_seconds": "29 55",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "A Maccabeats Hanukkah - Al Hanissim"
+ },
+ {
+  "start_utc": "2026-11-25T19:19:57Z",
+  "start_et": "2026-11-25 14:19:57",
+  "hour_et": "2026-11-25 14:00",
+  "spots": 1,
+  "total_seconds": 35,
+  "spot_seconds": "35",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors",
+  "next_item": "Sruli Williger - Jerusalem"
+ },
+ {
+  "start_utc": "2026-11-25T19:29:57Z",
+  "start_et": "2026-11-25 14:29:57",
+  "hour_et": "2026-11-25 14:00",
+  "spots": 1,
+  "total_seconds": 65,
+  "spot_seconds": "65",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors",
+  "next_item": "Leiner  Kol Hakavod - We Go On"
+ },
+ {
+  "start_utc": "2026-11-25T19:38:57Z",
+  "start_et": "2026-11-25 14:38:57",
+  "hour_et": "2026-11-25 14:00",
+  "spots": 1,
+  "total_seconds": 53,
+  "spot_seconds": "53",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors",
+  "next_item": "Shira Chadasha Chanukah - Raos."
+ },
+ {
+  "start_utc": "2026-11-25T20:02:27Z",
+  "start_et": "2026-11-25 15:02:27",
+  "hour_et": "2026-11-25 15:00",
+  "spots": 3,
+  "total_seconds": 124,
+  "spot_seconds": "71 35 18",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "DR DAVE INTRO - HOW BITACHON WORKS"
  }
 ]
