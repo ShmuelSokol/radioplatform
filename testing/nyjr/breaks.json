@@ -4865,11 +4865,11 @@
   "start_utc": "2026-11-25T19:02:44Z",
   "start_et": "2026-11-25 14:02:44",
   "hour_et": "2026-11-25 14:00",
-  "spots": 3,
-  "total_seconds": null,
-  "spot_seconds": "70 17 ?",
+  "spots": 4,
+  "total_seconds": 162,
+  "spot_seconds": "70 17 57 18",
   "block_names": "Weather Schedule Sponsors",
-  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
-  "next_item": ""
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  613 SHAMARTI"
  }
 ]
