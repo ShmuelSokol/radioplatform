@@ -4618,5 +4618,16 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Coins"
+ },
+ {
+  "start_utc": "2026-11-25T13:05:17Z",
+  "start_et": "2026-11-25 08:05:17",
+  "hour_et": "2026-11-25 08:00",
+  "spots": 2,
+  "total_seconds": 85,
+  "spot_seconds": "55 30",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "8:06\tBENNY FRIEDMAN COMP\tBENNY COMP 50 - 55"
  }
 ]
