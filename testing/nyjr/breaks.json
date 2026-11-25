@@ -4381,11 +4381,11 @@
   "start_utc": "2026-11-25T02:00:20Z",
   "start_et": "2026-11-24 21:00:20",
   "hour_et": "2026-11-24 21:00",
-  "spots": 5,
-  "total_seconds": null,
-  "spot_seconds": "59 65 66 86 ?",
+  "spots": 7,
+  "total_seconds": 374,
+  "spot_seconds": "59 65 66 86 38 53 7",
   "block_names": "Kol B'Ramah Sponsors | Mesivta D'Rakia",
-  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia",
-  "next_item": ""
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia",
+  "next_item": "21:06\tIrons R. Shmuel\tHerod - Hillel  Part 2"
  }
 ]
