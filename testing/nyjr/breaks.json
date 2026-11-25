@@ -4701,10 +4701,87 @@
   "start_et": "2026-11-25 10:06:55",
   "hour_et": "2026-11-25 10:00",
   "spots": 1,
-  "total_seconds": null,
-  "spot_seconds": "?",
+  "total_seconds": 18,
+  "spot_seconds": "18",
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors",
-  "next_item": ""
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  YAAKOV speak to EASAV"
+ },
+ {
+  "start_utc": "2026-11-25T15:09:21Z",
+  "start_et": "2026-11-25 10:09:21",
+  "hour_et": "2026-11-25 10:00",
+  "spots": 1,
+  "total_seconds": 55,
+  "spot_seconds": "55",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "Shwekey Live in Cesaria 2 - Kol Mevasser"
+ },
+ {
+  "start_utc": "2026-11-25T15:34:05Z",
+  "start_et": "2026-11-25 10:34:05",
+  "hour_et": "2026-11-25 10:00",
+  "spots": 3,
+  "total_seconds": 216,
+  "spot_seconds": "59 74 83",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Yoni Shlomo - V'Atah Shalom"
+ },
+ {
+  "start_utc": "2026-11-25T15:59:58Z",
+  "start_et": "2026-11-25 10:59:58",
+  "hour_et": "2026-11-25 10:00",
+  "spots": 2,
+  "total_seconds": 118,
+  "spot_seconds": "70 48",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Ask Rabbi Leff - Cameras on Shabbos"
+ },
+ {
+  "start_utc": "2026-11-25T16:02:49Z",
+  "start_et": "2026-11-25 11:02:49",
+  "hour_et": "2026-11-25 11:00",
+  "spots": 1,
+  "total_seconds": 5,
+  "spot_seconds": "5",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  400 men  400 shekels"
+ },
+ {
+  "start_utc": "2026-11-25T16:06:21Z",
+  "start_et": "2026-11-25 11:06:21",
+  "hour_et": "2026-11-25 11:00",
+  "spots": 1,
+  "total_seconds": 74,
+  "spot_seconds": "74",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "Weber Berry - Chazak"
+ },
+ {
+  "start_utc": "2026-11-25T16:31:53Z",
+  "start_et": "2026-11-25 11:31:53",
+  "hour_et": "2026-11-25 11:00",
+  "spots": 3,
+  "total_seconds": 133,
+  "spot_seconds": "33 39 61",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Tuvie Eichler - Open Up"
+ },
+ {
+  "start_utc": "2026-11-25T17:00:50Z",
+  "start_et": "2026-11-25 12:00:50",
+  "hour_et": "2026-11-25 12:00",
+  "spots": 4,
+  "total_seconds": 156,
+  "spot_seconds": "11 70 53 22",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "Pliskin R. Zeleg Encourage - Encourage 17 story"
  }
 ]
