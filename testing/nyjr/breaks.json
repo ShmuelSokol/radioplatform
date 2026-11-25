@@ -4398,5 +4398,38 @@
   "block_names": "Mesivta D'Rakia | Kol B'Ramah Sponsors",
   "items": "Mesivta D'Rakia | Kol B'Ramah Sponsors | Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia",
   "next_item": "Dr. Dave Leiberman Maximize Your Life - Raising Happy Children  2"
+ },
+ {
+  "start_utc": "2026-11-25T03:48:22Z",
+  "start_et": "2026-11-24 22:48:22",
+  "hour_et": "2026-11-24 22:00",
+  "spots": 3,
+  "total_seconds": 124,
+  "spot_seconds": "30 33 61",
+  "block_names": "Mesivta D'Rakia | Kol B'Ramah Sponsors",
+  "items": "Mesivta D'Rakia | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Baruch Levine Padushka - Ushavtem"
+ },
+ {
+  "start_utc": "2026-11-25T04:03:45Z",
+  "start_et": "2026-11-24 23:03:45",
+  "hour_et": "2026-11-24 23:00",
+  "spots": 1,
+  "total_seconds": 48,
+  "spot_seconds": "48",
+  "block_names": "Mesivta D'Rakia",
+  "items": "Mesivta D'Rakia",
+  "next_item": "Glatstein R. Daniel - Vayishlach  2019"
+ },
+ {
+  "start_utc": "2026-11-25T04:04:33Z",
+  "start_et": "2026-11-24 23:04:33",
+  "hour_et": "2026-11-24 23:00",
+  "spots": 1,
+  "total_seconds": null,
+  "spot_seconds": "?",
+  "block_names": "Mesivta D'Rakia",
+  "items": "Mesivta D'Rakia",
+  "next_item": ""
  }
 ]
