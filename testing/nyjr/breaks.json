@@ -4453,5 +4453,27 @@
   "block_names": "107.9  Kol  B'Ramah  Lakewood",
   "items": "107.9  Kol  B'Ramah  Lakewood",
   "next_item": "Shlomo at Dr Ritchies - 13 You Are Jewish!"
+ },
+ {
+  "start_utc": "2026-11-25T05:50:02Z",
+  "start_et": "2026-11-25 00:50:02",
+  "hour_et": "2026-11-25 00:00",
+  "spots": 1,
+  "total_seconds": 30,
+  "spot_seconds": "30",
+  "block_names": "107.9  Kol  B'Ramah  Lakewood",
+  "items": "107.9  Kol  B'Ramah  Lakewood",
+  "next_item": "Ohad   Oh ! - Veyachon Am"
+ },
+ {
+  "start_utc": "2026-11-25T06:02:34Z",
+  "start_et": "2026-11-25 01:02:34",
+  "hour_et": "2026-11-25 01:00",
+  "spots": 1,
+  "total_seconds": 28,
+  "spot_seconds": "28",
+  "block_names": "Tikun Chatzos",
+  "items": "Tikun Chatzos",
+  "next_item": "Shwekey 3 - Im Eshkochech"
  }
 ]
