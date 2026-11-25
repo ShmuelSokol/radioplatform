@@ -118,23 +118,53 @@ def redraws(monkeypatch):
 @pytest.mark.asyncio
 async def test_songs_of_a_block_that_ends_at_the_hard_break_do_not_air_after_it(db_session: AsyncSession, redraws):
     """Carlebach ends at the hour: a Carlebach song the queue now puts after the
-    break, before the night block's songs, is taken out."""
+    break, before the night block's songs, is taken out once the song before the hour
+    is about to start (until then the fit may need it)."""
     station = await _station(db_session)
     sid = station.id
     ids = await _blocks(db_session, station, {"carlebach": (-1, 0), "night": (0, 3)})
-    on_air_ends = HOUR - timedelta(minutes=8)
+    on_air_ends = HOUR - timedelta(minutes=4)
     await _queue(db_session, station, on_air_ends, [
-        ("Carlebach 1", 240.0, {"block_id": ids["carlebach"]}),
         ("Carlebach 2", 260.0, {"block_id": ids["carlebach"]}),  # on air at the hour, loses ~14 s
         ("Carlebach 3", 200.0, {"block_id": ids["carlebach"]}),  # would air at 1:01
         ("Night 1", 240.0, {"block_id": ids["night"]}),
         ("Night 2", 240.0, {"block_id": ids["night"]}),
     ])
-    assert await fit_before_hard_item(db_session, sid, on_air_ends - timedelta(minutes=2))
-    await db_session.commit()
-    assert await _order(db_session, sid) == ["Carlebach 1", "Carlebach 2", "Night 1", "Night 2"]
-    # nothing more to do on the next look, and no redraw: the night songs are right
     assert not await fit_before_hard_item(db_session, sid, on_air_ends - timedelta(minutes=2))
+    await db_session.commit()
+    assert "Carlebach 3" in await _order(db_session, sid)
+    assert await fit_before_hard_item(db_session, sid, on_air_ends - timedelta(seconds=60))
+    await db_session.commit()
+    assert await _order(db_session, sid) == ["Carlebach 2", "Night 1", "Night 2"]
+    # nothing more to do on the next look, and no redraw: the night songs are right
+    assert not await fit_before_hard_item(db_session, sid, on_air_ends - timedelta(seconds=60))
+    assert redraws == []
+
+
+@pytest.mark.asyncio
+async def test_the_block_songs_after_the_break_are_kept_for_the_fit(db_session: AsyncSession, redraws):
+    """Main 2026-11-24 0:59:30: the Carlebach songs after 1 AM had been taken out before
+    the fit looked, so it had nothing to swap and the 1:00 time check cut a 4:22 song
+    after 30 s. Kept until the run-up is settled, one of them fills the place."""
+    station = await _station(db_session)
+    sid = station.id
+    ids = await _blocks(db_session, station, {"carlebach": (-1, 0), "night": (0, 3)})
+    on_air_ends = HOUR - timedelta(minutes=4)
+    await _queue(db_session, station, on_air_ends, [
+        ("Carlebach 2", 213.0, {"block_id": ids["carlebach"]}),  # ends 30 s before the hour
+        ("Lulei Torascha", 262.0, {"block_id": ids["carlebach"]}),  # would start at 0:59:30
+        ("Carlebach 4", 243.0, {"block_id": ids["carlebach"]}),  # ends right at the hour
+        ("Night 1", 240.0, {"block_id": ids["night"]}),
+        ("Night 2", 240.0, {"block_id": ids["night"]}),
+    ])
+    assert await fit_before_hard_item(db_session, sid, on_air_ends - timedelta(minutes=3))
+    await db_session.commit()
+    first = (await _order(db_session, sid))[0]
+    assert first in ("Lulei Torascha", "Carlebach 4")  # one song that runs to the hour
+    for _ in range(3):
+        await fit_before_hard_item(db_session, sid, on_air_ends - timedelta(seconds=60))
+        await db_session.commit()
+    assert await _order(db_session, sid) == [first, "Night 1", "Night 2"]
     assert redraws == []
 
 
@@ -389,3 +419,27 @@ async def test_a_song_about_to_start_is_left_alone(db_session):
     ])
     assert not await _drop_ended(db_session, sid, HOUR + timedelta(seconds=30))
     assert await _order(db_session, sid) == ["Night A", "Carlebach 1"]
+
+
+@pytest.mark.asyncio
+async def test_a_waiting_song_is_not_drawn_again_for_the_artist_rule(db_session: AsyncSession):
+    """Main 2026-11-24: "Kol Birama" aired at 0:34 and 0:52. Most Carlebach songs share
+    one artist; the one by another artist was the only song clear of the artist rule,
+    and the draw took it again although it was already waiting. Now the artist rule
+    gives way while songs that are not waiting remain."""
+    from app.services.playlist_generator_service import _Library
+
+    rows = [_asset(f"Carlebach {i}", category="Carlebach") for i in range(30)]
+    for r in rows:
+        r.artist = "Shlomo Carlebach"
+    other = _asset("Kol Birama", category="Carlebach")
+    other.artist = "Other singer"
+    station = Station(id=uuid.uuid4(), name="Main", timezone="America/New_York", is_active=True)
+    db_session.add_all([station, other, *rows])
+    await db_session.commit()
+    library = _Library(db_session, station.id, set())
+    at = datetime(2026, 11, 24, 5, 34, tzinfo=UTC)
+    got, _ = await library.draw("music", "Carlebach", {"shlomo carlebach"}, at)
+    assert got.title == "Kol Birama"  # the only one clear of the artist rule
+    got, relaxed = await library.draw("music", "Carlebach", {"shlomo carlebach"}, at + timedelta(minutes=18))
+    assert got.title != "Kol Birama" and relaxed

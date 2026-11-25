@@ -240,6 +240,9 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
     for hard in sorted({_aware(t) for t in hard_times}):
         if await _fit_one(db, station, now, hard, key):
             changed = True
+            # Once more on the new order: when it is settled, the old block's songs
+            # behind the hard item go now rather than at a later look
+            await _fit_one(db, station, now, hard, key)
     return changed
 
 
@@ -335,11 +338,21 @@ async def _fit_one(db: AsyncSession, station, now: datetime, hard_at: datetime, 
     if not slots:
         return False
     last = slots[-1]
-    # Songs drawn for a block that ends at this hard item but pushed past it (a fit
-    # moved them, or songs ran longer than planned) would air in the next block: Main
-    # 2026-11-23 aired a Carlebach song at 1:01 after its half hour ended at 1:00
-    if await _drop_block_leftovers(db, station, now, hard_at, last, songs, engine):
-        return True
+
+    async def tidy(settled: bool = False) -> bool:
+        # Songs drawn for a block that ends at this hard item but pushed past it (a fit
+        # moved them, or songs ran longer than planned) would air in the next block: Main
+        # 2026-11-23 aired a Carlebach song at 1:01 after its half hour ended at 1:00.
+        # Only once the run-up is settled: they are the songs a fit chooses from (Main
+        # 2026-11-24: with them gone before the fit, a Carlebach song started at 0:59:30
+        # and the 1:00 time check cut it after 30 s; at 6 AM, with the Night
+        # instrumental songs gone, a Morning Drive song moved up to 5:59:44 and was cut).
+        # So they stay until the run-up is fitted within REPLAN of the hard item, or the
+        # last song before it is about to start; the look while that song is on air
+        # takes out any still there.
+        if not settled and (last.start - now).total_seconds() > PRELOADED_FROZEN:
+            return False
+        return await _drop_block_leftovers(db, station, now, hard_at, last, songs, engine)
     # Songs after the hard item drawn for a block that is not on then (they moved up
     # when songs before them were taken out): the station's automatic songs are drawn
     # again from now, as after a schedule change
@@ -368,7 +381,7 @@ async def _fit_one(db: AsyncSession, station, now: datetime, hard_at: datetime, 
     target = EARLY_TARGET if first_plan else ACCEPTABLE_CUT
     if loses <= target:
         planned.add(hard_at)
-        return False
+        return await tidy(settled=not first_plan)
 
     from app.services.playout_engine import cued_entry_id, held_entry_ids
 
@@ -392,15 +405,23 @@ async def _fit_one(db: AsyncSession, station, now: datetime, hard_at: datetime, 
         return (start - now).total_seconds() >= frozen
 
     if not movable(last.entry, last.start):
-        return False
+        return await tidy()
     block = last.entry.block_id
+    # The songs of the block before may fill the last place too, when the song there
+    # was drawn for the block that starts at the hard item and only moved up (Main
+    # 2026-11-24: a Morning Drive song started at 5:59:44, 16 s before the 6 AM break,
+    # and was cut): a song that starts before the change belongs to the block before
+    blocks = {block}
+    before_last = slots[-2] if len(slots) > 1 else None
+    if before_last is not None and before_last.entry.source == "auto" and before_last.entry.block_id:
+        blocks.add(before_last.entry.block_id)
     # Holiday songs stay where the fill spaced them (about every fourth song): pulled
     # forward into the last place they sat beside another holiday song (simulator,
     # Erev Chanukah 2026-11-19). One already in the last place may still move out.
     from app.models.holiday_music import HolidayItem
 
     holiday_ids = {str(a) for a in (await db.execute(select(HolidayItem.asset_id))).scalars().all()}
-    spare = [e for e in songs if movable(e) and e.block_id == block and secs(e) is not None
+    spare = [e for e in songs if movable(e) and e.block_id in blocks and secs(e) is not None
              and str(e.asset_id) not in holiday_ids]
     if _analysis_on():
         # A candidate whose end point is not measured yet is asked for and left out
@@ -420,7 +441,7 @@ async def _fit_one(db: AsyncSession, station, now: datetime, hard_at: datetime, 
             options.append((cut, (cand,)))
     # ...or the last two places filled again (one long song, or a pair)
     before = slots[-2] if len(slots) > 1 else None
-    if before is not None and movable(before.entry, before.start) and before.entry.block_id == block:
+    if before is not None and movable(before.entry, before.start) and before.entry.block_id in blocks:
         room2 = (hard_at - before.start).total_seconds()
         pool = [before.entry, last.entry, *spare]
         for a in pool:
@@ -466,7 +487,7 @@ async def _fit_one(db: AsyncSession, station, now: datetime, hard_at: datetime, 
                 "no swap among %d songs saves %.0f s or more; %d more songs not measured yet)",
                 station.id, hard_at.strftime("%H:%M:%S"), loses, len(spare), WORTH_IT, len(unmeasured),
             )
-        return False
+        return await tidy()
 
     if len(best) == 1:
         _bring_forward(queue_order, last.entry, [best[0]])

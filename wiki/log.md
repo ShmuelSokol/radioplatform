@@ -526,3 +526,4 @@ UPDATE 2026-11-23 station-simulator.md shiur sponsorship check follows the per-s
 UPDATE 2026-11-23 spot-schedules.md a soft sponsorship break the song on air carries into quiet hours is skipped (missed play), no longer cut for at 12:35
 INGEST 2026-11-23 station-simulator.md real play-log check: paused shiur or story resumed and reached its end (the simulator's engine always resumes)
 UPDATE 2026-11-23 shabbos-ending.md nothing that cannot finish starts before the back-timed song (swap with an item that fits, else skip); Jerusalem story cut 11-20
+UPDATE 2026-11-25 hourly-slots.md playlist-generation.md fit keeps the old block's songs until the run-up is fitted (Main 0:59:30 and 5:59:44 cuts); a waiting song is not re-drawn within the hour for the artist rule (Kol Birama twice); last_played re-reads 3 h (plays are logged at their end)
