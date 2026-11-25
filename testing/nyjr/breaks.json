@@ -4970,5 +4970,16 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Kibud Av"
+ },
+ {
+  "start_utc": "2026-11-25T21:05:24Z",
+  "start_et": "2026-11-25 16:05:24",
+  "hour_et": "2026-11-25 16:00",
+  "spots": 1,
+  "total_seconds": null,
+  "spot_seconds": "?",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": ""
  }
 ]
