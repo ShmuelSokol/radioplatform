@@ -2300,3 +2300,7 @@
 {"start_utc": "2026-11-25T04:03:45Z", "start_epoch": 1795579425, "playlist_time": "23:03", "artist": "", "title": "Mesivta D'Rakia", "raw": "23:03\tMesivta D'Rakia", "logged_utc": "2026-11-25T04:04:02Z"}
 {"start_utc": "2026-11-25T04:04:33Z", "start_epoch": 1795579473, "playlist_time": "23:04", "artist": "Glatstein R. Daniel", "title": "Vayishlach  2019", "raw": "23:04\tGlatstein R. Daniel \tVayishlach  2019", "logged_utc": "2026-11-25T04:05:03Z"}
 {"start_utc": "2026-11-25T04:04:33Z", "start_epoch": 1795579473, "playlist_time": "23:04", "artist": "", "title": "Mesivta D'Rakia", "raw": "23:04\tMesivta D'Rakia", "logged_utc": "2026-11-25T04:05:03Z"}
+{"start_utc": "2026-11-25T04:54:33Z", "start_epoch": 1795582473, "playlist_time": "23:54", "artist": "", "title": "Mesivta D'Rakia", "raw": "23:54\tMesivta D'Rakia", "logged_utc": "2026-11-25T04:55:03Z"}
+{"start_utc": "2026-11-25T04:55:12Z", "start_epoch": 1795582512, "playlist_time": "23:55", "artist": "", "title": "Kol B'Ramah Sponsors", "raw": "23:55\tKol B'Ramah Sponsors", "logged_utc": "2026-11-25T04:56:02Z"}
+{"start_utc": "2026-11-25T04:56:27Z", "start_epoch": 1795582587, "playlist_time": "23:56", "artist": "SHWEKEY  HAPPINESS", "title": "Thank You", "raw": "23:56\tSHWEKEY  HAPPINESS\tThank You", "logged_utc": "2026-11-25T04:57:03Z"}
+{"start_utc": "2026-11-25T05:00:00Z", "start_epoch": 1795582800, "playlist_time": "0:00", "artist": "SHWEKEY  Toast to Life", "title": "Hinei Elokeinu", "raw": "0:00\tSHWEKEY  Toast to Life\tHinei Elokeinu", "logged_utc": "2026-11-25T05:00:03Z"}
