@@ -4651,5 +4651,49 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
   "next_item": "Pliskin My Father My King - 72 Suffering"
+ },
+ {
+  "start_utc": "2026-11-25T14:06:21Z",
+  "start_et": "2026-11-25 09:06:21",
+  "hour_et": "2026-11-25 09:00",
+  "spots": 1,
+  "total_seconds": 5,
+  "spot_seconds": "5",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH   GIFTS TO ESAUV   COMPOUND INTEREST"
+ },
+ {
+  "start_utc": "2026-11-25T14:08:17Z",
+  "start_et": "2026-11-25 09:08:17",
+  "hour_et": "2026-11-25 09:00",
+  "spots": 2,
+  "total_seconds": 85,
+  "spot_seconds": "55 30",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Eli Marcus  Yogati - B'chol Koichoi"
+ },
+ {
+  "start_utc": "2026-11-25T14:32:10Z",
+  "start_et": "2026-11-25 09:32:10",
+  "hour_et": "2026-11-25 09:00",
+  "spots": 4,
+  "total_seconds": 213,
+  "spot_seconds": "59 58 63 33",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Shapiro  Hakol Mishamayim - One In a Million"
+ },
+ {
+  "start_utc": "2026-11-25T15:00:31Z",
+  "start_et": "2026-11-25 10:00:31",
+  "hour_et": "2026-11-25 10:00",
+  "spots": 4,
+  "total_seconds": 187,
+  "spot_seconds": "70 17 68 32",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors | Weather Sponsors",
+  "next_item": "DR DAVE INTRO - HOW BITACHON WORKS"
  }
 ]
