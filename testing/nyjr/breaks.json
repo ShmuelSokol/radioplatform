@@ -4574,5 +4574,27 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors",
   "next_item": "Sruly Bornstein - Arachin 8"
+ },
+ {
+  "start_utc": "2026-11-25T11:54:47Z",
+  "start_et": "2026-11-25 06:54:47",
+  "hour_et": "2026-11-25 06:00",
+  "spots": 1,
+  "total_seconds": 6,
+  "spot_seconds": "6",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "NYBC Emes - Achakei Lo"
+ },
+ {
+  "start_utc": "2026-11-25T11:59:58Z",
+  "start_et": "2026-11-25 06:59:58",
+  "hour_et": "2026-11-25 06:00",
+  "spots": 2,
+  "total_seconds": 79,
+  "spot_seconds": "71 8",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Kosman R. Mishna - Eruvin 3b"
  }
 ]
