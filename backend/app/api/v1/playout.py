@@ -295,10 +295,16 @@ class LevelsReport(BaseModel):
     r: list[float] = []
     step: float = 0.1
     at: float | None = None
+    # What the engine understands (engine proto 7 sends it every second)
+    proto: int | None = None
 
 
 @router.post("/{station_id}/levels")
-async def levels_report(body: LevelsReport, station_id: uuid.UUID = Depends(_require_engine)):
+async def levels_report(
+    body: LevelsReport,
+    station_id: uuid.UUID = Depends(_require_engine),
+    x_playout_instance: str | None = Header(default=None),
+):
     """The engine's on-air level, ten RMS values per side each second: passed straight on
     to the station's open pages for the control room meters (no database). Token only, no
     one-engine check: it runs every second and must stay cheap; a second engine is refused
@@ -306,7 +312,7 @@ async def levels_report(body: LevelsReport, station_id: uuid.UUID = Depends(_req
     from app.api.v1.websocket import broadcast_levels
 
     broadcast_levels(str(station_id), body.l, body.r, body.step)
-    playout_engine.note_levels(station_id)
+    playout_engine.note_levels(station_id, body.proto, x_playout_instance)
     return {"ok": True}
 
 

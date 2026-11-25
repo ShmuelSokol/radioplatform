@@ -314,7 +314,7 @@ def test_the_engine_holds_quiet_before_a_hard_item_instead_of_emergency_music():
     assert "[on_air_quiet, timed_heard, main_heard, hold, blackout_quiet, emergency]" in liq
     assert "(timed_pending() > 0 and left < 8. and left > -2.)" in liq
     assert 'elsif hold_open() then "hold"' in liq and 'elsif blackout_on() then "blackout" else "emergency" end' in liq
-    assert "engine_proto = 6" in liq
+    assert "engine_proto = 7" in liq
 
 
 def test_speech_is_never_overlapped_and_the_song_crossfade_comes_from_the_backend():
@@ -554,7 +554,7 @@ def test_the_item_after_a_live_show_loads_during_the_show():
     once the show was over. /flush now asks under the live lane too (proto 4), and the
     backend quiets the engine before it flushes, so the flush loads that item."""
     liq = _liq()
-    assert "engine_proto = 6" in liq
+    assert "engine_proto = 7" in liq
     flush = liq[liq.index('control("/flush"'):]
     flush = flush[:flush.index("end)")]
     assert 'on_air_lane() != "main" or live_wanted()' in flush
@@ -572,7 +572,7 @@ def test_the_live_lane_plays_the_show_from_live_mp3_with_the_token_in_a_header()
     """Engine proto 5: the host's show (after the broadcast delay) is on the stream. The
     feed opens on live on, closes on live off, and the lane is quiet without it."""
     liq = _liq()
-    assert "engine_proto = 6" in liq
+    assert "engine_proto = 7" in liq
     feed = liq[liq.index("live_feed = input.http("):]
     feed = feed[:feed.index("\n)\n")]
     assert "start=false" in feed

@@ -56,9 +56,10 @@ auth_headers = [("X-Playout-Token", token), ("X-Playout-Instance", engine_instan
 # when no song is handed out). 4 = the next item is loaded while a host is on air (the
 # live lane keeps it off the stream until the show ends). 5 = the live lane plays the
 # show from the backend's live.mp3 (listener pages then hear it on the stream). 6 = the
-# emergency alert lane (/alert, /alert_stop, /alert_line; reports to /alert). The
-# backend keeps to the old serial hand-over for an engine that sends nothing.
-engine_proto = 6
+# emergency alert lane (/alert, /alert_stop, /alert_line; reports to /alert). 7 = the
+# proto also rides on every levels post, so a restarted backend learns it within a second.
+# The backend keeps to the old serial hand-over for an engine that sends nothing.
+engine_proto = 7
 
 # On start-up tell the backend we hold nothing of its queue any more. Done before any
 # track is requested, so the two cannot cross. If the backend cannot be reached (or
@@ -1539,7 +1540,7 @@ thread.run.recurrent(fast=false, delay=1., fun () -> begin
   meter_r := []
   if ls != [] then
     try
-      ignore(http.post(headers=auth_headers, timeout=2., data=json.stringify({l=ls, r=rs, step=0.1, at=time()}),
+      ignore(http.post(headers=auth_headers, timeout=2., data=json.stringify({l=ls, r=rs, step=0.1, at=time(), proto=engine_proto}),
                        "#{backend_url}/playout/#{station_id}/levels"))
     catch _ do
       ()

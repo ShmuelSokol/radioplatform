@@ -2547,3 +2547,31 @@ async def test_deleting_one_of_two_overlapping_blackouts_keeps_the_other_silence
     left = (await db_session.execute(select(QueueEntry).where(
         QueueEntry.asset_id == silence, QueueEntry.status == "pending"))).scalars().all()
     assert len(left) == len(rows)
+
+
+@pytest.mark.asyncio
+async def test_a_restarted_backend_learns_the_engine_proto_from_its_levels(client, db_session, eng, monkeypatch):
+    """Main 2026-11-24 20:20-21:02 ET: the backend restarted (a deploy) in mid shiur and
+    knew nothing of the engine's proto until the engine next asked for an item, 42 minutes
+    later: the status page said live_on_stream false and a live show starting then would
+    have been held off the stream. The engine's levels (every second) carry its proto."""
+    station, _, _, _ = eng
+    # A fresh backend: no hello, no ask yet
+    monkeypatch.delitem(playout_engine._states, str(station.id), raising=False)
+    assert playout_engine.get_state(station.id).engine_proto == 0
+    r = await client.post(f"/api/v1/playout/{station.id}/levels", headers=HEADERS,
+                          json={"l": [0.1], "r": [0.1], "step": 0.1, "proto": 7})
+    assert r.status_code == 200
+    assert playout_engine.get_state(station.id).engine_proto >= playout_engine.ENGINE_PROTO_LIVE_AUDIO
+    # An older engine (no proto in its levels) changes nothing; the hello stays the word
+    monkeypatch.delitem(playout_engine._states, str(station.id), raising=False)
+    await client.post(f"/api/v1/playout/{station.id}/levels", headers=HEADERS,
+                      json={"l": [0.1], "r": [0.1], "step": 0.1})
+    assert playout_engine.get_state(station.id).engine_proto == 0
+    # Another engine's levels never set it once the station's engine is known
+    state = playout_engine.get_state(station.id)
+    state.instance = "the-station-engine"
+    await client.post(f"/api/v1/playout/{station.id}/levels",
+                      headers={**HEADERS, "X-Playout-Instance": "a-second-engine"},
+                      json={"l": [0.1], "r": [0.1], "step": 0.1, "proto": 7})
+    assert playout_engine.get_state(station.id).engine_proto == 0

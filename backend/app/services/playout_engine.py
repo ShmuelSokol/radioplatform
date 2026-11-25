@@ -1171,8 +1171,22 @@ BLACKOUT_DAYS = 10
 _levels_at: dict[str, float] = {}
 
 
-def note_levels(station_id) -> None:
+def note_levels(station_id, proto: int | None = None, instance: str | None = None) -> None:
+    """The engine's levels arrived. They carry its proto (engine proto 7), so after a
+    backend restart the backend knows what the engine understands within a second, not
+    only when the engine next asks for an item: Main 2026-11-24 20:20-21:02 ET, a restart
+    in mid shiur left live_on_stream false (and the hold, parallel groups and live preload
+    off) for 42 minutes. Only fills an unknown proto, and only from the station's engine
+    (or before the backend has heard which instance that is): the hello stays the word."""
     _levels_at[str(station_id)] = time.monotonic()
+    if not isinstance(proto, int) or proto <= 0:
+        return
+    state = get_state(station_id)
+    if state.engine_proto > 0:
+        return
+    if state.instance and instance and state.instance != instance:
+        return
+    _note_proto(state, proto)
 
 
 def levels_quiet_for(station_id) -> float | None:
