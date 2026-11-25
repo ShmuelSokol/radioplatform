@@ -142,6 +142,7 @@ class QueueReplenishService:
             automatic_songs,
             drop_dated_clips,
             realign_before_block_change,
+            realign_keep,
             songs_to_replace,
             uses_block_playlists,
         )
@@ -175,6 +176,10 @@ class QueueReplenishService:
             station = await self._station()
             if await realign_before_block_change(self.db, station, datetime.now(timezone.utc), remove=False):
                 redraw = True
+                # A change on a hard timed item keeps the songs fitted to end on it
+                kept = realign_keep(self.station_id)
+                if kept is not None and self.keep_next is None:
+                    self.keep_next = max(KEEP_NEXT, kept)
         if redraw and generation.enabled:
             self.replacing, self.cursor_back = await songs_to_replace(
                 self.db, self.station_id, keep_next=KEEP_NEXT if self.keep_next is None else self.keep_next

@@ -13,7 +13,9 @@ automatic songs are moved, only within the same schedule block, and never one
 that is about to start or that the playout engine already holds. Nothing is
 added, and only songs of a block that ends at the hard item but would air after it
 are taken out (the next block's songs follow), so the queue can never run dry because of it, and the hard
-item still starts on its second. Both players pick by position, so the browser
+item still starts on its second. When no order of the waiting songs ends near the
+hard item, one song is replaced by a song of the block's own playlist that does
+(_fit_from_library). Both players pick by position, so the browser
 player and the engine follow the new order alike.
 
 See wiki/hourly-slots.md ("Songs fitted to the time before the hour").
@@ -472,6 +474,30 @@ async def _fit_one(db: AsyncSession, station, now: datetime, hard_at: datetime, 
         best_cut, best = min((o for o in options if o[0] <= good_enough), key=reach)
     saves = loses - best_cut if best is not None else 0.0
     worth = saves >= WORTH_IT or (best_cut <= ACCEPTABLE_CUT and saves >= WORTH_IT_INTO_ACCEPTABLE)
+    if best is None or best_cut > ACCEPTABLE_CUT:
+        # No order of the waiting songs ends near the hard item. When the block ends
+        # there, the only songs of it after the run-up are the one or two the fill
+        # drew past its end, so a song of the block's playlist that fits takes the
+        # last place (or the one before it) instead. Main 2026-11-25: 70 s of the
+        # Gerstner Medley (658 s) lost at 6:00, where a 578 s track of the same
+        # Night instrumental block would have ended on the hour.
+        swap = await _fit_from_library(
+            db, station, now, last, before, hard_at, room, loses, held, preloaded, movable, holiday_ids, engine,
+            third=slots[-3] if len(slots) > 2 else None,
+        )
+        if swap is not None and swap[0] <= ACCEPTABLE_CUT and (best is None or swap[0] < best_cut - NEAR_ENOUGH):
+            cut, changes = swap
+            said = ", ".join(f"{getattr(old.asset, 'title', None)!r} by {asset.title!r}" for old, asset in changes)
+            for old, asset in changes:
+                await _replace_song(db, old, asset)
+            planned.add(hard_at)
+            await db.flush()
+            logger.info(
+                "Station %s: before the %s hard item %s replaced from the block's playlist "
+                "(the song on air then loses %.0f s instead of %.0f s)",
+                station.id, hard_at.strftime("%H:%M:%S"), said, cut, loses,
+            )
+            return True
     if best is None or not worth:
         if loses <= ACCEPTABLE_CUT:
             planned.add(hard_at)  # good enough as it is: not reordered later for a few seconds
@@ -484,8 +510,9 @@ async def _fit_one(db: AsyncSession, station, now: datetime, hard_at: datetime, 
             _said_nothing[key] = said
             logger.info(
                 "Station %s: queue left as it is before the %s hard item (the song on air then loses %.0f s; "
-                "no swap among %d songs saves %.0f s or more; %d more songs not measured yet)",
+                "no swap among %d songs saves %.0f s or more; %d more songs not measured yet; block's playlist: %s)",
                 station.id, hard_at.strftime("%H:%M:%S"), loses, len(spare), WORTH_IT, len(unmeasured),
+                _library_said.get(key, "not looked at"),
             )
         return await tidy()
 
@@ -501,6 +528,215 @@ async def _fit_one(db: AsyncSession, station, now: datetime, hard_at: datetime, 
         station.id, hard_at.strftime("%H:%M:%S"), best_cut, loses,
     )
     return True
+
+
+# station -> why the last look in the block's playlist found nothing (for the log)
+_library_said: dict[str, str] = {}
+# A song from the library put in to fit the hour has not aired on the station for this
+# long and is not waiting in the queue (playlist_generator_service.REPEAT_GUARD)
+LIBRARY_FIT_REST = timedelta(hours=3)
+# Songs from the library looked at for one fit, nearest in length first
+LIBRARY_FIT_LOOK = 200
+# A library song not analysed yet counts as losing this much more: its end point is
+# only known from the file length until the players analyse it
+UNMEASURED_COST = 5.0
+# Songs tried in pairs for the last two places (every n-th by length)
+LIBRARY_FIT_PAIRS = 60
+# ...and in threes for the last three places
+LIBRARY_FIT_TRIOS = 25
+
+
+async def _fit_from_library(
+    db: AsyncSession, station, now: datetime, last, before, hard_at: datetime, room: float, loses: float,
+    held: set, preloaded, movable, holiday_ids: set, engine: bool, third=None,
+):
+    """Songs of the run-up block's playlist that fill the last place (or the one
+    before it, with the last song kept or moved past the hard item, or both places) so
+    the run-up ends near the hard item, as (seconds lost, [(entry replaced, asset)]);
+    None when none does better.
+    Only songs the fill itself could draw for the block (its playlist's categories,
+    the same filters), rested LIBRARY_FIT_REST and not waiting in the queue."""
+    from types import SimpleNamespace
+
+    from app.models.asset import Asset, needs_analysis
+    from app.models.schedule_block import ScheduleBlock
+    from app.services.last_played import last_played
+    from app.services.playlist_generator_service import _Library
+
+    block_id = last.entry.block_id
+    if not block_id or last.entry.source != "auto":
+        _library_said[str(station.id)] = "not an automatic song of a block"
+        return None
+    block = (
+        await db.execute(
+            select(ScheduleBlock).options(joinedload(ScheduleBlock.playlist_template)).where(ScheduleBlock.id == block_id)
+        )
+    ).unique().scalars().first()
+    template = block.playlist_template if block is not None else None
+    if template is None or not template.is_active:
+        _library_said[str(station.id)] = "its block has no active playlist"
+        return None
+    from app.models.playlist_template import TemplateSlot
+
+    steps = (await db.execute(select(TemplateSlot).where(TemplateSlot.template_id == template.id))).scalars().all()
+    categories = sorted({
+        s.category for s in steps if (s.asset_type or "music").lower() == "music" and s.category
+    })
+    if not categories:
+        _library_said[str(station.id)] = "its playlist names no music category"
+        return None
+    library = _Library(db, station.id, set())
+    rows = {}
+    for category in categories:
+        for row in await library.pool("music", category):
+            rows[str(row.id)] = row
+    # What waits to air within LIBRARY_FIT_REST (the 48-hour fill holds tomorrow's
+    # night too: counting all of it left Main's 46 instrumentals with none to choose)
+    queued = (
+        await db.execute(
+            select(QueueEntry.asset_id, Asset.duration)
+            .join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(
+                QueueEntry.station_id == station.id,
+                QueueEntry.status.in_(["pending", "playing"]),
+                # timed items sit at the positions they were queued at, often before
+                # songs that air earlier: counted, they ended the look within minutes
+                QueueEntry.preempt_at.is_(None),
+            )
+            .order_by(QueueEntry.position)
+        )
+    ).all()
+    waiting: set[str] = set()
+    ahead = 0.0
+    for asset_id, seconds in queued:
+        if ahead > LIBRARY_FIT_REST.total_seconds():
+            break
+        waiting.add(str(asset_id))
+        ahead += float(seconds or 180.0)
+    aired = await last_played(db, station.id)
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+    def rested(sid: str) -> bool:
+        return sid not in waiting and sid not in holiday_ids and now - aired.get(sid, epoch) >= LIBRARY_FIT_REST
+
+    # Places that may take a new song: the last one, and the one before it with the
+    # last song kept (when the last is short of the room by itself)
+    places = []
+    if movable(last.entry, last.start):
+        places.append((last.entry, room, 0.0, _artist(before.entry) if before is not None else None))
+    if (before is not None and before.entry.block_id == block_id and movable(before.entry, before.start)
+            and _seconds(last.entry, engine)):
+        room2 = (hard_at - before.start).total_seconds()
+        places.append((before.entry, room2, _seconds(last.entry, engine), _artist(last.entry)))
+        # ...or the one before it runs to the hard item and the last waits until after
+        # it (the last starts seconds before the hour: live 11-24 Lulei Torascha
+        # started at 0:59:30)
+        places.append((before.entry, room2, 0.0, None))
+    if not places:
+        _library_said[str(station.id)] = "no place before the hard item may change"
+        return None
+    candidates = [r for sid, r in rows.items() if rested(sid) and r.duration]
+    if not candidates:
+        _library_said[str(station.id)] = "no song of the playlist rested 3 h and not waiting"
+        return None
+    # Each candidate's length, worked out once: the nearest in length to each place's
+    # room, and for a pair (two library songs in the last two places) a spread of them
+    wants = [space - kept for _, space, kept, _ in places]
+    chosen: dict[str, object] = {}
+    for want in wants:
+        for r in sorted(candidates, key=lambda r: abs(float(r.duration) - want))[:LIBRARY_FIT_LOOK]:
+            chosen[str(r.id)] = r
+    pair_room = places[-1][1] if len(places) > 1 else None
+    pairable = []
+    if pair_room is not None:
+        fits = [r for r in candidates if float(r.duration) < pair_room]
+        pairable = sorted(fits, key=lambda r: float(r.duration))[:: max(1, len(fits) // LIBRARY_FIT_PAIRS)]
+        for r in pairable:
+            chosen[str(r.id)] = r
+    # ...and three in the last three places, when the run-up is planned early enough
+    # (Main's 6:00 break comes after three hours of the same 46 tracks: with about 17
+    # left to choose from, one or two places found no fit one night in three)
+    trio_room = None
+    trio = []
+    if (pair_room is not None and third is not None and third.entry.block_id == block_id
+            and movable(third.entry, third.start)):
+        trio_room = (hard_at - third.start).total_seconds()
+        fits = [r for r in candidates if float(r.duration) < trio_room]
+        trio = sorted(fits, key=lambda r: float(r.duration))[:: max(1, len(fits) // LIBRARY_FIT_TRIOS)]
+        for r in trio:
+            chosen[str(r.id)] = r
+    assets = {
+        str(a.id): a for a in (
+            await db.execute(select(Asset).where(Asset.id.in_([r.id for r in chosen.values()])))
+        ).scalars().all()
+    }
+    lengths: dict[str, float] = {}
+    for sid, asset in assets.items():
+        probe = SimpleNamespace(asset=asset, station_id=station.id, preempt_at=None, source="auto", id=None)
+        seconds = _seconds(probe, engine)
+        if seconds is not None:
+            # an unanalysed song's end point may still move by a few seconds
+            lengths[sid] = seconds
+
+    def cost(total: float, space: float, picked) -> float | None:
+        cut = _cut(total, space)
+        if cut is None:
+            _library_said[str(station.id)] = "a song length is unknown"
+            return None
+        return cut + sum(UNMEASURED_COST for a in picked if needs_analysis(a))
+
+    def artist_of(asset) -> str | None:
+        return (asset.artist or "").strip().lower() or None
+
+    best = None
+    for entry, space, kept, neighbour in places:
+        for sid, seconds in lengths.items():
+            asset = assets[sid]
+            if artist_of(asset) and artist_of(asset) == neighbour:
+                continue
+            cut = cost(seconds + kept, space, [asset])
+            if cut is not None and cut < loses and (best is None or cut < best[0]):
+                best = (cut, [(entry, asset)])
+    if pair_room is not None and before is not None:
+        # Two library songs in the last two places (Main 6:00: a few long tracks left)
+        ids = [str(r.id) for r in pairable if str(r.id) in lengths]
+        for i in ids:
+            for j in ids:
+                if i == j or (artist_of(assets[i]) and artist_of(assets[i]) == artist_of(assets[j])):
+                    continue
+                cut = cost(lengths[i] + lengths[j], pair_room, [assets[i], assets[j]])
+                if cut is not None and cut < loses and (best is None or cut < best[0]):
+                    best = (cut, [(before.entry, assets[i]), (last.entry, assets[j])])
+    if trio_room is not None and (best is None or best[0] > ACCEPTABLE_CUT):
+        ids = [str(r.id) for r in trio if str(r.id) in lengths]
+        for i in ids:
+            for j in ids:
+                if i == j or (artist_of(assets[i]) and artist_of(assets[i]) == artist_of(assets[j])):
+                    continue
+                for k in ids:
+                    if k in (i, j) or (artist_of(assets[k]) and artist_of(assets[k]) == artist_of(assets[j])):
+                        continue
+                    cut = cost(lengths[i] + lengths[j] + lengths[k], trio_room, [assets[i], assets[j], assets[k]])
+                    if cut is not None and cut < loses and (best is None or cut < best[0]):
+                        best = (cut, [(third.entry, assets[i]), (before.entry, assets[j]), (last.entry, assets[k])])
+    _library_said[str(station.id)] = (
+        f"{len(lengths)} songs of the block's playlist tried" if best is None or best[0] > ACCEPTABLE_CUT
+        else "fits")
+    return best
+
+
+async def _replace_song(db: AsyncSession, old: QueueEntry, asset) -> None:
+    """A new queue entry for `asset` in `old`'s place. A new entry, not the old one with
+    another song: the engine tells a changed next song by its entry id."""
+    import uuid
+
+    position, block_id, station_id = old.position, old.block_id, old.station_id
+    await db.delete(old)
+    await db.flush()
+    db.add(QueueEntry(
+        id=uuid.uuid4(), station_id=station_id, asset_id=asset.id, position=position,
+        status="pending", block_id=block_id, source="auto",
+    ))
 
 
 async def _drop_block_leftovers(

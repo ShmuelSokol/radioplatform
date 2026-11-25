@@ -123,14 +123,14 @@ async def seed(db, export: dict, start: datetime, days: int = 2, stations: set[s
             sponsor_of[aid] = by_title[title]
     for a in export["assets"]:
         db.add(Asset(id=uuid.UUID(a["id"]), title=a["title"] or "untitled", asset_type=a["asset_type"],
-                     category=a["category"], duration=a["duration"],
+                     category=a["category"], duration=a["duration"], artist=a.get("artist"),
                      sponsor_id=uuid.UUID(sponsor_of[a["id"]]) if a["id"] in sponsor_of else None,
                      file_path=f"https://cdn.example.com/audio/{a['id']}.mp3",
                      metadata_extra={"cues": a.get("cues") or {}} if a.get("cues") else None))
     for a in extra_assets or []:
         # Items a scenario needs that the export lacks, with real analysis if given
         db.add(Asset(id=uuid.UUID(a["id"]), title=a["title"], asset_type=a.get("asset_type", "music"),
-                     category=a.get("category"), duration=a["duration"],
+                     category=a.get("category"), duration=a["duration"], artist=a.get("artist"),
                      file_path=f"https://cdn.example.com/audio/{a['id']}.mp3",
                      metadata_extra=({"audio_analysis": a["analysis"]} if a.get("analysis") else None)))
     await db.flush()

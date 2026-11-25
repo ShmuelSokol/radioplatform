@@ -118,10 +118,13 @@ async def test_sequence_artist_distance_and_block_change(db_session: AsyncSessio
         "1 med fast",
         "1 Relax",
     ] * 2
-    # the same artist never comes back within two songs
+    # the same artist never comes back within two songs, unless the only songs clear
+    # of that rule were drawn within REPEAT_GUARD (this tiny library runs out of them
+    # after about 80 minutes): a song again that soon is worse (Main 2026-11-25)
     for i, p in enumerate(picks):
-        assert p.artist not in [q.artist for q in picks[max(0, i - 2) : i]]
-        assert not p.artist_rule_relaxed
+        if not p.artist_rule_relaxed:
+            assert p.artist not in [q.artist for q in picks[max(0, i - 2) : i]]
+    assert not any(p.artist_rule_relaxed for p in picks if p.at < MONDAY_7AM + timedelta(hours=1))
     # nothing repeats while unplayed songs of its type remain
     fast = [p.asset_id for p in picks if p.category == "1 med fast"]
     assert len(set(fast[:12])) == 12

@@ -213,14 +213,92 @@ async def realign_before_block_change(
     if change is None or _realigned.get(str(station.id)) == change:
         return False
     _realigned[str(station.id)] = change
+    # A hard timed item at the change (the time check on the hour) starts the new block
+    # on time by itself, and the songs before it have been fitted to end on it
+    # (hour_fit): only the songs after it are drawn again. Drawing the run-up again
+    # threw that fit away: Main 2026-11-25, redrawn at 5:45, lost 70 s of a medley at
+    # 6:00 (423 s of a track in the simulator).
+    keep = await _songs_before_hard_change(db, station, now, at)
+    _realign_keep[str(station.id)] = keep
     if remove:
-        removed = await remove_automatic_songs(db, station.id, keep_next=KEEP_NEXT)
+        removed = await remove_automatic_songs(db, station.id, keep_next=max(KEEP_NEXT, keep or 0))
         logger.info(
             "Station %s: redrew %d automatic songs before the playlist changes (%s)", station.id, removed, change
         )
     else:
-        logger.info("Station %s: redrawing the automatic songs before the playlist changes (%s)", station.id, change)
+        logger.info("Station %s: redrawing the automatic songs before the playlist changes (%s)%s", station.id, change,
+                    f", keeping the {keep} before the hard item there" if keep is not None else "")
     return True
+
+
+# station id -> how many automatic songs the last realign keeps (None: KEEP_NEXT)
+_realign_keep: dict[str, int | None] = {}
+
+
+def realign_keep(station_id) -> int | None:
+    """The songs the last realign_before_block_change keeps: the run-up to a hard
+    timed item at the change, or None (KEEP_NEXT)."""
+    return _realign_keep.pop(str(station_id), None)
+
+
+async def _songs_before_hard_change(db: AsyncSession, station: Station, now: datetime, change: datetime) -> int | None:
+    """When a hard timed item falls on the block change: how many of the automatic
+    songs (in queue order) start before it, by the same lengths the fit uses. None
+    when there is no hard item there."""
+    from app.config import settings
+    from app.models.queue_entry import hard_timed, is_soft_timed
+    from app.services.hour_fit import EARLY_START, _aware, _seconds, on_air_until
+
+    hard = (
+        await db.execute(
+            select(QueueEntry.preempt_at).where(
+                QueueEntry.station_id == station.id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at >= change - timedelta(minutes=1),
+                QueueEntry.preempt_at <= change + timedelta(minutes=1),
+                hard_timed(),
+            ).order_by(QueueEntry.preempt_at).limit(1)
+        )
+    ).scalar_one_or_none()
+    if hard is None:
+        return None
+    hard = _aware(hard)
+    engine = settings.engine_drives(station.id)
+    rows = (
+        await db.execute(
+            select(QueueEntry)
+            .options(selectinload(QueueEntry.asset))
+            .where(QueueEntry.station_id == station.id, QueueEntry.status.in_(["pending", "playing"]))
+            .order_by(QueueEntry.position)
+        )
+    ).scalars().all()
+    automatic = set(
+        (await db.execute(select(QueueEntry.id).where(*automatic_songs(station.id)))).scalars().all()
+    )
+    at = now
+    playing = next((e for e in rows if e.status == "playing"), None)
+    if playing is not None and playing.started_at is not None:
+        until = on_air_until(playing, engine)
+        if until is not None:
+            at = max(now, until)
+    timed = sorted((e for e in rows if e.status == "pending" and e.preempt_at is not None and _aware(e.preempt_at) < hard),
+                   key=lambda e: _aware(e.preempt_at))
+    keep = 0
+    for e in rows:
+        if e.status != "pending" or e.preempt_at is not None:
+            continue
+        while timed and _aware(timed[0].preempt_at) <= at + timedelta(seconds=EARLY_START):
+            item = timed.pop(0)
+            due = _aware(item.preempt_at)
+            if not is_soft_timed(item) and due > at:
+                at = due
+            at += timedelta(seconds=_seconds(item, engine) or 30.0)
+        if at >= hard - timedelta(seconds=EARLY_START):
+            break
+        if e.id in automatic:
+            keep += 1
+        at += timedelta(seconds=_seconds(e, engine) or 180.0)
+    return keep
 
 
 # station id -> the blackout end the songs after it were last redrawn for
