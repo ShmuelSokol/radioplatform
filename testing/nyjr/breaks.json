@@ -4552,5 +4552,27 @@
   "block_names": "Highest Frequncy",
   "items": "Highest Frequncy",
   "next_item": "Kakadu - Gagadju Life Force"
+ },
+ {
+  "start_utc": "2026-11-25T10:32:35Z",
+  "start_et": "2026-11-25 05:32:35",
+  "hour_et": "2026-11-25 05:00",
+  "spots": 2,
+  "total_seconds": 317,
+  "spot_seconds": "74 243",
+  "block_names": "Kol B'Ramah  WMDI  107.9  Lakewood | Rain Forest",
+  "items": "Kol B'Ramah  WMDI  107.9  Lakewood | Rain Forest",
+  "next_item": "Windjana - Skyland."
+ },
+ {
+  "start_utc": "2026-11-25T10:59:58Z",
+  "start_et": "2026-11-25 05:59:58",
+  "hour_et": "2026-11-25 05:00",
+  "spots": 2,
+  "total_seconds": 85,
+  "spot_seconds": "79 6",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Sruly Bornstein - Arachin 8"
  }
 ]
