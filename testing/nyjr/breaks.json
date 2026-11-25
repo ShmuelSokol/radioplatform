@@ -4530,5 +4530,16 @@
   "block_names": "Highest Frequncy",
   "items": "Highest Frequncy",
   "next_item": "Uluru - Mutitjula Walk."
+ },
+ {
+  "start_utc": "2026-11-25T09:30:34Z",
+  "start_et": "2026-11-25 04:30:34",
+  "hour_et": "2026-11-25 04:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Night Mix ID",
+  "items": "Night Mix ID",
+  "next_item": "Uluru - Touching Sky"
  }
 ]
