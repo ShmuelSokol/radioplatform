@@ -43,6 +43,9 @@ from app.services.spot_schedule_service import as_utc, load_blackouts
 CONFIG_KEY = "playlist_generation"
 DEFAULT_HOURS = 6
 DEFAULT_ARTIST_DISTANCE = 2
+# A song waiting in the queue is not drawn again this close to when it airs, even
+# when the artist rule would want it (see _Library.draw)
+REPEAT_GUARD = timedelta(hours=1)
 # A place in the queue is counted as this long when working out when a waiting song airs
 QUEUED_PLACE_SECONDS = 240.0
 DEFAULT_DURATION = 180.0
@@ -437,6 +440,17 @@ class _Library:
         counts = self.artists[key]
         clear = len(order) - sum(counts.get(a, 0) for a in recent_artists)
         relaxed = clear <= 0
+        if not relaxed and not order[0][0]:
+            # A song not waiting yet exists, but every one clear of the artist rule is
+            # waiting already: the artist rule gives way rather than the song coming
+            # back. Main 2026-11-24: "Kol Birama" aired at 0:34 and 0:52 in the
+            # Carlebach half hour, where most songs share one artist and the few by
+            # others were all queued by the 48-hour fill.
+            # Only for a song that would come back within the hour: further apart, the
+            # studio program's order (artist rule first) stands.
+            first_clear = next((c for c in order if c[4] not in recent_artists), None)
+            if first_clear is not None and first_clear[0] and abs(at - first_clear[1]) < REPEAT_GUARD:
+                relaxed = True
         skip = () if relaxed else recent_artists
         # Draw from the most-rested third so the order is not the same every cycle...
         limit = max(1, math.ceil((len(order) if relaxed else clear) / 3))

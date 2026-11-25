@@ -20,9 +20,11 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 
-# Plays are written when they start, a little after their start_utc; re-read this
-# much before the last read so none fall between two reads.
-OVERLAP = timedelta(minutes=10)
+# A play is written when it ends (the engine's next start report closes it), with
+# start_utc when it began, so a 40-minute shiur's row appears 40 minutes after its
+# start_utc. Re-read this much before the last read so none fall between two reads
+# (it was 10 minutes: a shiur longer than that could look never aired).
+OVERLAP = timedelta(hours=3)
 # The whole history is read in the background only: once after the first read
 # of a station, then daily. It took 16 to 17 s for one station on the live
 # database (2026-11-18), so no request may wait for it, and stations take turns.
