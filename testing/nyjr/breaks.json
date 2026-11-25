@@ -4926,5 +4926,49 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "DR DAVE INTRO - HOW BITACHON WORKS"
+ },
+ {
+  "start_utc": "2026-11-25T20:06:53Z",
+  "start_et": "2026-11-25 15:06:53",
+  "hour_et": "2026-11-25 15:00",
+  "spots": 1,
+  "total_seconds": 18,
+  "spot_seconds": "18",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH    CHANUKAH AND PURIM"
+ },
+ {
+  "start_utc": "2026-11-25T20:12:15Z",
+  "start_et": "2026-11-25 15:12:15",
+  "hour_et": "2026-11-25 15:00",
+  "spots": 1,
+  "total_seconds": 55,
+  "spot_seconds": "55",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Dovid Gabay  Eretz Yisroel - Vehu Yishlach"
+ },
+ {
+  "start_utc": "2026-11-25T20:31:31Z",
+  "start_et": "2026-11-25 15:31:31",
+  "hour_et": "2026-11-25 15:00",
+  "spots": 4,
+  "total_seconds": 193,
+  "spot_seconds": "30 68 65 30",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Chanukah - Kol Rina"
+ },
+ {
+  "start_utc": "2026-11-25T21:01:09Z",
+  "start_et": "2026-11-25 16:01:09",
+  "hour_et": "2026-11-25 16:00",
+  "spots": 3,
+  "total_seconds": 170,
+  "spot_seconds": "77 55 38",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Kibud Av"
  }
 ]
