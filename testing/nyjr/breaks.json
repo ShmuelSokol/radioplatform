@@ -4596,5 +4596,27 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors",
   "next_item": "Kosman R. Mishna - Eruvin 3b"
+ },
+ {
+  "start_utc": "2026-11-25T12:11:11Z",
+  "start_et": "2026-11-25 07:11:11",
+  "hour_et": "2026-11-25 07:00",
+  "spots": 1,
+  "total_seconds": 42,
+  "spot_seconds": "42",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "Naftoli Kempeh  Elul - Elul medley"
+ },
+ {
+  "start_utc": "2026-11-25T12:59:58Z",
+  "start_et": "2026-11-25 07:59:58",
+  "hour_et": "2026-11-25 07:00",
+  "spots": 2,
+  "total_seconds": 123,
+  "spot_seconds": "74 49",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Coins"
  }
 ]
