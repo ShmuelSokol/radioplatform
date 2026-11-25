@@ -4783,5 +4783,16 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "Pliskin R. Zeleg Encourage - Encourage 17 story"
+ },
+ {
+  "start_utc": "2026-11-25T17:05:26Z",
+  "start_et": "2026-11-25 12:05:26",
+  "hour_et": "2026-11-25 12:00",
+  "spots": 1,
+  "total_seconds": 5,
+  "spot_seconds": "5",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  YAAKOV"
  }
 ]
