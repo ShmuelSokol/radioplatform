@@ -5602,11 +5602,55 @@
   "start_utc": "2026-11-26T20:05:38Z",
   "start_et": "2026-11-26 15:05:38",
   "hour_et": "2026-11-26 15:00",
-  "spots": 2,
-  "total_seconds": null,
-  "spot_seconds": "58 ?",
+  "spots": 3,
+  "total_seconds": 119,
+  "spot_seconds": "58 35 26",
   "block_names": "Weather Schedule Sponsors",
-  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors",
-  "next_item": ""
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "DR DAVE INTRO - HOW BITACHON WORKS"
+ },
+ {
+  "start_utc": "2026-11-26T20:09:54Z",
+  "start_et": "2026-11-26 15:09:54",
+  "hour_et": "2026-11-26 15:00",
+  "spots": 1,
+  "total_seconds": 18,
+  "spot_seconds": "18",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  YAAKOV"
+ },
+ {
+  "start_utc": "2026-11-26T20:11:36Z",
+  "start_et": "2026-11-26 15:11:36",
+  "hour_et": "2026-11-26 15:00",
+  "spots": 1,
+  "total_seconds": 55,
+  "spot_seconds": "55",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Veroba  Reach Out - Haneiros Hallalu."
+ },
+ {
+  "start_utc": "2026-11-26T20:32:06Z",
+  "start_et": "2026-11-26 15:32:06",
+  "hour_et": "2026-11-26 15:00",
+  "spots": 3,
+  "total_seconds": 185,
+  "spot_seconds": "54 69 62",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Derech Achim - 7. Od Yishama"
+ },
+ {
+  "start_utc": "2026-11-26T21:00:26Z",
+  "start_et": "2026-11-26 16:00:26",
+  "hour_et": "2026-11-26 16:00",
+  "spots": 3,
+  "total_seconds": 165,
+  "spot_seconds": "64 30 71",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  613 SHAMARTI"
  }
 ]
