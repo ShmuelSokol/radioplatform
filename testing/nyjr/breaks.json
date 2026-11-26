@@ -5085,11 +5085,11 @@
   "start_utc": "2026-11-26T01:01:48Z",
   "start_et": "2026-11-25 20:01:48",
   "hour_et": "2026-11-25 20:00",
-  "spots": 4,
-  "total_seconds": null,
-  "spot_seconds": "12 90 77 ?",
+  "spots": 5,
+  "total_seconds": 222,
+  "spot_seconds": "12 90 77 31 12",
   "block_names": "More Stories for Kids | Kol B'Ramah Sponsors | Weather Schedule Sponsors",
-  "items": "More Stories for Kids | Kol B'Ramah Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
-  "next_item": ""
+  "items": "More Stories for Kids | Kol B'Ramah Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  CAF TO PACH"
  }
 ]
