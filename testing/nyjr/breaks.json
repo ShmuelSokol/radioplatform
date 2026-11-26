@@ -5559,10 +5559,43 @@
   "start_et": "2026-11-26 14:06:16",
   "hour_et": "2026-11-26 14:00",
   "spots": 1,
-  "total_seconds": null,
-  "spot_seconds": "?",
+  "total_seconds": 85,
+  "spot_seconds": "85",
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors",
-  "next_item": ""
+  "next_item": "A Maccabeats Hanukkah - Light One Candle"
+ },
+ {
+  "start_utc": "2026-11-26T19:19:58Z",
+  "start_et": "2026-11-26 14:19:58",
+  "hour_et": "2026-11-26 14:00",
+  "spots": 1,
+  "total_seconds": 59,
+  "spot_seconds": "59",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors",
+  "next_item": "Yaakov Young - Shomra"
+ },
+ {
+  "start_utc": "2026-11-26T19:29:57Z",
+  "start_et": "2026-11-26 14:29:57",
+  "hour_et": "2026-11-26 14:00",
+  "spots": 1,
+  "total_seconds": 66,
+  "spot_seconds": "66",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors",
+  "next_item": "Shmuly Schneider - All The Hits 2"
+ },
+ {
+  "start_utc": "2026-11-26T19:38:57Z",
+  "start_et": "2026-11-26 14:38:57",
+  "hour_et": "2026-11-26 14:00",
+  "spots": 1,
+  "total_seconds": 63,
+  "spot_seconds": "63",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors",
+  "next_item": "14:40\tShmuly Schneider - All The Hits 3"
  }
 ]
