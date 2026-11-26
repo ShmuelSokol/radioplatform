@@ -5355,5 +5355,16 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Shalem"
+ },
+ {
+  "start_utc": "2026-11-26T14:05:17Z",
+  "start_et": "2026-11-26 09:05:17",
+  "hour_et": "2026-11-26 09:00",
+  "spots": 2,
+  "total_seconds": 84,
+  "spot_seconds": "55 29",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Shwekey Musica - Aish"
  }
 ]
