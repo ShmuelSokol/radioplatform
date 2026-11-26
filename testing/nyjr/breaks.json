@@ -5476,5 +5476,49 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  CAF TO PACH"
+ },
+ {
+  "start_utc": "2026-11-26T17:10:29Z",
+  "start_et": "2026-11-26 12:10:29",
+  "hour_et": "2026-11-26 12:00",
+  "spots": 2,
+  "total_seconds": 85,
+  "spot_seconds": "30 55",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "Chabad 4 Yiddish Nachas - Nigun Rikud 1"
+ },
+ {
+  "start_utc": "2026-11-26T17:38:22Z",
+  "start_et": "2026-11-26 12:38:22",
+  "hour_et": "2026-11-26 12:00",
+  "spots": 3,
+  "total_seconds": 172,
+  "spot_seconds": "56 83 33",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Red Green - Yetzaveh"
+ },
+ {
+  "start_utc": "2026-11-26T17:59:57Z",
+  "start_et": "2026-11-26 12:59:57",
+  "hour_et": "2026-11-26 12:00",
+  "spots": 3,
+  "total_seconds": 161,
+  "spot_seconds": "112 23 26",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "Rabbi Leff Fund - 518 323 0376    ID 64848"
+ },
+ {
+  "start_utc": "2026-11-26T18:04:18Z",
+  "start_et": "2026-11-26 13:04:18",
+  "hour_et": "2026-11-26 13:00",
+  "spots": 1,
+  "total_seconds": 29,
+  "spot_seconds": "29",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH   Hip Chanukah"
  }
 ]
