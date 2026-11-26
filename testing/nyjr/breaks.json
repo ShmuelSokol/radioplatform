@@ -5278,5 +5278,38 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors",
   "next_item": "Sruly Bornstein - Arachin 9"
+ },
+ {
+  "start_utc": "2026-11-26T12:18:18Z",
+  "start_et": "2026-11-26 07:18:18",
+  "hour_et": "2026-11-26 07:00",
+  "spots": 2,
+  "total_seconds": 72,
+  "spot_seconds": "64 8",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Kosman R. Mishna - Eruvin 4a"
+ },
+ {
+  "start_utc": "2026-11-26T12:30:50Z",
+  "start_et": "2026-11-26 07:30:50",
+  "hour_et": "2026-11-26 07:00",
+  "spots": 2,
+  "total_seconds": 41,
+  "spot_seconds": "12 29",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Yoely Greenfeld - Haboitchim"
+ },
+ {
+  "start_utc": "2026-11-26T12:59:58Z",
+  "start_et": "2026-11-26 07:59:58",
+  "hour_et": "2026-11-26 07:00",
+  "spots": 2,
+  "total_seconds": 111,
+  "spot_seconds": "63 48",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH    CHANUKAH AND PURIM"
  }
 ]
