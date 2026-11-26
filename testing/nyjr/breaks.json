@@ -5520,5 +5520,38 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH   Hip Chanukah"
+ },
+ {
+  "start_utc": "2026-11-26T18:09:24Z",
+  "start_et": "2026-11-26 13:09:24",
+  "hour_et": "2026-11-26 13:00",
+  "spots": 1,
+  "total_seconds": 55,
+  "spot_seconds": "55",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Eli Marcus - Chavivi"
+ },
+ {
+  "start_utc": "2026-11-26T18:31:19Z",
+  "start_et": "2026-11-26 13:31:19",
+  "hour_et": "2026-11-26 13:00",
+  "spots": 2,
+  "total_seconds": 106,
+  "spot_seconds": "68 38",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "13:33\tV'Havienu - Kiracheim"
+ },
+ {
+  "start_utc": "2026-11-26T19:00:35Z",
+  "start_et": "2026-11-26 14:00:35",
+  "hour_et": "2026-11-26 14:00",
+  "spots": 3,
+  "total_seconds": 134,
+  "spot_seconds": "58 50 26",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  400 men  400 shekels"
  }
 ]
