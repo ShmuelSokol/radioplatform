@@ -5179,5 +5179,16 @@
   "block_names": "Tikun Chatzos",
   "items": "Tikun Chatzos",
   "next_item": "Shalsheles Jr  2 - Im Escacheich Yerushalayim"
+ },
+ {
+  "start_utc": "2026-11-26T07:04:04Z",
+  "start_et": "2026-11-26 02:04:04",
+  "hour_et": "2026-11-26 02:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Highest Frequncy",
+  "items": "Highest Frequncy",
+  "next_item": "Benny Friedman  Kol Haneshama - Rak Beyachad"
  }
 ]
