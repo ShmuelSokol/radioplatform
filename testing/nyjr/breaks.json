@@ -5212,5 +5212,27 @@
   "block_names": "Highest Frequncy",
   "items": "Highest Frequncy",
   "next_item": "Aslan Rav - Segulah   Hafkeid Alav"
+ },
+ {
+  "start_utc": "2026-11-26T08:42:22Z",
+  "start_et": "2026-11-26 03:42:22",
+  "hour_et": "2026-11-26 03:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Night Mix ID",
+  "items": "Night Mix ID",
+  "next_item": "3:42\tEyal Sela - Dawn"
+ },
+ {
+  "start_utc": "2026-11-26T09:02:13Z",
+  "start_et": "2026-11-26 04:02:13",
+  "hour_et": "2026-11-26 04:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Highest Frequncy",
+  "items": "Highest Frequncy",
+  "next_item": "4:02\tNakai - Red Wind"
  }
 ]
