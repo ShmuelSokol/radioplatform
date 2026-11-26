@@ -530,3 +530,4 @@ UPDATE 2026-11-25 hourly-slots.md playlist-generation.md fit keeps the old block
 INGEST 2026-11-25 streaming-architecture.md engine proto 7: proto rides on every levels post so a restarted backend knows it within a second (Main live_on_stream false 42 min after a deploy, 2026-11-24)
 UPDATE 2026-11-25 hourly-slots.md the block on with no songs waiting (control-room presses cut its last songs) gets its songs drawn again
 UPDATE 2026-11-25 playlist-generation.md hourly-slots.md artist rule gives way before a song airs again within 3 h (Main night instrumentals, Gerstner Medley 3x); fit takes up to three songs of the block's playlist when no reorder fits; the realign redraw keeps the run-up to a hard item at the change (6:00 70 s cut)
+INGEST 2026-11-26 streaming-architecture.md nightly unattended-upgrades + needrestart restarted icecast2 and with it every engine (Requires=); setup scripts now keep needrestart off icecast2/kbr-*/nginx

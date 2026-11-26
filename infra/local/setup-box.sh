@@ -91,6 +91,18 @@ if [ "${KBR_SETUP_SKIP_APT:-}" != 1 ] && [ "$BY_TIMER" != 1 ]; then
   apt-get update -q
   apt-get install -y -q liquidsoap icecast2 alsa-utils python3 curl openssl
 fi
+
+# Nightly security updates still install, but needrestart must not restart the stream
+# or the engines after a library update: kbr-engine@ Requires=icecast2, so restarting
+# icecast2 restarted every engine with ~20 s of silence each time (Main 2026-11-26
+# 06:01-06:05Z, three updates, three songs cut). They pick up new libraries at the next
+# run of this script or a planned reboot.
+mkdir -p /etc/needrestart/conf.d
+cat > /etc/needrestart/conf.d/kbr-no-auto-restart.conf <<'NR'
+$nrconf{override_rc}{qr(^icecast2\.service$)} = 0;
+$nrconf{override_rc}{qr(^kbr-.*\.service$)} = 0;
+$nrconf{override_rc}{qr(^nginx\.service$)} = 0;
+NR
 # The engine's user may use the sound card
 usermod -aG audio liquidsoap
 

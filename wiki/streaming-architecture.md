@@ -516,3 +516,7 @@ KBR Jerusalem 10:30Z 2026-11-23: Daf Yomi ("Succah 50", 54 min) paused for the :
 Harness: `resume_arrives_after_time_check` (the resume's file arrives `KBR_RESUME_LATE` s, default 1.4, after the time check ends). The old radio.liq played emergency music there at 1.0, 1.4 and 1.8 s. `music_not_ready_after_timed` covers an almost empty item after a time check.
 
 Why the station simulator missed it: its fake engine starts every item the moment it is handed. It never models a download, the music lane's skip check, or the fallback to emergency, so every paused shiur "comes back" there. Timing faults between lanes need the real engine (harness).
+
+## Nightly updates must not restart the engines (2026-11-26)
+
+Main lost three songs at 1:01-1:05 AM ET on 2026-11-26 (and two on 11-25 at 1:49 and 1:53): unattended-upgrades installed library updates, and its needrestart step restarted `icecast2`. `kbr-engine@` has `Requires=icecast2`, so systemd restarted every engine, about 20 s of silence each, and the engine came back on the next queue entry. `setup.sh` (and `infra/local/setup-box.sh`) now write `/etc/needrestart/conf.d/kbr-no-auto-restart.conf`, which keeps needrestart off icecast2, every `kbr-*` unit and nginx. Updates still install; the engines take new libraries at the next setup run or a planned reboot (automatic reboot is off). A song that ends early with no `/skip` or `/flush` in the engine log: look for "Shutdown signal received" in the journal first.
