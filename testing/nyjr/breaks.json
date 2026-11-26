@@ -5256,5 +5256,27 @@
   "block_names": "Highest Frequncy",
   "items": "Highest Frequncy",
   "next_item": "Windjana - The Gathering"
+ },
+ {
+  "start_utc": "2026-11-26T10:30:05Z",
+  "start_et": "2026-11-26 05:30:05",
+  "hour_et": "2026-11-26 05:00",
+  "spots": 1,
+  "total_seconds": 62,
+  "spot_seconds": "62",
+  "block_names": "Kol B'Ramah  WMDI  107.9  Lakewood",
+  "items": "Kol B'Ramah  WMDI  107.9  Lakewood",
+  "next_item": "5:31\tEyal Sela - Ethiopian"
+ },
+ {
+  "start_utc": "2026-11-26T10:59:59Z",
+  "start_et": "2026-11-26 05:59:59",
+  "hour_et": "2026-11-26 05:00",
+  "spots": 2,
+  "total_seconds": 72,
+  "spot_seconds": "66 6",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Sruly Bornstein - Arachin 9"
  }
 ]
