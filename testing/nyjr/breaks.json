@@ -5091,5 +5091,38 @@
   "block_names": "More Stories for Kids | Kol B'Ramah Sponsors | Weather Schedule Sponsors",
   "items": "More Stories for Kids | Kol B'Ramah Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  CAF TO PACH"
+ },
+ {
+  "start_utc": "2026-11-26T01:10:04Z",
+  "start_et": "2026-11-25 20:10:04",
+  "hour_et": "2026-11-25 20:00",
+  "spots": 1,
+  "total_seconds": 30,
+  "spot_seconds": "30",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Simcha Jacoby - Od Avinu Chai."
+ },
+ {
+  "start_utc": "2026-11-26T01:31:37Z",
+  "start_et": "2026-11-25 20:31:37",
+  "hour_et": "2026-11-25 20:00",
+  "spots": 3,
+  "total_seconds": 136,
+  "spot_seconds": "32 66 38",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Baruch Levine Padushka - Margeeshin"
+ },
+ {
+  "start_utc": "2026-11-26T01:59:56Z",
+  "start_et": "2026-11-25 20:59:56",
+  "hour_et": "2026-11-25 20:00",
+  "spots": 3,
+  "total_seconds": 167,
+  "spot_seconds": "77 50 40",
+  "block_names": "Mesivta D'Rakia",
+  "items": "Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia",
+  "next_item": "21:02\tKrohn R. Pesach\tMentchlichkeit - Manners and Decency"
  }
 ]
