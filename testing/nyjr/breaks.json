@@ -5190,5 +5190,27 @@
   "block_names": "Highest Frequncy",
   "items": "Highest Frequncy",
   "next_item": "Benny Friedman  Kol Haneshama - Rak Beyachad"
+ },
+ {
+  "start_utc": "2026-11-26T07:32:59Z",
+  "start_et": "2026-11-26 02:32:59",
+  "hour_et": "2026-11-26 02:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Night Mix ID",
+  "items": "Night Mix ID",
+  "next_item": "Abie Rottenberg - Yehei"
+ },
+ {
+  "start_utc": "2026-11-26T08:00:47Z",
+  "start_et": "2026-11-26 03:00:47",
+  "hour_et": "2026-11-26 03:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Highest Frequncy",
+  "items": "Highest Frequncy",
+  "next_item": "Aslan Rav - Segulah   Hafkeid Alav"
  }
 ]
