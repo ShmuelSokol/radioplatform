@@ -5047,5 +5047,16 @@
   "block_names": "Childrens Hour",
   "items": "Childrens Hour | Childrens Hour | Childrens Hour | Childrens Hour | Childrens Hour",
   "next_item": "UNCLE MOISHY CHANUKAH NEW - FEEL THE SIMCHA"
+ },
+ {
+  "start_utc": "2026-11-26T00:01:30Z",
+  "start_et": "2026-11-25 19:01:30",
+  "hour_et": "2026-11-25 19:00",
+  "spots": 3,
+  "total_seconds": 140,
+  "spot_seconds": "70 30 40",
+  "block_names": "Krias Shema Al HaMitah",
+  "items": "Krias Shema Al HaMitah | Krias Shema Al HaMitah | Krias Shema Al HaMitah",
+  "next_item": "Cohen Rabbi Mordchai - Krias Shma al Hamitah"
  }
 ]
