@@ -5157,5 +5157,27 @@
   "block_names": "Mesivta D'Rakia | Kol B'Ramah Sponsors | 107.9  Kol  B'Ramah  Lakewood",
   "items": "Mesivta D'Rakia | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | 107.9  Kol  B'Ramah  Lakewood",
   "next_item": "Shlomo at Dr Ritchies - 4 Sanzer Coffee Story"
+ },
+ {
+  "start_utc": "2026-11-26T05:35:48Z",
+  "start_et": "2026-11-26 00:35:48",
+  "hour_et": "2026-11-26 00:00",
+  "spots": 1,
+  "total_seconds": 29,
+  "spot_seconds": "29",
+  "block_names": "107.9  Kol  B'Ramah  Lakewood",
+  "items": "107.9  Kol  B'Ramah  Lakewood",
+  "next_item": "WEBER  KORBAN - MAN D YUHIV"
+ },
+ {
+  "start_utc": "2026-11-26T06:02:29Z",
+  "start_et": "2026-11-26 01:02:29",
+  "hour_et": "2026-11-26 01:00",
+  "spots": 1,
+  "total_seconds": 28,
+  "spot_seconds": "28",
+  "block_names": "Tikun Chatzos",
+  "items": "Tikun Chatzos",
+  "next_item": "Shalsheles Jr  2 - Im Escacheich Yerushalayim"
  }
 ]
