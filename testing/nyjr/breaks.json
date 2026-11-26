@@ -5399,5 +5399,38 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Why 2nd Camp Survives"
+ },
+ {
+  "start_utc": "2026-11-26T15:08:22Z",
+  "start_et": "2026-11-26 10:08:22",
+  "hour_et": "2026-11-26 10:00",
+  "spots": 1,
+  "total_seconds": 54,
+  "spot_seconds": "54",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "Gertner  Serenity - One King"
+ },
+ {
+  "start_utc": "2026-11-26T15:31:27Z",
+  "start_et": "2026-11-26 10:31:27",
+  "hour_et": "2026-11-26 10:00",
+  "spots": 3,
+  "total_seconds": 183,
+  "spot_seconds": "47 74 62",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Yoel Weiss - Yehi Ratzon"
+ },
+ {
+  "start_utc": "2026-11-26T15:59:58Z",
+  "start_et": "2026-11-26 10:59:58",
+  "hour_et": "2026-11-26 10:00",
+  "spots": 3,
+  "total_seconds": 137,
+  "spot_seconds": "75 58 4",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
+  "next_item": "Ask Rabbi Leff - Yetzer Harah"
  }
 ]
