@@ -5388,5 +5388,16 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors",
   "next_item": "DR DAVE INTRO - HOW BITACHON WORKS"
+ },
+ {
+  "start_utc": "2026-11-26T15:05:26Z",
+  "start_et": "2026-11-26 10:05:26",
+  "hour_et": "2026-11-26 10:00",
+  "spots": 1,
+  "total_seconds": 18,
+  "spot_seconds": "18",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Why 2nd Camp Survives"
  }
 ]
