@@ -5316,11 +5316,44 @@
   "start_utc": "2026-11-26T13:06:53Z",
   "start_et": "2026-11-26 08:06:53",
   "hour_et": "2026-11-26 08:00",
+  "spots": 2,
+  "total_seconds": 84,
+  "spot_seconds": "55 29",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Yosef Chaim  Chavivin - Min Hameitzar"
+ },
+ {
+  "start_utc": "2026-11-26T13:33:33Z",
+  "start_et": "2026-11-26 08:33:33",
+  "hour_et": "2026-11-26 08:00",
+  "spots": 3,
+  "total_seconds": 171,
+  "spot_seconds": "47 53 71",
+  "block_names": "Sponsors",
+  "items": "Sponsors | Sponsors | Sponsors",
+  "next_item": "8:36\tV'Havienu - Avinu"
+ },
+ {
+  "start_utc": "2026-11-26T13:59:58Z",
+  "start_et": "2026-11-26 08:59:58",
+  "hour_et": "2026-11-26 08:00",
+  "spots": 3,
+  "total_seconds": 144,
+  "spot_seconds": "75 65 4",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
+  "next_item": "Pliskin My Father My King - 26 Eating"
+ },
+ {
+  "start_utc": "2026-11-26T14:04:16Z",
+  "start_et": "2026-11-26 09:04:16",
+  "hour_et": "2026-11-26 09:00",
   "spots": 1,
-  "total_seconds": null,
-  "spot_seconds": "?",
+  "total_seconds": 6,
+  "spot_seconds": "6",
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors",
-  "next_item": ""
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Shalem"
  }
 ]
