@@ -5124,5 +5124,16 @@
   "block_names": "Mesivta D'Rakia",
   "items": "Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia",
   "next_item": "21:02\tKrohn R. Pesach\tMentchlichkeit - Manners and Decency"
+ },
+ {
+  "start_utc": "2026-11-26T03:14:07Z",
+  "start_et": "2026-11-25 22:14:07",
+  "hour_et": "2026-11-25 22:00",
+  "spots": 7,
+  "total_seconds": 266,
+  "spot_seconds": "35 30 36 16 60 84 5",
+  "block_names": "Mesivta D'Rakia | Kol B'Ramah Sponsors",
+  "items": "Mesivta D'Rakia | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia",
+  "next_item": "Tatz R. Akiva - World to Come 2"
  }
 ]
