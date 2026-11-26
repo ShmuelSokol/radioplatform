@@ -5553,5 +5553,16 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  400 men  400 shekels"
+ },
+ {
+  "start_utc": "2026-11-26T19:06:16Z",
+  "start_et": "2026-11-26 14:06:16",
+  "hour_et": "2026-11-26 14:00",
+  "spots": 1,
+  "total_seconds": null,
+  "spot_seconds": "?",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": ""
  }
 ]
