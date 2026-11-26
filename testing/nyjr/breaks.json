@@ -5366,5 +5366,27 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors",
   "next_item": "Shwekey Musica - Aish"
+ },
+ {
+  "start_utc": "2026-11-26T14:36:52Z",
+  "start_et": "2026-11-26 09:36:52",
+  "hour_et": "2026-11-26 09:00",
+  "spots": 4,
+  "total_seconds": 207,
+  "spot_seconds": "48 33 65 61",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Voice of the Stars - De'ay  Rivie Schwebel"
+ },
+ {
+  "start_utc": "2026-11-26T14:59:58Z",
+  "start_et": "2026-11-26 09:59:58",
+  "hour_et": "2026-11-26 09:00",
+  "spots": 2,
+  "total_seconds": 160,
+  "spot_seconds": "75 85",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "DR DAVE INTRO - HOW BITACHON WORKS"
  }
 ]
