@@ -5058,5 +5058,38 @@
   "block_names": "Krias Shema Al HaMitah",
   "items": "Krias Shema Al HaMitah | Krias Shema Al HaMitah | Krias Shema Al HaMitah",
   "next_item": "Cohen Rabbi Mordchai - Krias Shma al Hamitah"
+ },
+ {
+  "start_utc": "2026-11-26T00:10:56Z",
+  "start_et": "2026-11-25 19:10:56",
+  "hour_et": "2026-11-25 19:00",
+  "spots": 3,
+  "total_seconds": 73,
+  "spot_seconds": "11 29 33",
+  "block_names": "Krias Shema Al HaMitah | More Stories for Kids",
+  "items": "Krias Shema Al HaMitah | Krias Shema Al HaMitah | More Stories for Kids",
+  "next_item": "19:12\tAdventures in the Beit HaMikdash\tGolden Menorah Chanukah - Part 1    18"
+ },
+ {
+  "start_utc": "2026-11-26T00:49:14Z",
+  "start_et": "2026-11-25 19:49:14",
+  "hour_et": "2026-11-25 19:00",
+  "spots": 2,
+  "total_seconds": 50,
+  "spot_seconds": "43 7",
+  "block_names": "More Stories for Kids",
+  "items": "More Stories for Kids | More Stories for Kids",
+  "next_item": "Kosman R. Mishna - Eruvin 1"
+ },
+ {
+  "start_utc": "2026-11-26T01:01:48Z",
+  "start_et": "2026-11-25 20:01:48",
+  "hour_et": "2026-11-25 20:00",
+  "spots": 4,
+  "total_seconds": null,
+  "spot_seconds": "12 90 77 ?",
+  "block_names": "More Stories for Kids | Kol B'Ramah Sponsors | Weather Schedule Sponsors",
+  "items": "More Stories for Kids | Kol B'Ramah Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": ""
  }
 ]
