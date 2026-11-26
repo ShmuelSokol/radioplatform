@@ -5597,5 +5597,16 @@
   "block_names": "Kol B'Ramah Sponsors",
   "items": "Kol B'Ramah Sponsors",
   "next_item": "14:40\tShmuly Schneider - All The Hits 3"
+ },
+ {
+  "start_utc": "2026-11-26T20:05:38Z",
+  "start_et": "2026-11-26 15:05:38",
+  "hour_et": "2026-11-26 15:00",
+  "spots": 2,
+  "total_seconds": null,
+  "spot_seconds": "58 ?",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": ""
  }
 ]
