@@ -5652,5 +5652,93 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  613 SHAMARTI"
+ },
+ {
+  "start_utc": "2026-11-26T21:08:23Z",
+  "start_et": "2026-11-26 16:08:23",
+  "hour_et": "2026-11-26 16:00",
+  "spots": 1,
+  "total_seconds": 54,
+  "spot_seconds": "54",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Miami Boys Choir  Yavo - Esa Einai"
+ },
+ {
+  "start_utc": "2026-11-26T21:09:57Z",
+  "start_et": "2026-11-26 16:09:57",
+  "hour_et": "2026-11-26 16:00",
+  "spots": 1,
+  "total_seconds": 32,
+  "spot_seconds": "32",
+  "block_names": "CANDLES AT 4:15",
+  "items": "CANDLES AT 4:15",
+  "next_item": "16:10\tFligman - Neshomale"
+ },
+ {
+  "start_utc": "2026-11-26T21:28:02Z",
+  "start_et": "2026-11-26 16:28:02",
+  "hour_et": "2026-11-26 16:00",
+  "spots": 2,
+  "total_seconds": 89,
+  "spot_seconds": "57 32",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Shalsheles Jr 2 - Nar Hayesee"
+ },
+ {
+  "start_utc": "2026-11-26T21:33:56Z",
+  "start_et": "2026-11-26 16:33:56",
+  "hour_et": "2026-11-26 16:00",
+  "spots": 2,
+  "total_seconds": 68,
+  "spot_seconds": "38 30",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Shloime Dachs  K'ish Echad - Tzomoh"
+ },
+ {
+  "start_utc": "2026-11-26T22:00:48Z",
+  "start_et": "2026-11-26 17:00:48",
+  "hour_et": "2026-11-26 17:00",
+  "spots": 4,
+  "total_seconds": 181,
+  "spot_seconds": "17 76 58 30",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  YAAKOV EASAV OLAM HABAH"
+ },
+ {
+  "start_utc": "2026-11-26T22:06:26Z",
+  "start_et": "2026-11-26 17:06:26",
+  "hour_et": "2026-11-26 17:00",
+  "spots": 1,
+  "total_seconds": 54,
+  "spot_seconds": "54",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Shainfeld  Naar Hayiti - Kol Haneshama"
+ },
+ {
+  "start_utc": "2026-11-26T22:29:02Z",
+  "start_et": "2026-11-26 17:29:02",
+  "hour_et": "2026-11-26 17:00",
+  "spots": 3,
+  "total_seconds": 180,
+  "spot_seconds": "58 64 58",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Acheinu  Connections - Maoz Tzur"
+ },
+ {
+  "start_utc": "2026-11-26T22:59:57Z",
+  "start_et": "2026-11-26 17:59:57",
+  "hour_et": "2026-11-26 17:00",
+  "spots": 4,
+  "total_seconds": 242,
+  "spot_seconds": "88 43 81 30",
+  "block_names": "Childrens Hour",
+  "items": "Childrens Hour | Childrens Hour | Childrens Hour | Childrens Hour",
+  "next_item": "Juravel  More Chanukah - 1"
  }
 ]
