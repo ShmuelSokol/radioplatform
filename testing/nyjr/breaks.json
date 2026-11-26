@@ -5432,5 +5432,38 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
   "next_item": "Ask Rabbi Leff - Yetzer Harah"
+ },
+ {
+  "start_utc": "2026-11-26T16:07:22Z",
+  "start_et": "2026-11-26 11:07:22",
+  "hour_et": "2026-11-26 11:00",
+  "spots": 1,
+  "total_seconds": 74,
+  "spot_seconds": "74",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "Dovid V'Shloime - Shifchi"
+ },
+ {
+  "start_utc": "2026-11-26T16:31:37Z",
+  "start_et": "2026-11-26 11:31:37",
+  "hour_et": "2026-11-26 11:00",
+  "spots": 3,
+  "total_seconds": 134,
+  "spot_seconds": "30 76 28",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Shades of  Green 2 - Always On Call"
+ },
+ {
+  "start_utc": "2026-11-26T17:00:35Z",
+  "start_et": "2026-11-26 12:00:35",
+  "hour_et": "2026-11-26 12:00",
+  "spots": 4,
+  "total_seconds": 152,
+  "spot_seconds": "69 36 43 4",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "12:03\tUpgrades - 64  Outcome Thinking"
  }
 ]
