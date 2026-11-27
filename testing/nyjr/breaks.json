@@ -6048,5 +6048,49 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
   "next_item": "9:03\tUpgrades - 20 Coach"
+ },
+ {
+  "start_utc": "2026-11-27T14:07:22Z",
+  "start_et": "2026-11-27 09:07:22",
+  "hour_et": "2026-11-27 09:00",
+  "spots": 1,
+  "total_seconds": 6,
+  "spot_seconds": "6",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH   Hip Chanukah"
+ },
+ {
+  "start_utc": "2026-11-27T14:12:05Z",
+  "start_et": "2026-11-27 09:12:05",
+  "hour_et": "2026-11-27 09:00",
+  "spots": 2,
+  "total_seconds": 84,
+  "spot_seconds": "54 30",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Shirei Shabbas Yedidim International - Gut Shabbos"
+ },
+ {
+  "start_utc": "2026-11-27T14:33:38Z",
+  "start_et": "2026-11-27 09:33:38",
+  "hour_et": "2026-11-27 09:00",
+  "spots": 4,
+  "total_seconds": 291,
+  "spot_seconds": "115 30 60 86",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "BARUCH LEVINE Lev Chodosh - Shivisi"
+ },
+ {
+  "start_utc": "2026-11-27T15:01:01Z",
+  "start_et": "2026-11-27 10:01:01",
+  "hour_et": "2026-11-27 10:00",
+  "spots": 3,
+  "total_seconds": null,
+  "spot_seconds": "126 85 ?",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
+  "next_item": ""
  }
 ]
