@@ -5949,5 +5949,38 @@
   "block_names": "Highest Frequncy",
   "items": "Highest Frequncy",
   "next_item": "Kakadu - Billabong"
+ },
+ {
+  "start_utc": "2026-11-27T10:30:26Z",
+  "start_et": "2026-11-27 05:30:26",
+  "hour_et": "2026-11-27 05:00",
+  "spots": 1,
+  "total_seconds": 129,
+  "spot_seconds": "129",
+  "block_names": "Kol B'Ramah  WMDI  107.9  Lakewood",
+  "items": "Kol B'Ramah  WMDI  107.9  Lakewood",
+  "next_item": "Curtis - Rebirth"
+ },
+ {
+  "start_utc": "2026-11-27T10:36:22Z",
+  "start_et": "2026-11-27 05:36:22",
+  "hour_et": "2026-11-27 05:00",
+  "spots": 1,
+  "total_seconds": 243,
+  "spot_seconds": "243",
+  "block_names": "Rain Forest",
+  "items": "Rain Forest",
+  "next_item": "YANUKA - CLOSE TO HASHEM"
+ },
+ {
+  "start_utc": "2026-11-27T10:59:59Z",
+  "start_et": "2026-11-27 05:59:59",
+  "hour_et": "2026-11-27 05:00",
+  "spots": 2,
+  "total_seconds": 140,
+  "spot_seconds": "134 6",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Sruly Bornstein - Arachin 10"
  }
 ]
