@@ -6092,5 +6092,49 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
   "next_item": "DR DAVE INTRO - HOW BITACHON WORKS"
+ },
+ {
+  "start_utc": "2026-11-27T15:07:51Z",
+  "start_et": "2026-11-27 10:07:51",
+  "hour_et": "2026-11-27 10:00",
+  "spots": 1,
+  "total_seconds": 19,
+  "spot_seconds": "19",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  Why 2nd Camp Survives"
+ },
+ {
+  "start_utc": "2026-11-27T15:10:47Z",
+  "start_et": "2026-11-27 10:10:47",
+  "hour_et": "2026-11-27 10:00",
+  "spots": 1,
+  "total_seconds": 55,
+  "spot_seconds": "55",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "Chaim - Yom Shekulo Shabbos"
+ },
+ {
+  "start_utc": "2026-11-27T15:29:50Z",
+  "start_et": "2026-11-27 10:29:50",
+  "hour_et": "2026-11-27 10:00",
+  "spots": 5,
+  "total_seconds": 331,
+  "spot_seconds": "54 114 28 70 65",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Gabay - Mitzvah Gedolah"
+ },
+ {
+  "start_utc": "2026-11-27T15:59:58Z",
+  "start_et": "2026-11-27 10:59:58",
+  "hour_et": "2026-11-27 10:00",
+  "spots": 3,
+  "total_seconds": 195,
+  "spot_seconds": "126 65 4",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
+  "next_item": "Ask Rabbi Leff - Mussar"
  }
 ]
