@@ -5839,5 +5839,16 @@
   "block_names": "Mesivta D'Rakia",
   "items": "Mesivta D'Rakia",
   "next_item": "Glatstein R. Daniel - VAYISHLACH  Rebbi Akiva"
+ },
+ {
+  "start_utc": "2026-11-27T05:33:59Z",
+  "start_et": "2026-11-27 00:33:59",
+  "hour_et": "2026-11-27 00:00",
+  "spots": 5,
+  "total_seconds": 128,
+  "spot_seconds": "9 30 36 23 30",
+  "block_names": "Mesivta D'Rakia | Kol B'Ramah Sponsors | 107.9  Kol  B'Ramah  Lakewood",
+  "items": "Mesivta D'Rakia | Mesivta D'Rakia | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | 107.9  Kol  B'Ramah  Lakewood",
+  "next_item": "Shlomo at Dr Ritchies - 3 Chanukah Torah"
  }
 ]
