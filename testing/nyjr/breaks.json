@@ -5822,11 +5822,22 @@
   "start_utc": "2026-11-27T04:05:13Z",
   "start_et": "2026-11-26 23:05:13",
   "hour_et": "2026-11-26 23:00",
-  "spots": 3,
-  "total_seconds": null,
-  "spot_seconds": "34 34 ?",
+  "spots": 5,
+  "total_seconds": 187,
+  "spot_seconds": "34 34 61 49 9",
   "block_names": "Mesivta D'Rakia | Kol B'Ramah Sponsors",
-  "items": "Mesivta D'Rakia | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
-  "next_item": ""
+  "items": "Mesivta D'Rakia | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Mesivta D'Rakia | Mesivta D'Rakia",
+  "next_item": "Freedman Rav Moshe Aron - VaYishlach  5779"
+ },
+ {
+  "start_utc": "2026-11-27T04:44:40Z",
+  "start_et": "2026-11-26 23:44:40",
+  "hour_et": "2026-11-26 23:00",
+  "spots": 1,
+  "total_seconds": 10,
+  "spot_seconds": "10",
+  "block_names": "Mesivta D'Rakia",
+  "items": "Mesivta D'Rakia",
+  "next_item": "Glatstein R. Daniel - VAYISHLACH  Rebbi Akiva"
  }
 ]
