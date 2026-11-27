@@ -6136,5 +6136,38 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
   "next_item": "Ask Rabbi Leff - Mussar"
+ },
+ {
+  "start_utc": "2026-11-27T16:08:29Z",
+  "start_et": "2026-11-27 11:08:29",
+  "hour_et": "2026-11-27 11:00",
+  "spots": 1,
+  "total_seconds": 73,
+  "spot_seconds": "73",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors",
+  "next_item": "Moshe Kahan - Git Shabbos"
+ },
+ {
+  "start_utc": "2026-11-27T16:34:09Z",
+  "start_et": "2026-11-27 11:34:09",
+  "hour_et": "2026-11-27 11:00",
+  "spots": 3,
+  "total_seconds": 192,
+  "spot_seconds": "63 67 62",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Eitan Katz  Unplugged 3 - Vesim Chelkeinu"
+ },
+ {
+  "start_utc": "2026-11-27T17:01:52Z",
+  "start_et": "2026-11-27 12:01:52",
+  "hour_et": "2026-11-27 12:00",
+  "spots": 3,
+  "total_seconds": null,
+  "spot_seconds": "11 126 ?",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": ""
  }
 ]
