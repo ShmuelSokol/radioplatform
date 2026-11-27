@@ -6362,10 +6362,21 @@
   "start_et": "2026-11-27 16:06:51",
   "hour_et": "2026-11-27 16:00",
   "spots": 1,
-  "total_seconds": null,
-  "spot_seconds": "?",
+  "total_seconds": 55,
+  "spot_seconds": "55",
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors",
+  "next_item": "16:07\tLev Tahor - Kol Mehaneig"
+ },
+ {
+  "start_utc": "2026-11-27T21:09:58Z",
+  "start_et": "2026-11-27 16:09:58",
+  "hour_et": "2026-11-27 16:00",
+  "spots": 4,
+  "total_seconds": null,
+  "spot_seconds": "60 245 499 ?",
+  "block_names": "CANDLES AT 4:15",
+  "items": "CANDLES AT 4:15 | CANDLES AT 4:15 | CANDLES AT 4:15 | CANDLES AT 4:15",
   "next_item": ""
  }
 ]
