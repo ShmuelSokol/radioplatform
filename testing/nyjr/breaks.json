@@ -6087,10 +6087,10 @@
   "start_et": "2026-11-27 10:01:01",
   "hour_et": "2026-11-27 10:00",
   "spots": 3,
-  "total_seconds": null,
-  "spot_seconds": "126 85 ?",
+  "total_seconds": 246,
+  "spot_seconds": "126 85 35",
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
-  "next_item": ""
+  "next_item": "DR DAVE INTRO - HOW BITACHON WORKS"
  }
 ]
