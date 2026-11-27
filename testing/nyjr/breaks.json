@@ -6015,5 +6015,38 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  613 SHAMARTI"
+ },
+ {
+  "start_utc": "2026-11-27T13:08:36Z",
+  "start_et": "2026-11-27 08:08:36",
+  "hour_et": "2026-11-27 08:00",
+  "spots": 2,
+  "total_seconds": 85,
+  "spot_seconds": "55 30",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "8:10\tEmes - Aishes Chayil"
+ },
+ {
+  "start_utc": "2026-11-27T13:31:42Z",
+  "start_et": "2026-11-27 08:31:42",
+  "hour_et": "2026-11-27 08:00",
+  "spots": 5,
+  "total_seconds": 303,
+  "spot_seconds": "115 30 54 71 33",
+  "block_names": "Sponsors",
+  "items": "Sponsors | Sponsors | Sponsors | Sponsors | Sponsors",
+  "next_item": "Shainfeld  Naar Hayiti - Shira B'Simcha  5"
+ },
+ {
+  "start_utc": "2026-11-27T13:59:59Z",
+  "start_et": "2026-11-27 08:59:59",
+  "hour_et": "2026-11-27 08:00",
+  "spots": 3,
+  "total_seconds": 211,
+  "spot_seconds": "125 82 4",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors | Weather Sponsors",
+  "next_item": "9:03\tUpgrades - 20 Coach"
  }
 ]
