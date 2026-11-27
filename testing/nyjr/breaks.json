@@ -5740,5 +5740,38 @@
   "block_names": "Childrens Hour",
   "items": "Childrens Hour | Childrens Hour | Childrens Hour | Childrens Hour",
   "next_item": "Juravel  More Chanukah - 1"
+ },
+ {
+  "start_utc": "2026-11-27T00:17:35Z",
+  "start_et": "2026-11-26 19:17:35",
+  "hour_et": "2026-11-26 19:00",
+  "spots": 3,
+  "total_seconds": 128,
+  "spot_seconds": "58 30 40",
+  "block_names": "Krias Shema Al HaMitah",
+  "items": "Krias Shema Al HaMitah | Krias Shema Al HaMitah | Krias Shema Al HaMitah",
+  "next_item": "Cohen Rabbi Mordchai - Krias Shma al Hamitah"
+ },
+ {
+  "start_utc": "2026-11-27T00:26:48Z",
+  "start_et": "2026-11-26 19:26:48",
+  "hour_et": "2026-11-26 19:00",
+  "spots": 3,
+  "total_seconds": 82,
+  "spot_seconds": "20 29 33",
+  "block_names": "Krias Shema Al HaMitah | More Stories for Kids",
+  "items": "Krias Shema Al HaMitah | Krias Shema Al HaMitah | More Stories for Kids",
+  "next_item": "Torah Island 1 - Part 1"
+ },
+ {
+  "start_utc": "2026-11-27T01:03:06Z",
+  "start_et": "2026-11-26 20:03:06",
+  "hour_et": "2026-11-26 20:00",
+  "spots": 1,
+  "total_seconds": 50,
+  "spot_seconds": "50",
+  "block_names": "More Stories for Kids",
+  "items": "More Stories for Kids",
+  "next_item": "Kosman R. Mishna - Eruvin 2"
  }
 ]
