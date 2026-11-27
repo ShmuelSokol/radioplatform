@@ -6169,5 +6169,49 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "12:05\tUpgrades - 2 Abundance Mindset"
+ },
+ {
+  "start_utc": "2026-11-27T17:07:42Z",
+  "start_et": "2026-11-27 12:07:42",
+  "hour_et": "2026-11-27 12:00",
+  "spots": 1,
+  "total_seconds": 5,
+  "spot_seconds": "5",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  400 men  400 shekels"
+ },
+ {
+  "start_utc": "2026-11-27T17:11:14Z",
+  "start_et": "2026-11-27 12:11:14",
+  "hour_et": "2026-11-27 12:00",
+  "spots": 1,
+  "total_seconds": 84,
+  "spot_seconds": "84",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Yeshiva Boys Choir Live #1 - Ashrei/L'cha Dodi Medly"
+ },
+ {
+  "start_utc": "2026-11-27T17:30:58Z",
+  "start_et": "2026-11-27 12:30:58",
+  "hour_et": "2026-11-27 12:00",
+  "spots": 3,
+  "total_seconds": 194,
+  "spot_seconds": "64 65 65",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Chaim Dovid Berson - Simchas Olam"
+ },
+ {
+  "start_utc": "2026-11-27T17:59:58Z",
+  "start_et": "2026-11-27 12:59:58",
+  "hour_et": "2026-11-27 12:00",
+  "spots": 3,
+  "total_seconds": 214,
+  "spot_seconds": "126 57 31",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "Rabbi Leff Fund - 518 323 0376    ID 64848"
  }
 ]
