@@ -5993,5 +5993,27 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors",
   "next_item": "Kosman R. Mishna - Eruvin 5a"
+ },
+ {
+  "start_utc": "2026-11-27T12:10:50Z",
+  "start_et": "2026-11-27 07:10:50",
+  "hour_et": "2026-11-27 07:00",
+  "spots": 2,
+  "total_seconds": 41,
+  "spot_seconds": "12 29",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Farkas, Dov - Eishes Chayil"
+ },
+ {
+  "start_utc": "2026-11-27T12:59:59Z",
+  "start_et": "2026-11-27 07:59:59",
+  "hour_et": "2026-11-27 07:00",
+  "spots": 2,
+  "total_seconds": 206,
+  "spot_seconds": "125 81",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  613 SHAMARTI"
  }
 ]
