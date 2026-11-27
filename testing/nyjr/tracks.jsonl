@@ -3021,3 +3021,8 @@
 {"start_utc": "2026-11-27T04:05:13Z", "start_epoch": 1795752313, "playlist_time": "23:05", "artist": "", "title": "Mesivta D'Rakia", "raw": "23:05\tMesivta D'Rakia", "logged_utc": "2026-11-27T04:06:02Z"}
 {"start_utc": "2026-11-27T04:05:47Z", "start_epoch": 1795752347, "playlist_time": "23:05", "artist": "", "title": "Kol B'Ramah Sponsors", "raw": "23:05\tKol B'Ramah Sponsors", "logged_utc": "2026-11-27T04:06:02Z"}
 {"start_utc": "2026-11-27T04:06:21Z", "start_epoch": 1795752381, "playlist_time": "23:06", "artist": "", "title": "Kol B'Ramah Sponsors", "raw": "23:06\tKol B'Ramah Sponsors", "logged_utc": "2026-11-27T04:07:02Z"}
+{"start_utc": "2026-11-27T04:07:22Z", "start_epoch": 1795752442, "playlist_time": "23:07", "artist": "", "title": "Mesivta D'Rakia", "raw": "23:07\tMesivta D'Rakia", "logged_utc": "2026-11-27T04:08:03Z"}
+{"start_utc": "2026-11-27T04:08:11Z", "start_epoch": 1795752491, "playlist_time": "23:08", "artist": "", "title": "Mesivta D'Rakia", "raw": "23:08\tMesivta D'Rakia", "logged_utc": "2026-11-27T04:09:02Z"}
+{"start_utc": "2026-11-27T04:08:20Z", "start_epoch": 1795752500, "playlist_time": "23:08", "artist": "Freedman Rav Moshe Aron", "title": "VaYishlach  5779", "raw": "23:08\tFreedman Rav Moshe Aron\tVaYishlach  5779", "logged_utc": "2026-11-27T04:09:02Z"}
+{"start_utc": "2026-11-27T04:44:40Z", "start_epoch": 1795754680, "playlist_time": "23:44", "artist": "", "title": "Mesivta D'Rakia", "raw": "23:44\tMesivta D'Rakia", "logged_utc": "2026-11-27T04:45:03Z"}
+{"start_utc": "2026-11-27T04:44:50Z", "start_epoch": 1795754690, "playlist_time": "23:44", "artist": "Glatstein R. Daniel", "title": "VAYISHLACH  Rebbi Akiva", "raw": "23:44\tGlatstein R. Daniel\tVAYISHLACH  Rebbi Akiva", "logged_utc": "2026-11-27T04:45:03Z"}
