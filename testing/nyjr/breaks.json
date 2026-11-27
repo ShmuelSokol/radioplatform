@@ -5850,5 +5850,16 @@
   "block_names": "Mesivta D'Rakia | Kol B'Ramah Sponsors | 107.9  Kol  B'Ramah  Lakewood",
   "items": "Mesivta D'Rakia | Mesivta D'Rakia | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | 107.9  Kol  B'Ramah  Lakewood",
   "next_item": "Shlomo at Dr Ritchies - 3 Chanukah Torah"
+ },
+ {
+  "start_utc": "2026-11-27T06:36:33Z",
+  "start_et": "2026-11-27 01:36:33",
+  "hour_et": "2026-11-27 01:00",
+  "spots": 2,
+  "total_seconds": 59,
+  "spot_seconds": "30 29",
+  "block_names": "107.9  Kol  B'Ramah  Lakewood | Tikun Chatzos",
+  "items": "107.9  Kol  B'Ramah  Lakewood | Tikun Chatzos",
+  "next_item": "1:37\tShwekey - Im Eshcochaich"
  }
 ]
