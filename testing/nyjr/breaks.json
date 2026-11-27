@@ -5811,11 +5811,11 @@
   "start_utc": "2026-11-27T03:02:27Z",
   "start_et": "2026-11-26 22:02:27",
   "hour_et": "2026-11-26 22:00",
-  "spots": 3,
+  "spots": 4,
   "total_seconds": null,
-  "spot_seconds": "36 65 ?",
+  "spot_seconds": "36 65 64 ?",
   "block_names": "Mesivta D'Rakia | Kol B'Ramah Sponsors",
-  "items": "Mesivta D'Rakia | Kol B'Ramah Sponsors | Mesivta D'Rakia",
+  "items": "Mesivta D'Rakia | Kol B'Ramah Sponsors | Mesivta D'Rakia | Mesivta D'Rakia",
   "next_item": ""
  }
 ]
