@@ -6312,5 +6312,49 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
   "next_item": "DR DAVE INTRO - HOW BITACHON WORKS"
+ },
+ {
+  "start_utc": "2026-11-27T20:07:24Z",
+  "start_et": "2026-11-27 15:07:24",
+  "hour_et": "2026-11-27 15:00",
+  "spots": 1,
+  "total_seconds": 19,
+  "spot_seconds": "19",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH   GIFTS TO ESAUV   COMPOUND INTEREST"
+ },
+ {
+  "start_utc": "2026-11-27T20:09:33Z",
+  "start_et": "2026-11-27 15:09:33",
+  "hour_et": "2026-11-27 15:00",
+  "spots": 1,
+  "total_seconds": 55,
+  "spot_seconds": "55",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Miami  Moshiach - L'Cha Dodi"
+ },
+ {
+  "start_utc": "2026-11-27T20:34:08Z",
+  "start_et": "2026-11-27 15:34:08",
+  "hour_et": "2026-11-27 15:00",
+  "spots": 1,
+  "total_seconds": 32,
+  "spot_seconds": "32",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors",
+  "next_item": "15:34\tRechnitz\tYemale Pi - Levy Falkowitz"
+ },
+ {
+  "start_utc": "2026-11-27T21:01:12Z",
+  "start_et": "2026-11-27 16:01:12",
+  "hour_et": "2026-11-27 16:00",
+  "spots": 1,
+  "total_seconds": 132,
+  "spot_seconds": "132",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  400 men  400 shekels"
  }
 ]
