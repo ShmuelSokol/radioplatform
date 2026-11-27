@@ -5773,5 +5773,38 @@
   "block_names": "More Stories for Kids",
   "items": "More Stories for Kids",
   "next_item": "Kosman R. Mishna - Eruvin 2"
+ },
+ {
+  "start_utc": "2026-11-27T01:15:02Z",
+  "start_et": "2026-11-26 20:15:02",
+  "hour_et": "2026-11-26 20:00",
+  "spots": 4,
+  "total_seconds": 192,
+  "spot_seconds": "12 86 16 78",
+  "block_names": "More Stories for Kids | Kol B'Ramah Sponsors | Weather Schedule Sponsors",
+  "items": "More Stories for Kids | Kol B'Ramah Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH    CHANUKAH AND PURIM"
+ },
+ {
+  "start_utc": "2026-11-27T01:23:18Z",
+  "start_et": "2026-11-26 20:23:18",
+  "hour_et": "2026-11-26 20:00",
+  "spots": 3,
+  "total_seconds": 118,
+  "spot_seconds": "50 60 8",
+  "block_names": "Weather Schedule Sponsors | Kol B'Ramah Sponsors",
+  "items": "Weather Schedule Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Wagensberg Rabbi Abba - 08 Vayishlach part 1  33"
+ },
+ {
+  "start_utc": "2026-11-27T01:58:30Z",
+  "start_et": "2026-11-26 20:58:30",
+  "hour_et": "2026-11-26 20:00",
+  "spots": 7,
+  "total_seconds": 285,
+  "spot_seconds": "30 58 32 65 38 53 9",
+  "block_names": "Kol B'Ramah Sponsors | Mesivta D'Rakia",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia | Mesivta D'Rakia",
+  "next_item": "Wagensberg Rabbi Abba - 08 Vayishlach part 2  59"
  }
 ]
