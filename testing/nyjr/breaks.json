@@ -5861,5 +5861,16 @@
   "block_names": "107.9  Kol  B'Ramah  Lakewood | Tikun Chatzos",
   "items": "107.9  Kol  B'Ramah  Lakewood | Tikun Chatzos",
   "next_item": "1:37\tShwekey - Im Eshcochaich"
+ },
+ {
+  "start_utc": "2026-11-27T07:04:43Z",
+  "start_et": "2026-11-27 02:04:43",
+  "hour_et": "2026-11-27 02:00",
+  "spots": 1,
+  "total_seconds": 14,
+  "spot_seconds": "14",
+  "block_names": "Highest Frequncy",
+  "items": "Highest Frequncy",
+  "next_item": "Shalheves Boys Choir - ki heim"
  }
 ]
