@@ -6163,11 +6163,11 @@
   "start_utc": "2026-11-27T17:01:52Z",
   "start_et": "2026-11-27 12:01:52",
   "hour_et": "2026-11-27 12:00",
-  "spots": 3,
-  "total_seconds": null,
-  "spot_seconds": "11 126 ?",
+  "spots": 4,
+  "total_seconds": 231,
+  "spot_seconds": "11 126 74 20",
   "block_names": "Weather Schedule Sponsors",
-  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
-  "next_item": ""
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": "12:05\tUpgrades - 2 Abundance Mindset"
  }
 ]
