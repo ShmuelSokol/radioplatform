@@ -5982,5 +5982,16 @@
   "block_names": "Weather Sponsors",
   "items": "Weather Sponsors | Weather Sponsors",
   "next_item": "Sruly Bornstein - Arachin 10"
+ },
+ {
+  "start_utc": "2026-11-27T12:01:30Z",
+  "start_et": "2026-11-27 07:01:30",
+  "hour_et": "2026-11-27 07:00",
+  "spots": 2,
+  "total_seconds": 140,
+  "spot_seconds": "131 9",
+  "block_names": "Weather Sponsors",
+  "items": "Weather Sponsors | Weather Sponsors",
+  "next_item": "Kosman R. Mishna - Eruvin 5a"
  }
 ]
