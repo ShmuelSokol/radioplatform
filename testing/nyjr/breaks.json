@@ -6224,5 +6224,38 @@
   "block_names": "Weather Schedule Sponsors",
   "items": "Weather Schedule Sponsors",
   "next_item": "GLATSTEIN R, DANIEL - VAYISHLACH  613 SHAMARTI"
+ },
+ {
+  "start_utc": "2026-11-27T18:10:53Z",
+  "start_et": "2026-11-27 13:10:53",
+  "hour_et": "2026-11-27 13:00",
+  "spots": 1,
+  "total_seconds": 54,
+  "spot_seconds": "54",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors",
+  "next_item": "Simply Tsfat  New Beginnings - L'Cha Dodi"
+ },
+ {
+  "start_utc": "2026-11-27T18:30:05Z",
+  "start_et": "2026-11-27 13:30:05",
+  "hour_et": "2026-11-27 13:00",
+  "spots": 4,
+  "total_seconds": 243,
+  "spot_seconds": "54 71 65 53",
+  "block_names": "Kol B'Ramah Sponsors",
+  "items": "Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors | Kol B'Ramah Sponsors",
+  "next_item": "Tischler Moshe - Chazakim"
+ },
+ {
+  "start_utc": "2026-11-27T19:02:50Z",
+  "start_et": "2026-11-27 14:02:50",
+  "hour_et": "2026-11-27 14:00",
+  "spots": 3,
+  "total_seconds": null,
+  "spot_seconds": "11 77 ?",
+  "block_names": "Weather Schedule Sponsors",
+  "items": "Weather Schedule Sponsors | Weather Schedule Sponsors | Weather Schedule Sponsors",
+  "next_item": ""
  }
 ]
