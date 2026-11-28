@@ -3282,3 +3282,6 @@
 {"start_utc": "2026-11-27T21:10:58Z", "start_epoch": 1795813858, "playlist_time": "16:11", "artist": "", "title": "CANDLES AT 4:15", "raw": "16:11\tCANDLES AT 4:15", "logged_utc": "2026-11-27T21:11:02Z"}
 {"start_utc": "2026-11-27T21:15:03Z", "start_epoch": 1795814103, "playlist_time": "16:15", "artist": "", "title": "CANDLES AT 4:15", "raw": "16:15\tCANDLES AT 4:15", "logged_utc": "2026-11-27T21:16:02Z"}
 {"start_utc": "2026-11-27T21:23:22Z", "start_epoch": 1795814602, "playlist_time": "16:23", "artist": "", "title": "CANDLES AT 4:15", "raw": "16:23\tCANDLES AT 4:15", "logged_utc": "2026-11-27T21:24:02Z"}
+{"start_utc": "2026-11-28T15:51:59Z", "start_epoch": 1795881119, "playlist_time": "10:47", "artist": "Meydad Tasa", "title": "Mizrach Medley", "raw": "10:47\tMeydad Tasa\tMizrach Medley", "logged_utc": "2026-11-28T15:52:02Z"}
+{"start_utc": "2026-11-28T15:53:18Z", "start_epoch": 1795881198, "playlist_time": "10:53", "artist": "Mbd", "title": "Shabbas Malchusa", "raw": "10:53\tMbd \tShabbas Malchusa", "logged_utc": "2026-11-28T15:54:03Z"}
+{"start_utc": "2026-11-28T16:00:48Z", "start_epoch": 1795881648, "playlist_time": "11:00", "artist": "Gertner   Mincha", "title": "Kadish", "raw": "11:00\tGertner   Mincha\tKadish", "logged_utc": "2026-11-28T16:01:03Z"}
